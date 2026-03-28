@@ -1,98 +1,361 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import { Colors } from '@/constants/colors';
+import { useColorScheme } from '@/hooks/use-color-scheme';
+import { authService } from '@/services/auth';
+import type { AuthStatus } from '@/types/auth';
+import { validateLoginForm } from '@/utils/validation';
+import { useRouter } from 'expo-router';
+import React, { useCallback, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  Image,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+export default function LoginScreen() {
+  const colorScheme = useColorScheme();
+  const colors = Colors[colorScheme || 'light'];
+  const router = useRouter();
 
-export default function HomeScreen() {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [status, setStatus] = useState<AuthStatus>('idle');
+  const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
+  const [showPassword, setShowPassword] = useState(false);
+
+  const handleLogin = useCallback(async () => {
+    // Validate form
+    const validation = validateLoginForm(email, password);
+    
+    if (!validation.isValid) {
+      setErrors(validation.errors);
+      return;
+    }
+
+    setStatus('loading');
+    setErrors({});
+
+    try {
+      const response = await authService.login({
+        email: email.toLowerCase().trim(),
+        password,
+      });
+
+      if (response.success) {
+        setStatus('success');
+        // Navigate based on email
+        const isAdmin = email.toLowerCase().includes('admin');
+        setTimeout(() => {
+          if (isAdmin) {
+            router.push('/office/office-portal');
+          } else {
+            router.push('/guard/dashboard');
+          }
+        }, 200);
+      } else {
+        setStatus('error');
+        Alert.alert('Login Failed', response.message || 'Please try again');
+      }
+    } catch (error) {
+      setStatus('error');
+      const errorMessage = error instanceof Error ? error.message : 'An error occurred';
+      Alert.alert('Login Error', errorMessage);
+    }
+  }, [email, password, router]);
+
+  const isLoading = status === 'loading';
+
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.primary }]}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={{ flex: 1 }}
+      >
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          scrollEnabled={Platform.OS !== 'web'}
+        >
+          {/* Header Section */}
+          <View style={styles.headerSection}>
+            <Text style={styles.appTitle}>NU-SECURE</Text>
+            <Text style={styles.appSubtitle}>
+              Smart Visitor Monitoring System
+            </Text>
+          </View>
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+          {/* Form Card */}
+          <View style={[styles.formCard, { backgroundColor: colors.surface }]}>
+            {/* Logo Section - Inside Card */}
+            <View style={styles.logoSectionInCard}>
+              <Image 
+                source={require('@/assets/images/icon.png')}
+                style={styles.logoBadge}
+                resizeMode="contain"
+              />
+            </View>
+
+            {/* Email Field */}
+            <View style={styles.formGroup}>
+              <Text style={[styles.label, { color: colors.text }]}>Email</Text>
+              <View
+                style={[
+                  styles.inputWrapper,
+                  {
+                    borderColor: errors.email ? '#FF6B6B' : colors.border,
+                    backgroundColor: colors.background,
+                  },
+                ]}
+              >
+                <TextInput
+                  style={[styles.input, { color: colors.text }]}
+                  placeholder="Enter your email"
+                  placeholderTextColor={colors.textSecondary}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoComplete="email"
+                  editable={!isLoading}
+                  value={email}
+                  onChangeText={(text) => {
+                    setEmail(text);
+                    if (errors.email) {
+                      setErrors({ ...errors, email: undefined });
+                    }
+                  }}
+                  accessibilityLabel="Email input"
+                />
+              </View>
+              {errors.email && (
+                <Text style={styles.errorText}>{errors.email}</Text>
+              )}
+            </View>
+
+            {/* Password Field */}
+            <View style={styles.formGroup}>
+              <Text style={[styles.label, { color: colors.text }]}>Password</Text>
+              <View
+                style={[
+                  styles.inputWrapper,
+                  {
+                    borderColor: errors.password ? '#FF6B6B' : colors.border,
+                    backgroundColor: colors.background,
+                  },
+                ]}
+              >
+                <TextInput
+                  style={[styles.input, { color: colors.text }]}
+                  placeholder="Enter your password"
+                  placeholderTextColor={colors.textSecondary}
+                  secureTextEntry={!showPassword}
+                  editable={!isLoading}
+                  value={password}
+                  onChangeText={(text) => {
+                    setPassword(text);
+                    if (errors.password) {
+                      setErrors({ ...errors, password: undefined });
+                    }
+                  }}
+                  accessibilityLabel="Password input"
+                />
+                <TouchableOpacity
+                  onPress={() => setShowPassword(!showPassword)}
+                  accessible={true}
+                  accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
+                  disabled={isLoading}
+                >
+                  <Text style={[styles.togglePasswordText, { color: colors.primary }]}>
+                    {showPassword ? '👁️' : '👁️‍🗨️'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+              {errors.password && (
+                <Text style={styles.errorText}>{errors.password}</Text>
+              )}
+            </View>
+
+            {/* Sign In Button */}
+            <TouchableOpacity
+              style={[
+                styles.signInButton,
+                {
+                  backgroundColor: '#5A5A5A',
+                  opacity: isLoading ? 0.7 : 1,
+                },
+              ]}
+              onPress={handleLogin}
+              disabled={isLoading}
+              activeOpacity={0.8}
+              accessibilityLabel="Sign in button"
+              accessibilityRole="button"
+            >
+              {isLoading ? (
+                <ActivityIndicator color="#FFFFFF" size="small" />
+              ) : (
+                <Text style={styles.signInButtonText}>Sign In</Text>
+              )}
+            </TouchableOpacity>
+
+            {/* Forgot Password Link */}
+            <TouchableOpacity
+              onPress={() => Alert.alert('Forgot Password', 'Feature coming soon')}
+              disabled={isLoading}
+              accessible={true}
+              accessibilityLabel="Forgot password link"
+              accessibilityRole="button"
+            >
+              <Text style={[styles.forgotPasswordLink, { color: colors.primary }]}>
+                Forgot password?
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
+  container: {
+    flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 20,
+  },
+  headerSection: {
+    alignItems: 'center',
+    marginBottom: 32,
+  },
+  appTitle: {
+    fontSize: 32,
+    fontWeight: '700',
+    letterSpacing: 2,
+    marginBottom: 8,
+    color: '#FFD700',
+  },
+  appSubtitle: {
+    fontSize: 14,
+    fontWeight: '400',
+    letterSpacing: 0.5,
+    color: '#E0E0E0',
+  },
+  logoSectionInCard: {
+    alignItems: 'center',
+    marginBottom: 24,
+    paddingTop: 8,
+  },
+  logoBadge: {
+    width: 90,
+    height: 90,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.15,
+        shadowRadius: 8,
+      },
+      android: {
+        elevation: 5,
+      },
+      web: {
+        boxShadow: '0px 4px 8px rgba(0, 0, 0, 0.15)',
+      },
+    }),
+  },
+  formCard: {
+    borderRadius: 16,
+    padding: 24,
+    marginBottom: 32,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 8,
+      },
+      android: {
+        elevation: 3,
+      },
+      web: {
+        boxShadow: '0px 2px 8px rgba(0, 0, 0, 0.1)',
+      },
+    }),
+  },
+  formGroup: {
+    marginBottom: 20,
+  },
+  label: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 8,
+    letterSpacing: 0.5,
+  },
+  inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    height: 48,
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
+  input: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '500',
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
+  togglePasswordText: {
+    fontSize: 18,
+    marginLeft: 8,
+  },
+  errorText: {
+    color: '#FF6B6B',
+    fontSize: 12,
+    marginTop: 6,
+    fontWeight: '500',
+  },
+  signInButton: {
+    height: 48,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 24,
+    marginBottom: 16,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.2,
+        shadowRadius: 8,
+      },
+      android: {
+        elevation: 4,
+      },
+      web: {
+        boxShadow: '0px 4px 12px rgba(0, 0, 0, 0.2)',
+      },
+    }),
+  },
+  signInButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  forgotPasswordLink: {
+    fontSize: 14,
+    fontWeight: '500',
+    textAlignVertical: 'center',
+    textAlign: 'center',
+    paddingVertical: 8,
   },
 });

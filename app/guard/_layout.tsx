@@ -6,20 +6,18 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
-export const unstable_settings = {
-  anchor: '(tabs)',
-};
-
-export default function RootLayout() {
+export default function GuardLayout() {
   const colorScheme = useColorScheme();
 
   return (
     <SafeAreaProvider>
       <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
         <Stack>
-          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-          <Stack.Screen name="guard" options={{ headerShown: false }} />
-          <Stack.Screen name="office" options={{ headerShown: false }} />
+          <Stack.Screen name="dashboard" options={{ headerShown: false }} />
+          <Stack.Screen name="select-visitor-type" options={{ headerShown: false }} />
+          <Stack.Screen name="register-visitor" options={{ headerShown: false }} />
+          <Stack.Screen name="exit-scan" options={{ headerShown: false }} />
+          <Stack.Screen name="alerts" options={{ headerShown: false }} />
           <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
         </Stack>
         <StatusBar style="auto" />
