@@ -51,14 +51,9 @@ export default function LoginScreen() {
 
       if (response.success) {
         setStatus('success');
-        // Navigate based on email
-        const isAdmin = email.toLowerCase().includes('admin');
+        // Navigate to dashboard based on role from database
         setTimeout(() => {
-          if (isAdmin) {
-            router.push('/office/office-portal');
-          } else {
-            router.push('/guard/dashboard');
-          }
+          router.push(response.dashboard);
         }, 200);
       } else {
         setStatus('error');
@@ -67,6 +62,7 @@ export default function LoginScreen() {
     } catch (error) {
       setStatus('error');
       const errorMessage = error instanceof Error ? error.message : 'An error occurred';
+      console.error('Login error details:', errorMessage);
       Alert.alert('Login Error', errorMessage);
     }
   }, [email, password, router]);

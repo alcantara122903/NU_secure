@@ -7,6 +7,8 @@ export interface LoginCredentials {
   password: string;
 }
 
+export type DashboardRoute = '/guard/dashboard' | '/office/office-portal';
+
 export interface AuthResponse {
   success: boolean;
   message?: string;
@@ -18,7 +20,8 @@ export interface User {
   id: string;
   email: string;
   name: string;
-  role: 'admin' | 'user' | 'visitor';
+  role?: 'admin' | 'user' | 'visitor' | 'guard' | 'office_staff';
+  role_id?: number;
 }
 
 export interface ApiError {
