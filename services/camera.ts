@@ -68,18 +68,26 @@ class CameraService {
       const photo = result.assets[0];
 
       if (!photo.base64) {
+        console.error('❌ No base64 from camera');
         return {
           success: false,
           error: 'Could not encode photo',
         };
       }
 
+      // Create properly formatted data URL
+      const dataUrl = `data:image/jpeg;base64,${photo.base64}`;
+      
       console.log('✅ Photo captured successfully');
+      console.log(`   URI: ${photo.uri}`);
+      console.log(`   Base64 length: ${photo.base64.length} chars`);
+      console.log(`   Data URL length: ${dataUrl.length} chars`);
+      console.log(`   Data URL prefix: ${dataUrl.substring(0, 50)}...`);
 
       return {
         success: true,
         uri: photo.uri,
-        base64: `data:image/jpeg;base64,${photo.base64}`,
+        base64: dataUrl,
       };
     } catch (error) {
       console.error('❌ CameraService error:', error);
@@ -116,18 +124,26 @@ class CameraService {
       const photo = result.assets[0];
 
       if (!photo.base64) {
+        console.error('❌ No base64 from photo library');
         return {
           success: false,
           error: 'Could not encode photo',
         };
       }
 
+      // Create properly formatted data URL
+      const dataUrl = `data:image/jpeg;base64,${photo.base64}`;
+
       console.log('✅ Photo selected successfully');
+      console.log(`   URI: ${photo.uri}`);
+      console.log(`   Base64 length: ${photo.base64.length} chars`);
+      console.log(`   Data URL length: ${dataUrl.length} chars`);
+      console.log(`   Data URL prefix: ${dataUrl.substring(0, 50)}...`);
 
       return {
         success: true,
         uri: photo.uri,
-        base64: `data:image/jpeg;base64,${photo.base64}`,
+        base64: dataUrl,
       };
     } catch (error) {
       console.error('❌ CameraService error:', error);

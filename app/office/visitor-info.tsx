@@ -1,9 +1,11 @@
 import { Colors } from '@/constants/colors';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { enrolleeService } from '@/services/enrollee';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
-import { useRouter } from 'expo-router';
-import React from 'react';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import React, { useState } from 'react';
 import {
+    Alert,
     Platform,
     ScrollView,
     StyleSheet,
@@ -17,17 +19,59 @@ export default function VisitorInfoScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme || 'light'];
   const router = useRouter();
+  const params = useLocalSearchParams();
+  const [isUpdating, setIsUpdating] = useState(false);
 
-  const visitorData = {
-    name: 'John Anderson',
-    id: 'ID12345',
-    initials: 'JA',
-    destination: 'Human Resources',
-    destinationCorrect: true,
-    purpose: 'Job Interview',
-    timeIn: 'Jan 25, 2026 02:32 PM',
-    controlNumber: 'SWS-250125-0001',
-    registeredBy: 'Officer Martinez',
+  // Get data from route params (passed from office portal after QR scan)
+  const visitorName = (params.visitorName as string) || 'John Anderson';
+  const visitorId = (params.visitorId as string) || 'ID12345';
+  const address = (params.address as string) || '';
+  const contactNo = (params.contactNo as string) || '';
+  const passNumber = (params.passNumber as string) || '';
+  const visitId = (params.visitId as string) || '';
+  const visitStatus = (params.visitStatus as string) || 'pending';
+  const enrolleeStatus = (params.enrolleeStatus as string) || 'pending';
+
+  const handleMarkAsCompleted = async () => {
+    if (!visitId) {
+      Alert.alert('Error', 'Visit ID not found. Cannot mark as completed.');
+      return;
+    }
+
+    try {
+      setIsUpdating(true);
+      console.log('✁ Marking visit as completed...');
+      
+      const success = await enrolleeService.updateVisitStatus(
+        parseInt(visitId),
+        'completed'
+      );
+
+      setIsUpdating(false);
+
+      if (success) {
+        Alert.alert(
+          'Visit Completed',
+          `${visitorName} visit has been marked as completed.`,
+          [
+            {
+              text: 'OK',
+              onPress: () => router.back(),
+            },
+          ]
+        );
+      } else {
+        Alert.alert(
+          'Update Failed',
+          'Could not update visit status. Please try again.',
+          [{ text: 'OK' }]
+        );
+      }
+    } catch (error) {
+      console.error('❌ Error updating visit status:', error);
+      setIsUpdating(false);
+      Alert.alert('Error', 'An error occurred while updating the visit status.');
+    }
   };
 
   const handleDone = () => {
@@ -66,98 +110,135 @@ export default function VisitorInfoScreen() {
           </View>
 
           {/* Visitor Details */}
-          <Text style={styles.visitorName}>{visitorData.name}</Text>
-          <Text style={styles.visitorId}>{visitorData.id}</Text>
+          <Text style={styles.visitorName}>{visitorName}</Text>
+          <Text style={styles.visitorId}>{visitorId}</Text>
         </View>
 
         {/* Details Section */}
         <View style={[styles.detailsCard, { backgroundColor: colors.surface }]}>
-          {/* Destination */}
+          {/* Contact Number */}
+          <View style={styles.detailRow}>
+            <View style={styles.detailIconContainer}>
+              <MaterialIcons name="phone" size={20} color={colors.primary} />
+            </View>
+            <View style={styles.detailContent}>
+              <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>
+                Contact Number
+              </Text>
+              <Text style={[styles.detailValue, { color: colors.text }]}>
+                {contactNo || '(not provided)'}
+              </Text>
+            </View>
+          </View>
+
+          <View style={[styles.divider, { backgroundColor: colors.border }]} />
+
+          {/* Address */}
           <View style={styles.detailRow}>
             <View style={styles.detailIconContainer}>
               <MaterialIcons name="location-on" size={20} color={colors.primary} />
             </View>
             <View style={styles.detailContent}>
               <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>
-                Destination
+                Address
               </Text>
               <Text style={[styles.detailValue, { color: colors.text }]}>
-                {visitorData.destination}
+                {address || '(not provided)'}
               </Text>
-              {visitorData.destinationCorrect && (
-                <View style={styles.correctBadge}>
-                  <MaterialIcons name="check-circle" size={16} color="#28A745" />
-                  <Text style={styles.correctText}>Correct destination</Text>
-                </View>
-              )}
             </View>
           </View>
 
           <View style={[styles.divider, { backgroundColor: colors.border }]} />
 
-          {/* Purpose of Visit */}
+          {/* Pass Number */}
           <View style={styles.detailRow}>
             <View style={styles.detailIconContainer}>
-              <MaterialIcons name="description" size={20} color={colors.primary} />
+              <MaterialIcons name="badge" size={20} color={colors.primary} />
             </View>
             <View style={styles.detailContent}>
               <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>
-                Purpose of Visit
+                Pass Number
               </Text>
               <Text style={[styles.detailValue, { color: colors.text }]}>
-                {visitorData.purpose}
+                {passNumber || '(none)'}
               </Text>
             </View>
           </View>
 
           <View style={[styles.divider, { backgroundColor: colors.border }]} />
 
-          {/* Time In */}
+          {/* Visit Status */}
           <View style={styles.detailRow}>
             <View style={styles.detailIconContainer}>
-              <MaterialIcons name="schedule" size={20} color={colors.primary} />
+              <MaterialIcons 
+                name={visitStatus === 'completed' ? 'check-circle' : 'schedule'} 
+                size={20} 
+                color={visitStatus === 'completed' ? '#28A745' : '#FF9800'} 
+              />
             </View>
             <View style={styles.detailContent}>
               <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>
-                Time In
+                Visit Status
               </Text>
-              <Text style={[styles.detailValue, { color: colors.text }]}>
-                {visitorData.timeIn}
+              <Text style={[
+                styles.detailValue, 
+                { color: visitStatus === 'completed' ? '#28A745' : '#FF9800' }
+              ]}>
+                {visitStatus === 'completed' ? '✓ Completed' : 'Pending'}
               </Text>
             </View>
           </View>
 
           <View style={[styles.divider, { backgroundColor: colors.border }]} />
 
-          {/* Additional Info Row */}
-          <View style={styles.infoRow}>
-            <View style={styles.infoColumn}>
-              <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>
-                Control Number
-              </Text>
-              <Text style={[styles.infoValue, { color: colors.text }]}>
-                {visitorData.controlNumber}
-              </Text>
+          {/* Enrollee Status */}
+          <View style={styles.detailRow}>
+            <View style={styles.detailIconContainer}>
+              <MaterialIcons 
+                name={enrolleeStatus === 'completed' ? 'check-circle' : 'schedule'} 
+                size={20} 
+                color={enrolleeStatus === 'completed' ? '#28A745' : '#FF9800'} 
+              />
             </View>
-            <View style={styles.infoColumn}>
-              <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>
-                Registered by
+            <View style={styles.detailContent}>
+              <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>
+                Enrollment Status
               </Text>
-              <Text style={[styles.infoValue, { color: colors.text }]}>
-                {visitorData.registeredBy}
+              <Text style={[
+                styles.detailValue, 
+                { color: enrolleeStatus === 'completed' ? '#28A745' : '#FF9800' }
+              ]}>
+                {enrolleeStatus === 'completed' ? '✓ Completed' : 'Pending'}
               </Text>
             </View>
           </View>
         </View>
 
-        {/* Done Button */}
-        <TouchableOpacity
-          style={[styles.doneButton, { backgroundColor: colors.primary }]}
-          onPress={handleDone}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.doneButtonText}>Done</Text>
-        </TouchableOpacity>
+        {/* Action Buttons */}
+        <View style={styles.buttonGroup}>
+          {visitStatus !== 'completed' && (
+            <TouchableOpacity
+              style={[styles.actionButton, { backgroundColor: '#28A745' }]}
+              onPress={handleMarkAsCompleted}
+              disabled={isUpdating}
+              activeOpacity={0.8}
+            >
+              <MaterialIcons name="check-circle" size={20} color="#FFFFFF" />
+              <Text style={styles.buttonText}>
+                {isUpdating ? 'Updating...' : 'Mark as Completed'}
+              </Text>
+            </TouchableOpacity>
+          )}
+
+          <TouchableOpacity
+            style={[styles.doneButton, { backgroundColor: colors.primary }]}
+            onPress={handleDone}
+            activeOpacity={0.8}
+          >
+            <MaterialIcons name="close" size={20} color="#FFFFFF" />
+            <Text style={styles.doneButtonText}>Done</Text>
+          </TouchableOpacity>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -320,6 +401,36 @@ const styles = StyleSheet.create({
     }),
   },
   doneButtonText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  buttonGroup: {
+    flexDirection: 'column',
+    gap: 10,
+    paddingHorizontal: 16,
+    marginBottom: 20,
+  },
+  actionButton: {
+    flexDirection: 'row',
+    paddingVertical: 14,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      },
+      android: {
+        elevation: 3,
+      },
+    }),
+  },
+  buttonText: {
     fontSize: 16,
     fontWeight: '700',
     color: '#FFFFFF',

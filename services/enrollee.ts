@@ -5,6 +5,9 @@
  * 
  * NOTE: OCR is handled via backend API to support React Native/Expo
  * See: utils/ocr-service.ts for backend API integration
+ * 
+ * Parser: Multi-ID system that supports 17 Philippine ID types
+ * Automatically detects ID type and routes to appropriate parser
  */
 
 import type { EnrolleeQRData, IDExtractionData } from '@/types/enrollee';
@@ -14,83 +17,143 @@ import {
     getConfidenceMessage,
     parseIDText,
     validateParsedData
-} from './id-parser';
+} from './id-multi-parser';
 import { supabase } from './supabase';
 
 
 export const enrolleeService = {
   /**
-   * Extract data from ID using OCR (Tesseract.js) and intelligent auto-detection parsing
+   * Extract data from ID using OCR.Space API and intelligent multi-ID parsing
    * 
-   * Supports multiple ID formats with automatic detection:
-   * - National ID / Citizen ID
-   * - Driver's License
-   * - Company/Employee ID
-   * - Passport (photo page)
-   * - Philippine ID / PhilHealth
-   * - Generic IDs (auto-detects format)
+   * Supports 17 different Philippine ID types:
+   * 1. Philippine National ID (PhilSys ID)
+   * 2. Philippine Passport
+   * 3. Driver's License (LTO Philippines)
+   * 4. UMID Card
+   * 5. PRC ID
+   * 6. TIN ID
+   * 7. Postal ID
+   * 8. Voter's ID
+   * 9. Senior Citizen ID
+   * 10. PWD ID
+   * 11. PhilHealth ID
+   * 12. SSS ID
+   * 13. School ID
+   * 14. Company / Employee ID
+   * 15. Barangay ID / Clearance
+   * 16. Police Clearance
+   * 17. NBI Clearance
    * 
    * Process:
-   * 1. Initialize OCR engine (Tesseract.js)
-   * 2. Convert base64 image to processable format
-   * 3. Run OCR to extract text from ID image
-   * 4. Auto-detect ID format from extracted text
-   * 5. Parse extracted text to find first_name, last_name, address
-   * 6. Return structured data or null if incomplete
+   * 1. Send image to OCR.Space API to extract raw text
+   * 2. Auto-detect ID type from extracted text keywords
+   * 3. Route to type-specific parser for optimal extraction
+   * 4. Extract first_name, last_name, address (if available)
+   * 5. Return structured data with confidence level
    * 
    * Returns:
    * - IDExtractionData with extracted fields if successful
-   * - null if OCR fails or critical data (name) is missing
+   * - null if OCR fails or no critical data extracted
    * 
    * The user will be shown the extracted data and can manually edit
    * if the extraction quality is low or incorrect.
    */
   async extractDataFromID(base64Image: string): Promise<(IDExtractionData & { confidence: 'high' | 'medium' | 'low' }) | null> {
     try {
-      console.log('🔍 Starting ID extraction process...');
+      console.log('\n\n========== ID EXTRACTION PROCESS STARTED ==========\n');
       
-      // Step 1: Send image to backend OCR service
-      console.log('📤 Sending image to backend OCR service...');
-      const extractedText = await extractDataFromIDViaBackend(base64Image);
+      // ==================== STEP 1: OCR ====================
+      console.log('📊 STEP 1: Calling OCR.Space API');
+      console.log('   Status: Sending image to OCR.Space...');
       
-      if (!extractedText) {
-        console.warn('⚠️ Backend OCR returned no text');
+      const ocrRawText = await extractDataFromIDViaBackend(base64Image);
+      
+      // Check OCR result
+      if (!ocrRawText) {
+        console.error('\n❌ STEP 1 FAILED: OCR.Space did not return text');
+        console.error('   Reason: ParsedResults missing OR ParsedText is empty');
+        console.error('\n📋 This means:');
+        console.error('   • OCR.Space could not read the ID image');
+        console.error('   • Possible causes: blurry, poor lighting, bad quality');
+        console.error('   • User will need to retake the photo or enter data manually');
         return null;
       }
 
-      console.log(`✅ Backend OCR extracted ${extractedText.length} characters`);
-      if (extractedText.length > 0) {
-        console.log('📝 Sample:', extractedText.substring(0, 150).replace(/\n/g, ' | '));
-      }
+      console.log('\n✅ STEP 1 SUCCESS: OCR.Space returned raw text');
+      console.log(`   ✓ Text received: ${ocrRawText.length} characters`);
+      console.log(`   ✓ Lines: ${ocrRawText.trim().split('\n').length}`);
       
-      // Step 2: Parse extracted text
-      console.log('🔍 Parsing extracted text to structured data...');
-      const parsedData = parseIDText(extractedText);
+      // IMPORTANT: Log the actual raw text so we can see what the OCR returned
+      console.log('\n📝 RAW OCR TEXT (for debugging):');
+      console.log('─'.repeat(60));
+      console.log(ocrRawText);
+      console.log('─'.repeat(60));
+      console.log('\n📋 Formatted as lines:');
+      const ocrLines = ocrRawText.trim().split('\n');
+      ocrLines.forEach((line, idx) => {
+        console.log(`   [${idx}] "${line}"`);
+      });
+      console.log('\n');
       
-      // Step 3: Validate parsed data
-      if (!validateParsedData(parsedData)) {
-        console.warn('⚠️ Validation failed - critical fields missing');
-        console.log(`   First Name: "${parsedData.firstName}"`);
-        console.log(`   Last Name: "${parsedData.lastName}"`);
+      // ==================== STEP 2: PARSE ====================
+      console.log('\n📊 STEP 2: Parsing raw text to extract fields');
+      console.log('   Status: Analyzing OCR text for firstName, lastName, address...');
+      
+      const parsedData = parseIDText(ocrRawText);
+      
+      console.log('\n✅ STEP 2 COMPLETE: Parser output:');
+      console.log(`   ✓ firstName: "${parsedData.firstName || '(not found)'}"`);
+      console.log(`   ✓ lastName: "${parsedData.lastName || '(not found)'}"`);
+      console.log(`   ✓ address: "${parsedData.address.substring(0, 60) || '(not found)'}${parsedData.address.length > 60 ? '...' : ''}"`);
+      console.log(`   ✓ confidence: ${parsedData.confidence}`);
+      
+      // ==================== STEP 3: VALIDATE ====================
+      console.log('\n📊 STEP 3: Validating parsed data');
+      console.log('   Status: Checking if ANY field was extracted...');
+      
+      const isValid = validateParsedData(parsedData);
+      
+      if (!isValid) {
+        console.error('\n❌ STEP 3 FAILED: No fields could be extracted');
+        console.error('   Reason: Parser could not identify firstName, lastName, or address');
+        console.error('\n📋 This means:');
+        console.error('   • OCR.Space read the image successfully');
+        console.error('   • BUT: The text could not be parsed to find name/address fields');
+        console.error('   • Possible causes: unusual ID format, corrupted text, unrecognized layout');
+        console.error('   • User will need to enter data manually');
         return null;
       }
+
+      console.log('\n✅ STEP 3 SUCCESS: At least ONE field was validated');
       
-      // Step 4: Format and return
+      // ==================== STEP 4: RETURN ====================
+      console.log('\n📊 STEP 4: Formatting and returning extracted data');
+      
       const formattedData = formatParsedData(parsedData);
       const message = getConfidenceMessage(parsedData.confidence);
-      console.log(`✅ Extraction successful (${parsedData.confidence} confidence)`);
-      console.log(`   ${message}`);
+      
+      const extractedFields = [];
+      if (formattedData.firstName) extractedFields.push('firstName');
+      if (formattedData.lastName) extractedFields.push('lastName');
+      if (formattedData.address) extractedFields.push('address');
+      
+      console.log(`\n✅ FINAL RESULT: Extraction successful`);
+      console.log(`   ✓ Confidence: ${parsedData.confidence}`);
+      console.log(`   ✓ Fields extracted: ${extractedFields.join(', ')}`);
+      console.log(`   ✓ Message: ${message}`);
+      console.log('\n========== ID EXTRACTION PROCESS COMPLETED ==========\n');
       
       return {
-        firstName: formattedData.firstName,
-        lastName: formattedData.lastName,
-        address: formattedData.address,
+        firstName: parsedData.firstName,
+        lastName: parsedData.lastName,
+        address: parsedData.address,
         confidence: parsedData.confidence,
       };
     } catch (error) {
-      console.error('❌ Error in ID extraction:', error);
+      console.error('\n❌ EXTRACTION ERROR: Exception thrown');
       const errorMessage = error instanceof Error ? error.message : String(error);
-      console.error('   Details:', errorMessage);
+      console.error(`   Details: ${errorMessage}`);
+      console.error('\n========== ID EXTRACTION PROCESS FAILED ==========\n');
       return null;
     }
   },
@@ -106,8 +169,10 @@ export const enrolleeService = {
     contactNo?: string;
     facePhotoUri?: string;
     idPhotoUri?: string;
-    qrCode: string;
-  }): Promise<{ enrollee_id: number; visitor_id: number } | null> {
+    passNumber: string;
+    controlNumber: string;
+    qrToken: string;
+  }): Promise<{ enrollee_id: number; visitor_id: number; visit_id?: number } | null> {
     try {
       console.log('💾 Creating visitor and enrollee record...');
 
@@ -121,7 +186,8 @@ export const enrolleeService = {
             address: enrolleeData.address,
             contact_no: enrolleeData.contactNo || null,
             visitor_photo_with_id_url: enrolleeData.idPhotoUri || null,
-            pass_number: enrolleeData.qrCode,
+            pass_number: enrolleeData.passNumber,
+            control_number: enrolleeData.controlNumber,
             created_at: new Date().toISOString(),
           },
         ])
@@ -155,9 +221,32 @@ export const enrolleeService = {
 
       console.log('✅ Enrollee created:', enrolleeRecData.enrollee_id);
 
+      // Step 3: Create visit record with qr_token for office scanning
+      const { data: visitData, error: visitError } = await supabase
+        .from('visit')
+        .insert([
+          {
+            visitor_id: visitorData.visitor_id,
+            enrollee_id: enrolleeRecData.enrollee_id,
+            qr_token: enrolleeData.qrToken,
+            status: 'pending',
+            created_at: new Date().toISOString(),
+          },
+        ])
+        .select()
+        .single();
+
+      if (visitError) {
+        console.warn('⚠️ Visit record creation error (non-critical):', visitError);
+        // Don't throw - visit is optional for basic functionality
+      } else {
+        console.log('✅ Visit record created:', visitData.visit_id);
+      }
+
       return {
         enrollee_id: enrolleeRecData.enrollee_id,
         visitor_id: visitorData.visitor_id,
+        visit_id: visitData?.visit_id,
       };
     } catch (error: any) {
       console.error('❌ Error creating enrollee:', error);
@@ -286,6 +375,92 @@ export const enrolleeService = {
     } catch (error) {
       console.error('❌ Error fetching enrollee by QR code:', error);
       return null;
+    }
+  },
+
+  /**
+   * Get visit and enrollee details by QR token
+   * Used by office portal to scan QR codes and display enrollment status
+   */
+  async getVisitByQRToken(qrToken: string): Promise<any | null> {
+    try {
+      console.log('🔍 Fetching visit data by QR token:', qrToken);
+
+      const { data, error } = await supabase
+        .from('visit')
+        .select(`
+          visit_id,
+          visitor_id,
+          enrollee_id,
+          qr_token,
+          status,
+          created_at,
+          visitor:visitor_id (
+            visitor_id,
+            first_name,
+            last_name,
+            address,
+            contact_no,
+            pass_number
+          ),
+          enrollee:enrollee_id (
+            enrollee_id,
+            status,
+            updated_at
+          )
+        `)
+        .eq('qr_token', qrToken)
+        .single();
+
+      if (error) {
+        console.warn('⚠️ Visit not found for QR token:', qrToken);
+        return null;
+      }
+
+      console.log('✅ Visit found:', (data as any).visit_id);
+
+      const enrolleeData = Array.isArray((data as any).enrollee) 
+        ? (data as any).enrollee[0] 
+        : (data as any).enrollee;
+
+      return {
+        visitId: (data as any).visit_id,
+        visitorId: (data as any).visitor_id,
+        enrolleeId: (data as any).enrollee_id,
+        qrToken: (data as any).qr_token,
+        visitStatus: (data as any).status,
+        createdAt: (data as any).created_at,
+        visitor: (data as any).visitor,
+        enrollee: enrolleeData,
+      };
+    } catch (error) {
+      console.error('❌ Error fetching visit by QR token:', error);
+      return null;
+    }
+  },
+
+  /**
+   * Update visit status (when office scans and marks completion)
+   */
+  async updateVisitStatus(visitId: number, status: 'pending' | 'completed'): Promise<boolean> {
+    try {
+      console.log(`🔄 Updating visit ${visitId} status to ${status}...`);
+
+      const { error } = await supabase
+        .from('visit')
+        .update({ status, updated_at: new Date().toISOString() })
+        .eq('visit_id', visitId);
+
+      if (error) {
+        console.error('❌ Visit status update error:', error);
+        return false;
+      }
+
+      console.log('✅ Visit status updated');
+      return true;
+    } catch (error) {
+      console.error('❌ Error updating visit status:', error);
+      return false;
     }
   },
 

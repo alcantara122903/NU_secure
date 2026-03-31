@@ -2,6 +2,7 @@ import { Colors } from '@/constants/colors';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { cameraService } from '@/services/camera';
 import { enrolleeService } from '@/services/enrollee';
+import { runOCRDiagnostics } from '@/utils/ocr-diagnostics';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
@@ -54,6 +55,7 @@ export default function RegisterVisitorScreen() {
   const [extractedAddress, setExtractedAddress] = useState('');
   const [extractionConfidence, setExtractionConfidence] = useState<'high' | 'medium' | 'low' | null>(null);
   const [passNumber, setPassNumber] = useState('');
+  const [controlNumber, setControlNumber] = useState('');
   const [contactNumber, setContactNumber] = useState('');
   const [enrolleeId, setEnrolleeId] = useState<number | null>(null);
   const [masterQrCode, setMasterQrCode] = useState('');
@@ -86,6 +88,18 @@ export default function RegisterVisitorScreen() {
       setQrCodeData(enrolleeQRData);
     }
   }, [step, visitorType, qrCodeData, visitorName]);
+
+  // Generate pass number and control number when entering Step 3
+  useEffect(() => {
+    if (step === 3 && !controlNumber) {
+      const pass = `PASS${Date.now()}`;
+      const control = `CTRL${Date.now()}`;
+      setPassNumber(pass);
+      setControlNumber(control);
+      console.log(`📋 Generated pass number: ${pass}`);
+      console.log(`📋 Generated control number: ${control}`);
+    }
+  }, [step, controlNumber]);
 
   const getVisitorTypeDisplay = () => {
     switch (visitorType) {
@@ -216,19 +230,27 @@ export default function RegisterVisitorScreen() {
         processingAlert?.dismiss?.();
       }
 
-      if (extractedData && extractedData.firstName && extractedData.lastName) {
-        // Extraction successful - set the extracted data
-        setExtractedFirstName(extractedData.firstName);
-        setExtractedLastName(extractedData.lastName);
+      if (extractedData) {
+        // Extraction successful - set whatever fields were extracted
+        // Some fields may be empty if parser couldn't confidently extract them
+        setExtractedFirstName(extractedData.firstName || '');
+        setExtractedLastName(extractedData.lastName || '');
         setExtractedAddress(extractedData.address || '');
         setExtractionConfidence(extractedData.confidence);
         setOcrExtractionFailed(false);
         
-        console.log(`✅ Data extracted successfully (${extractedData.confidence} confidence)`);
+        const extractedFields = [];
+        if (extractedData.firstName) extractedFields.push('First Name');
+        if (extractedData.lastName) extractedFields.push('Last Name');
+        if (extractedData.address) extractedFields.push('Address');
+        
+        console.log(`✅ Data extracted successfully (${extractedData.confidence} confidence) - Fields: ${extractedFields.join(', ')}`);
         
         // Show confidence-based message
         let confidenceMessage = '';
         let actionMessage = 'Please review and confirm the extracted information.';
+        let warningNote = '';
+        let missingFieldsNote = extractedFields.length < 3 ? `\n\n📝 Fields extracted: ${extractedFields.join(', ')}. You can fill in missing fields manually on the next screen.` : '';
         
         if (extractedData.confidence === 'high') {
           confidenceMessage = '✅ High Confidence\n';
@@ -236,26 +258,28 @@ export default function RegisterVisitorScreen() {
         } else if (extractedData.confidence === 'medium') {
           confidenceMessage = '⚠️ Medium Confidence\n';
           actionMessage = 'Some fields were extracted but please verify them carefully.';
+          warningNote = '\n\n💡 If your ID has a hologram or see-through security sticker, some details may have been affected by glare. Please review all fields on the next screen and make any necessary corrections.';
         } else {
           confidenceMessage = '⚠️ Low Confidence\n';
           actionMessage = 'Automatic extraction had difficulty. Please review all fields carefully.';
+          warningNote = '\n\n💡 Your ID may have holograms, security stickers, or glare that affected extraction. You will be able to manually correct any fields on the next screen.';
         }
         
         Alert.alert(
           'ID Data Extracted',
-          `${confidenceMessage}\nFirst Name: ${extractedData.firstName}\nLast Name: ${extractedData.lastName}\nAddress: ${extractedData.address || '(not found)'}\n\n${actionMessage}`,
+          `${confidenceMessage}\nFirst Name: ${extractedData.firstName || '(not extracted)'}\nLast Name: ${extractedData.lastName || '(not extracted)'}\nAddress: ${extractedData.address || '(not extracted)'}\n\n${actionMessage}${warningNote}${missingFieldsNote}`,
           [{ text: 'Review & Continue' }]
         );
       } else {
         // Extraction failed - guide user to manual entry
-        console.warn('⚠️ OCR extraction failed or incomplete (missing name fields)');
+        console.warn('⚠️ OCR extraction failed - could not extract usable information from ID');
         setExtractionConfidence('low');
         setOcrExtractionFailed(true);
         
         Alert.alert(
-          'Manual Data Entry Required',
-          'Could not automatically extract information from the ID. Please enter the details manually.\n\nThe system will now allow you to enter your information in the next step.',
-          [{ text: 'Continue' }]
+          '⚠️ Unable to Extract ID Details',
+          'We could not automatically read your ID due to image quality, lighting, or obscured text.\n\n✏️ No problem! You can enter your information manually on the next screen.\n\nRequired fields:\n  • First Name\n  • Last Name\n  • Address\n\nYou can also edit the phone number if needed.',
+          [{ text: 'Proceed to Manual Entry' }]
         );
       }
     } catch (error) {
@@ -281,11 +305,6 @@ export default function RegisterVisitorScreen() {
 
     console.log('📋 ID photo confirmed, extracting data...');
     
-    // Generate pass number
-    const pass = `PASS${Date.now()}`;
-    setPassNumber(pass);
-    console.log(`📋 Generated pass number: ${pass}`);
-    
     // Extract data from ID image
     await extractDataFromIdImage(capturedIdPhoto);
     
@@ -299,11 +318,40 @@ export default function RegisterVisitorScreen() {
     setIdPhotoPreview(null);
   };
 
+  const handleRunOCRDiagnostics = async () => {
+    console.log('🔧 Running OCR diagnostics...');
+    Alert.alert(
+      'Running Diagnostics',
+      'Checking backend connection and OCR configuration...',
+      [{ text: 'OK' }]
+    );
+
+    const diagnostics = await runOCRDiagnostics();
+
+    let message = `Backend: ${diagnostics.backendStatus === 'ok' ? '✅ OK' : '❌ ERROR'}\n`;
+    message += `Tesseract: ${diagnostics.tesseractReady ? '✅ Ready' : '⏳ Initializing'}\n\n`;
+
+    if (diagnostics.recommendations.length > 0) {
+      message += '💡 Recommendations:\n';
+      diagnostics.recommendations.forEach((rec) => {
+        message += `• ${rec}\n`;
+      });
+    }
+
+    Alert.alert('OCR Diagnostics Results', message, [{ text: 'OK' }]);
+  };
+
   const handleCreateEnrollee = async () => {
-    if (!extractedFirstName || !extractedLastName || !extractedAddress) {
+    // Validate required fields
+    const missingFields = [];
+    if (!extractedFirstName?.trim()) missingFields.push('First Name');
+    if (!extractedLastName?.trim()) missingFields.push('Last Name');
+    if (!extractedAddress?.trim()) missingFields.push('Address');
+
+    if (missingFields.length > 0) {
       Alert.alert(
-        'Missing Information',
-        'Please fill in First Name, Last Name, and Address before proceeding.',
+        '⚠️ Missing Required Information',
+        `Please fill in the following fields before proceeding:\n\n• ${missingFields.join('\n• ')}`,
         [{ text: 'OK' }]
       );
       return;
@@ -315,10 +363,13 @@ export default function RegisterVisitorScreen() {
         firstName: extractedFirstName,
         lastName: extractedLastName,
         address: extractedAddress,
+        contactNo: contactNumber,
       });
 
-      // Create QR code reference
-      const qrCodeValue = `ENQ-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      // Generate unique pass number and QR token
+      const pass = `PASS${Date.now()}`;
+      const control = `CTRL${Date.now()}`;
+      const qrToken = `QR-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
       // Save enrollee to database
       const enrolleeResult = await enrolleeService.createEnrollee({
@@ -328,7 +379,9 @@ export default function RegisterVisitorScreen() {
         contactNo: contactNumber || undefined,
         facePhotoUri: photoPreview || undefined,
         idPhotoUri: idPhotoPreview || undefined,
-        qrCode: qrCodeValue,
+        passNumber: pass,
+        controlNumber: control,
+        qrToken: qrToken,
       });
 
       if (!enrolleeResult) {
@@ -350,14 +403,18 @@ export default function RegisterVisitorScreen() {
       // Fetch enrollee steps from database
       await fetchEnrolleeSteps(enrolleeResult.enrollee_id);
 
-      // Create Master QR Code data
+      // Create Master QR Code data containing all visitor info and visit tracking token
       const masterQrData = {
         enrolleeId: enrolleeResult.enrollee_id,
         visitorId: enrolleeResult.visitor_id,
-        qrCode: qrCodeValue,
+        visitId: enrolleeResult.visit_id,
+        qrToken: qrToken,
+        passNumber: pass,
+        controlNumber: control,
         firstName: extractedFirstName,
         lastName: extractedLastName,
         address: extractedAddress,
+        contactNo: contactNumber,
         registrationDate: new Date().toISOString(),
         status: 'pending',
       };
@@ -368,8 +425,10 @@ export default function RegisterVisitorScreen() {
 
       console.log('✅ Enrollee created with Master QR code');
       console.log('Enrollee ID:', enrolleeResult.enrollee_id);
+      console.log('QR Token (for office scanning):', qrToken);
+      console.log('Pass Number:', pass);
+      console.log('Control Number:', control);
       console.log('Visitor ID:', enrolleeResult.visitor_id);
-      console.log('QR Code Value:', qrCodeValue);
       setIsCreatingEnrollee(false);
     } catch (error) {
       console.error('❌ Error creating enrollee:', error);
@@ -544,6 +603,16 @@ export default function RegisterVisitorScreen() {
                       <Text style={styles.captureButtonText}>Capture ID</Text>
                     </>
                   )}
+                </TouchableOpacity>
+
+                {/* Diagnostic Button */}
+                <TouchableOpacity
+                  style={[styles.diagnosticButton, { backgroundColor: '#FF9800', marginHorizontal: 20 }]}
+                  onPress={handleRunOCRDiagnostics}
+                  activeOpacity={0.8}
+                >
+                  <MaterialIcons name="build" size={24} color="#FFFFFF" />
+                  <Text style={styles.diagnosticButtonText}>Test OCR Connection</Text>
                 </TouchableOpacity>
 
                 {/* Instructions */}
@@ -722,14 +791,48 @@ export default function RegisterVisitorScreen() {
                         </View>
                       )}
 
+                      {/* Hologram/Glare Warning - Low or Medium Confidence */}
+                      {extractionConfidence && extractionConfidence !== 'high' && !ocrExtractionFailed && (
+                        <View
+                          style={[
+                            styles.confidenceAlert,
+                            {
+                              backgroundColor: '#FFF3E0',
+                              borderLeftColor: '#FF9800',
+                            },
+                          ]}
+                        >
+                          <MaterialIcons name="info" size={18} color="#FF9800" />
+                          <Text
+                            style={[
+                              styles.confidenceText,
+                              {
+                                color: '#E65100',
+                                marginLeft: 8,
+                              },
+                            ]}
+                          >
+                            Some ID details could not be extracted clearly. Please verify and edit the fields if needed.
+                          </Text>
+                        </View>
+                      )}
+
                       {/* Editable Fields Note */}
                       <Text
                         style={[
                           styles.editableNote,
-                          { color: colors.textSecondary, marginBottom: 12, fontSize: 12 },
+                          { 
+                            color: ocrExtractionFailed ? '#C62828' : colors.textSecondary, 
+                            marginBottom: 12, 
+                            fontSize: ocrExtractionFailed ? 13 : 12,
+                            fontWeight: ocrExtractionFailed ? '600' : '400',
+                          },
                         ]}
                       >
-                        ✎ All fields are editable. Please correct any inaccurate information.
+                        {ocrExtractionFailed 
+                          ? '✏️ Please enter your information below. All three fields are required: First Name, Last Name, and Address.'
+                          : '✎ All fields are editable. Please correct any inaccurate information.'
+                        }
                       </Text>
 
                       {/* First Name - ALWAYS EDITABLE */}
@@ -811,10 +914,35 @@ export default function RegisterVisitorScreen() {
                         />
                       </View>
 
-                      {/* Pass Number - READ-ONLY */}
+                      {/* Pass Number - EDITABLE */}
                       <View style={styles.detailField}>
                         <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
                           Pass Number
+                        </Text>
+                        <TextInput
+                          style={[
+                            styles.fieldInput,
+                            {
+                              borderColor: colors.border,
+                              borderWidth: 1,
+                              color: colors.text,
+                              marginTop: 8,
+                              paddingHorizontal: 12,
+                              paddingVertical: 12,
+                              borderRadius: 8,
+                            },
+                          ]}
+                          placeholder="Enter pass number"
+                          placeholderTextColor={colors.textSecondary}
+                          value={passNumber}
+                          onChangeText={setPassNumber}
+                        />
+                      </View>
+
+                      {/* Control Number - READ-ONLY */}
+                      <View style={styles.detailField}>
+                        <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
+                          Control Number
                         </Text>
                         <View
                           style={[
@@ -832,9 +960,12 @@ export default function RegisterVisitorScreen() {
                           ]}
                         >
                           <Text style={[styles.fieldValue, { color: colors.text, fontSize: 16, fontWeight: '600' }]}>
-                            {passNumber || 'Generating...'}
+                            {controlNumber || 'Generating...'}
                           </Text>
                         </View>
+                        <Text style={[styles.editableNote, { color: colors.textSecondary, marginTop: 4, fontSize: 11 }]}>
+                          Auto-generated by system
+                        </Text>
                       </View>
 
                       {/* Contact Number - EDITABLE */}
@@ -1309,6 +1440,22 @@ const styles = StyleSheet.create({
   captureButtonText: {
     fontSize: 16,
     fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  diagnosticButton: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 10,
+    gap: 8,
+    marginTop: 12,
+    marginBottom: 20,
+  },
+  diagnosticButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
     color: '#FFFFFF',
   },
   photoPreview: {

@@ -1,5 +1,6 @@
 import { Colors } from '@/constants/colors';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { enrolleeService } from '@/services/enrollee';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
@@ -20,6 +21,7 @@ export default function OfficePortalScreen() {
   const router = useRouter();
 
   const [isScanning, setIsScanning] = useState(false);
+  const [scannedVisitData, setScannedVisitData] = useState<any | null>(null);
 
   const officeData = {
     officeName: 'Office Portal',
@@ -38,24 +40,66 @@ export default function OfficePortalScreen() {
     'Audio feedback sounds once verified',
   ];
 
-  const handleScanQR = () => {
-    setIsScanning(true);
-    Alert.alert('QR Scanned', 'Visitor scanned successfully!', [
-      {
-        text: 'View Details',
-        onPress: () => {
-          setIsScanning(false);
-          router.push('/office/visitor-info');
+  const handleScanQR = async () => {
+    try {
+      // In a real implementation, this would use expo-barcode-scanner
+      // For now, we accept a QR token parameter for testing
+      const qrToken = undefined; // In production, this would come from barcode scanner
+      
+      if (!qrToken) {
+        // TODO: Integrate real barcode scanner
+        Alert.alert(
+          'QR Scanner',
+          'In production, this would use the device camera to scan QR codes.'
+        );
+        return;
+      }
+
+      setIsScanning(true);
+      console.log('📱 Scanning QR code:', qrToken);
+
+      // Fetch visit data by QR token
+      const visitData = await enrolleeService.getVisitByQRToken(qrToken);
+
+      if (!visitData) {
+        setIsScanning(false);
+        Alert.alert(
+          'QR Code Not Found',
+          'This QR code is not registered in the system. Please ask the visitor to verify their QR code.',
+          [{ text: 'Try Again' }]
+        );
+        return;
+      }
+
+      console.log('✅ Visit found:', visitData);
+      setScannedVisitData(visitData);
+      setIsScanning(false);
+
+      // Navigate to visitor info with the scanned data
+      router.push({
+        pathname: '/office/visitor-info',
+        params: {
+          visitId: String(visitData.visitId),
+          qrToken: visitData.qrToken,
+          visitorName: `${visitData.visitor?.first_name || ''} ${visitData.visitor?.last_name || ''}`,
+          visitorId: String(visitData.visitor?.visitor_id),
+          address: visitData.visitor?.address,
+          contactNo: visitData.visitor?.contact_no,
+          passNumber: visitData.visitor?.pass_number,
+          enrolleeId: String(visitData.enrolleeId || ''),
+          visitStatus: visitData.visitStatus,
+          enrolleeStatus: visitData.enrollee?.enrollee_status,
         },
-      },
-      {
-        text: 'Cancel',
-        onPress: () => {
-          setIsScanning(false);
-        },
-        style: 'cancel',
-      },
-    ]);
+      });
+    } catch (error) {
+      console.error('❌ Error scanning QR code:', error);
+      setIsScanning(false);
+      Alert.alert(
+        'Scan Error',
+        'Failed to scan QR code. Please try again.',
+        [{ text: 'OK' }]
+      );
+    }
   };
 
   return (
