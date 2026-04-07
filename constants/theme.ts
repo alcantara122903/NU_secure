@@ -1,6 +1,6 @@
 /**
- * Below are the colors that are used in the app. The colors are defined in the light and dark mode.
- * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://reactnativeunistyles.vercel.app), etc.
+ * DEPRECATED: Theme colors moved to colors.ts
+ * Import from constants/colors.ts instead for the main Colors object
  */
 
 import { Platform } from 'react-native';
@@ -8,7 +8,7 @@ import { Platform } from 'react-native';
 const tintColorLight = '#0a7ea4';
 const tintColorDark = '#fff';
 
-export const Colors = {
+export const ThemeColorScheme = {
   light: {
     text: '#11181C',
     background: '#fff',

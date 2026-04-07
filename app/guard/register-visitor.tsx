@@ -1,23 +1,23 @@
 import { Colors } from '@/constants/colors';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { cameraService } from '@/services/camera';
-import { enrolleeService } from '@/services/enrollee';
-import { runOCRDiagnostics } from '@/utils/ocr-diagnostics';
+import { officeService } from '@/services/office';
+import { enrolleeService, normalVisitorService } from '@/services/visitor';
+import { runOCRDiagnostics } from '@/utils/diagnostics';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Image,
-  Modal,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    Image,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -34,10 +34,22 @@ export default function RegisterVisitorScreen() {
   const [qrCodeData, setQrCodeData] = useState('');
   const [visitorId, setVisitorId] = useState('ID978444');
   const [destinationOffice, setDestinationOffice] = useState('');
+  const [selectedDestinationOffices, setSelectedDestinationOffices] = useState<string[]>([]);
   const [workLocation, setWorkLocation] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [reasonForVisit, setReasonForVisit] = useState('');
   const [showOfficeModal, setShowOfficeModal] = useState(false);
+  
+  // Normal Visitor Step 3 Fields
+  const [normalVisitorFirstName, setNormalVisitorFirstName] = useState('');
+  const [normalVisitorLastName, setNormalVisitorLastName] = useState('');
+  const [normalVisitorHouseNo, setNormalVisitorHouseNo] = useState('');
+  const [normalVisitorStreet, setNormalVisitorStreet] = useState('');
+  const [normalVisitorBarangay, setNormalVisitorBarangay] = useState('');
+  const [normalVisitorCity, setNormalVisitorCity] = useState('');
+  const [normalVisitorProvince, setNormalVisitorProvince] = useState('');
+  const [normalVisitorRegion, setNormalVisitorRegion] = useState('');
+  const [normalVisitorContactNo, setNormalVisitorContactNo] = useState('');
   
   // Step 1: Face Photo
   const [capturedFacePhoto, setCapturedFacePhoto] = useState<string | null>(null);
@@ -53,6 +65,13 @@ export default function RegisterVisitorScreen() {
   const [extractedFirstName, setExtractedFirstName] = useState('');
   const [extractedLastName, setExtractedLastName] = useState('');
   const [extractedAddress, setExtractedAddress] = useState('');
+  // Break down address into components
+  const [addressHouseNo, setAddressHouseNo] = useState('');
+  const [addressStreet, setAddressStreet] = useState('');
+  const [addressBarangay, setAddressBarangay] = useState('');
+  const [addressMunicipality, setAddressMunicipality] = useState('');
+  const [addressProvince, setAddressProvince] = useState('');
+  const [addressRegion, setAddressRegion] = useState('');
   const [extractionConfidence, setExtractionConfidence] = useState<'high' | 'medium' | 'low' | null>(null);
   const [passNumber, setPassNumber] = useState('');
   const [controlNumber, setControlNumber] = useState('');
@@ -64,17 +83,26 @@ export default function RegisterVisitorScreen() {
   const [ocrExtractionFailed, setOcrExtractionFailed] = useState(false);
 
   const offices = [
-    'Admission Office',
+    'Admissions Office',
+    'Bulldogs Exchange',
+    'Faculty Office',
+    'Guidance Services Office',
     'Health Services Office',
-    "Guidance's Service Office",
-    "Registrar's Office",
-    'Treasury Office',
-    'SDAO',
-    'BULLDOGS Exchange',
-    'ITSO',
-    'FAQ',
     'HR Office',
+    'Information Technology Systems Office',
+    "Registrar's Office",
+    'Student Development and Activities Office',
+    'Treasury Office',
   ];
+
+  // Handle destination office checkbox toggle
+  const toggleDestinationOffice = (office: string) => {
+    setSelectedDestinationOffices(prev =>
+      prev.includes(office)
+        ? prev.filter(o => o !== office)
+        : [...prev, office]
+    );
+  };
 
   // Generate QR code data when reaching step 3 for enrollees
   useEffect(() => {
@@ -236,6 +264,25 @@ export default function RegisterVisitorScreen() {
         setExtractedFirstName(extractedData.firstName || '');
         setExtractedLastName(extractedData.lastName || '');
         setExtractedAddress(extractedData.address || '');
+        
+        // Set address components for Enrollee
+        setAddressHouseNo(extractedData.addressHouseNo || '');
+        setAddressStreet(extractedData.addressStreet || '');
+        setAddressBarangay(extractedData.addressBarangay || '');
+        setAddressMunicipality(extractedData.addressCityMunicipality || '');
+        setAddressProvince(extractedData.addressProvince || '');
+        setAddressRegion(extractedData.addressRegion || '');
+        
+        // Also populate Normal Visitor fields with extracted data
+        setNormalVisitorFirstName(extractedData.firstName || '');
+        setNormalVisitorLastName(extractedData.lastName || '');
+        setNormalVisitorHouseNo(extractedData.addressHouseNo || '');
+        setNormalVisitorStreet(extractedData.addressStreet || '');
+        setNormalVisitorBarangay(extractedData.addressBarangay || '');
+        setNormalVisitorCity(extractedData.addressCityMunicipality || '');
+        setNormalVisitorProvince(extractedData.addressProvince || '');
+        setNormalVisitorRegion(extractedData.addressRegion || '');
+        
         setExtractionConfidence(extractedData.confidence);
         setOcrExtractionFailed(false);
         
@@ -342,11 +389,15 @@ export default function RegisterVisitorScreen() {
   };
 
   const handleCreateEnrollee = async () => {
-    // Validate required fields
+    // Validate required fields - at least firstName and lastName are required
     const missingFields = [];
     if (!extractedFirstName?.trim()) missingFields.push('First Name');
     if (!extractedLastName?.trim()) missingFields.push('Last Name');
-    if (!extractedAddress?.trim()) missingFields.push('Address');
+    // At least one address component should be filled
+    const hasAddressData = addressHouseNo?.trim() || addressStreet?.trim() || 
+                          addressBarangay?.trim() || addressMunicipality?.trim() || 
+                          addressProvince?.trim() || addressRegion?.trim();
+    if (!hasAddressData) missingFields.push('At least one Address component');
 
     if (missingFields.length > 0) {
       Alert.alert(
@@ -362,7 +413,12 @@ export default function RegisterVisitorScreen() {
       console.log('🔄 Creating enrollee with data:', {
         firstName: extractedFirstName,
         lastName: extractedLastName,
-        address: extractedAddress,
+        addressHouseNo,
+        addressStreet,
+        addressBarangay,
+        addressMunicipality,
+        addressProvince,
+        addressRegion,
         contactNo: contactNumber,
       });
 
@@ -375,7 +431,13 @@ export default function RegisterVisitorScreen() {
       const enrolleeResult = await enrolleeService.createEnrollee({
         firstName: extractedFirstName,
         lastName: extractedLastName,
-        address: extractedAddress,
+        // Separate address components
+        addressHouseNo,
+        addressStreet,
+        addressBarangay,
+        addressMunicipality,
+        addressProvince,
+        addressRegion,
         contactNo: contactNumber || undefined,
         facePhotoUri: photoPreview || undefined,
         idPhotoUri: idPhotoPreview || undefined,
@@ -835,7 +897,9 @@ export default function RegisterVisitorScreen() {
                         }
                       </Text>
 
-                      {/* First Name - ALWAYS EDITABLE */}
+                      {/* ========== FIELD ORDER: As Requested ========== */}
+
+                      {/* 1. First Name */}
                       <View style={styles.detailField}>
                         <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
                           First Name
@@ -860,7 +924,7 @@ export default function RegisterVisitorScreen() {
                         />
                       </View>
 
-                      {/* Last Name - ALWAYS EDITABLE */}
+                      {/* 2. Last Name */}
                       <View style={styles.detailField}>
                         <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
                           Last Name
@@ -885,10 +949,10 @@ export default function RegisterVisitorScreen() {
                         />
                       </View>
 
-                      {/* Address - ALWAYS EDITABLE */}
+                      {/* 3. House No */}
                       <View style={styles.detailField}>
                         <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
-                          Address
+                          House No.
                         </Text>
                         <TextInput
                           style={[
@@ -901,20 +965,167 @@ export default function RegisterVisitorScreen() {
                               paddingHorizontal: 12,
                               paddingVertical: 12,
                               borderRadius: 8,
-                              minHeight: 80,
-                              textAlignVertical: 'top',
                             },
                           ]}
-                          placeholder="Enter address"
+                          placeholder="e.g., 123"
                           placeholderTextColor={colors.textSecondary}
-                          value={extractedAddress}
-                          onChangeText={setExtractedAddress}
-                          multiline
-                          numberOfLines={3}
+                          value={addressHouseNo}
+                          onChangeText={setAddressHouseNo}
                         />
                       </View>
 
-                      {/* Pass Number - EDITABLE */}
+                      {/* 4. Street */}
+                      <View style={styles.detailField}>
+                        <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
+                          Street
+                        </Text>
+                        <TextInput
+                          style={[
+                            styles.fieldInput,
+                            {
+                              borderColor: colors.border,
+                              borderWidth: 1,
+                              color: colors.text,
+                              marginTop: 8,
+                              paddingHorizontal: 12,
+                              paddingVertical: 12,
+                              borderRadius: 8,
+                            },
+                          ]}
+                          placeholder="e.g., Main Street"
+                          placeholderTextColor={colors.textSecondary}
+                          value={addressStreet}
+                          onChangeText={setAddressStreet}
+                        />
+                      </View>
+
+                      {/* 5. Barangay */}
+                      <View style={styles.detailField}>
+                        <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
+                          Barangay
+                        </Text>
+                        <TextInput
+                          style={[
+                            styles.fieldInput,
+                            {
+                              borderColor: colors.border,
+                              borderWidth: 1,
+                              color: colors.text,
+                              marginTop: 8,
+                              paddingHorizontal: 12,
+                              paddingVertical: 12,
+                              borderRadius: 8,
+                            },
+                          ]}
+                          placeholder="e.g., Gulod Itaas"
+                          placeholderTextColor={colors.textSecondary}
+                          value={addressBarangay}
+                          onChangeText={setAddressBarangay}
+                        />
+                      </View>
+
+                      {/* 6. City / Municipality */}
+                      <View style={styles.detailField}>
+                        <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
+                          City / Municipality
+                        </Text>
+                        <TextInput
+                          style={[
+                            styles.fieldInput,
+                            {
+                              borderColor: colors.border,
+                              borderWidth: 1,
+                              color: colors.text,
+                              marginTop: 8,
+                              paddingHorizontal: 12,
+                              paddingVertical: 12,
+                              borderRadius: 8,
+                            },
+                          ]}
+                          placeholder="e.g., Batangas City"
+                          placeholderTextColor={colors.textSecondary}
+                          value={addressMunicipality}
+                          onChangeText={setAddressMunicipality}
+                        />
+                      </View>
+
+                      {/* 7. Province */}
+                      <View style={styles.detailField}>
+                        <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
+                          Province
+                        </Text>
+                        <TextInput
+                          style={[
+                            styles.fieldInput,
+                            {
+                              borderColor: colors.border,
+                              borderWidth: 1,
+                              color: colors.text,
+                              marginTop: 8,
+                              paddingHorizontal: 12,
+                              paddingVertical: 12,
+                              borderRadius: 8,
+                            },
+                          ]}
+                          placeholder="e.g., Batangas"
+                          placeholderTextColor={colors.textSecondary}
+                          value={addressProvince}
+                          onChangeText={setAddressProvince}
+                        />
+                      </View>
+
+                      {/* 8. Region */}
+                      <View style={styles.detailField}>
+                        <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
+                          Region
+                        </Text>
+                        <TextInput
+                          style={[
+                            styles.fieldInput,
+                            {
+                              borderColor: colors.border,
+                              borderWidth: 1,
+                              color: colors.text,
+                              marginTop: 8,
+                              paddingHorizontal: 12,
+                              paddingVertical: 12,
+                              borderRadius: 8,
+                            },
+                          ]}
+                          placeholder="e.g., CALABARZON"
+                          placeholderTextColor={colors.textSecondary}
+                          value={addressRegion}
+                          onChangeText={setAddressRegion}
+                        />
+                      </View>
+
+                      {/* 9. Contact No. */}
+                      <View style={styles.detailField}>
+                        <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
+                          Contact No.
+                        </Text>
+                        <TextInput
+                          style={[
+                            styles.fieldInput,
+                            {
+                              borderColor: colors.border,
+                              borderWidth: 1,
+                              color: colors.text,
+                              marginTop: 8,
+                              paddingHorizontal: 12,
+                              paddingVertical: 12,
+                              borderRadius: 8,
+                            },
+                          ]}
+                          placeholder="Enter phone number (e.g., 09xxxxxxxxx)"
+                          placeholderTextColor={colors.textSecondary}
+                          value={contactNumber}
+                          onChangeText={setContactNumber}
+                          keyboardType="phone-pad"
+                        />
+                      </View>
+
+                      {/* Pass Number */}
                       <View style={styles.detailField}>
                         <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
                           Pass Number
@@ -966,32 +1177,6 @@ export default function RegisterVisitorScreen() {
                         <Text style={[styles.editableNote, { color: colors.textSecondary, marginTop: 4, fontSize: 11 }]}>
                           Auto-generated by system
                         </Text>
-                      </View>
-
-                      {/* Contact Number - EDITABLE */}
-                      <View style={styles.detailField}>
-                        <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
-                          Contact Number
-                        </Text>
-                        <TextInput
-                          style={[
-                            styles.fieldInput,
-                            {
-                              borderColor: colors.border,
-                              borderWidth: 1,
-                              color: colors.text,
-                              marginTop: 8,
-                              paddingHorizontal: 12,
-                              paddingVertical: 12,
-                              borderRadius: 8,
-                            },
-                          ]}
-                          placeholder="Enter phone number (e.g., 09xxxxxxxxx)"
-                          placeholderTextColor={colors.textSecondary}
-                          value={contactNumber}
-                          onChangeText={setContactNumber}
-                          keyboardType="phone-pad"
-                        />
                       </View>
                     </View>
 
@@ -1163,153 +1348,358 @@ export default function RegisterVisitorScreen() {
               <>
                 {/* Visitor Details Card */}
                 <View style={[styles.detailsCard, { backgroundColor: colors.surface }]}>
-                  <Text style={[styles.detailsTitle, { color: colors.text }]}>
-                    Visitor Details (Auto-filled)
-                  </Text>
-                  
-                  {/* Visitor Avatar Section */}
-                  <View style={styles.avatarSection}>
-                    <View style={[styles.avatarCircle, { backgroundColor: '#E3F2FD' }]}>
-                      <MaterialIcons name="person" size={56} color={colors.primary} />
-                    </View>
-                    <View style={styles.avatarInfo}>
-                      <View style={styles.avatarField}>
-                        <Text style={[styles.avatarLabel, { color: colors.textSecondary }]}>Full Name</Text>
-                        <Text style={[styles.avatarValue, { color: colors.text }]}>{visitorName}</Text>
-                      </View>
-                      <View style={styles.avatarField}>
-                        <Text style={[styles.avatarLabel, { color: colors.textSecondary }]}>ID Number</Text>
-                        <Text style={[styles.avatarValue, { color: colors.text }]}>{visitorId}</Text>
-                      </View>
-                    </View>
+
+                  {/* ========== NORMAL VISITOR STEP 3 FIELDS - EXACT ORDER (MATCHING ENROLLEE) ========== */}
+
+                  {/* 1. First Name */}
+                  <View style={styles.detailField}>
+                    <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
+                      First Name
+                    </Text>
+                    <TextInput
+                      style={[
+                        styles.fieldInput,
+                        {
+                          borderColor: colors.border,
+                          borderWidth: 1,
+                          color: colors.text,
+                          marginTop: 8,
+                          paddingHorizontal: 12,
+                          paddingVertical: 12,
+                          borderRadius: 8,
+                        },
+                      ]}
+                      placeholder="Enter first name"
+                      placeholderTextColor={colors.textSecondary}
+                      value={normalVisitorFirstName}
+                      onChangeText={setNormalVisitorFirstName}
+                    />
+                  </View>
+
+                  {/* 2. Last Name */}
+                  <View style={styles.detailField}>
+                    <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
+                      Last Name
+                    </Text>
+                    <TextInput
+                      style={[
+                        styles.fieldInput,
+                        {
+                          borderColor: colors.border,
+                          borderWidth: 1,
+                          color: colors.text,
+                          marginTop: 8,
+                          paddingHorizontal: 12,
+                          paddingVertical: 12,
+                          borderRadius: 8,
+                        },
+                      ]}
+                      placeholder="Enter last name"
+                      placeholderTextColor={colors.textSecondary}
+                      value={normalVisitorLastName}
+                      onChangeText={setNormalVisitorLastName}
+                    />
+                  </View>
+
+                  {/* 3. House No */}
+                  <View style={styles.detailField}>
+                    <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
+                      House No.
+                    </Text>
+                    <TextInput
+                      style={[
+                        styles.fieldInput,
+                        {
+                          borderColor: colors.border,
+                          borderWidth: 1,
+                          color: colors.text,
+                          marginTop: 8,
+                          paddingHorizontal: 12,
+                          paddingVertical: 12,
+                          borderRadius: 8,
+                        },
+                      ]}
+                      placeholder="e.g., 123"
+                      placeholderTextColor={colors.textSecondary}
+                      value={normalVisitorHouseNo}
+                      onChangeText={setNormalVisitorHouseNo}
+                    />
+                  </View>
+
+                  {/* 4. Street */}
+                  <View style={styles.detailField}>
+                    <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
+                      Street
+                    </Text>
+                    <TextInput
+                      style={[
+                        styles.fieldInput,
+                        {
+                          borderColor: colors.border,
+                          borderWidth: 1,
+                          color: colors.text,
+                          marginTop: 8,
+                          paddingHorizontal: 12,
+                          paddingVertical: 12,
+                          borderRadius: 8,
+                        },
+                      ]}
+                      placeholder="e.g., Main Street"
+                      placeholderTextColor={colors.textSecondary}
+                      value={normalVisitorStreet}
+                      onChangeText={setNormalVisitorStreet}
+                    />
+                  </View>
+
+                  {/* 5. Barangay */}
+                  <View style={styles.detailField}>
+                    <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
+                      Barangay
+                    </Text>
+                    <TextInput
+                      style={[
+                        styles.fieldInput,
+                        {
+                          borderColor: colors.border,
+                          borderWidth: 1,
+                          color: colors.text,
+                          marginTop: 8,
+                          paddingHorizontal: 12,
+                          paddingVertical: 12,
+                          borderRadius: 8,
+                        },
+                      ]}
+                      placeholder="e.g., Gulod Itaas"
+                      placeholderTextColor={colors.textSecondary}
+                      value={normalVisitorBarangay}
+                      onChangeText={setNormalVisitorBarangay}
+                    />
+                  </View>
+
+                  {/* 6. City / Municipality */}
+                  <View style={styles.detailField}>
+                    <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
+                      City / Municipality
+                    </Text>
+                    <TextInput
+                      style={[
+                        styles.fieldInput,
+                        {
+                          borderColor: colors.border,
+                          borderWidth: 1,
+                          color: colors.text,
+                          marginTop: 8,
+                          paddingHorizontal: 12,
+                          paddingVertical: 12,
+                          borderRadius: 8,
+                        },
+                      ]}
+                      placeholder="e.g., Batangas City"
+                      placeholderTextColor={colors.textSecondary}
+                      value={normalVisitorCity}
+                      onChangeText={setNormalVisitorCity}
+                    />
+                  </View>
+
+                  {/* 7. Province */}
+                  <View style={styles.detailField}>
+                    <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
+                      Province
+                    </Text>
+                    <TextInput
+                      style={[
+                        styles.fieldInput,
+                        {
+                          borderColor: colors.border,
+                          borderWidth: 1,
+                          color: colors.text,
+                          marginTop: 8,
+                          paddingHorizontal: 12,
+                          paddingVertical: 12,
+                          borderRadius: 8,
+                        },
+                      ]}
+                      placeholder="e.g., Batangas"
+                      placeholderTextColor={colors.textSecondary}
+                      value={normalVisitorProvince}
+                      onChangeText={setNormalVisitorProvince}
+                    />
+                  </View>
+
+                  {/* 8. Region */}
+                  <View style={styles.detailField}>
+                    <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
+                      Region
+                    </Text>
+                    <TextInput
+                      style={[
+                        styles.fieldInput,
+                        {
+                          borderColor: colors.border,
+                          borderWidth: 1,
+                          color: colors.text,
+                          marginTop: 8,
+                          paddingHorizontal: 12,
+                          paddingVertical: 12,
+                          borderRadius: 8,
+                        },
+                      ]}
+                      placeholder="e.g., CALABARZON"
+                      placeholderTextColor={colors.textSecondary}
+                      value={normalVisitorRegion}
+                      onChangeText={setNormalVisitorRegion}
+                    />
+                  </View>
+
+                  {/* 9. Contact No. */}
+                  <View style={styles.detailField}>
+                    <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
+                      Contact No.
+                    </Text>
+                    <TextInput
+                      style={[
+                        styles.fieldInput,
+                        {
+                          borderColor: colors.border,
+                          borderWidth: 1,
+                          color: colors.text,
+                          marginTop: 8,
+                          paddingHorizontal: 12,
+                          paddingVertical: 12,
+                          borderRadius: 8,
+                        },
+                      ]}
+                      placeholder="e.g., 09xxxxxxxxx"
+                      placeholderTextColor={colors.textSecondary}
+                      value={normalVisitorContactNo}
+                      onChangeText={setNormalVisitorContactNo}
+                      keyboardType="phone-pad"
+                    />
                   </View>
                 </View>
 
-                {/* Destination Office / Work Location Field */}
+                {/* Destination Office - Checkbox Section */}
                 <View style={[styles.detailsCard, { backgroundColor: colors.surface }]}>
-                  <View style={styles.fieldHeader}>
-                    <MaterialIcons name={visitorType === 'contractor' ? 'construction' : 'location-on'} size={18} color={colors.primary} />
-                    <Text style={[styles.fieldLabel, { color: colors.textSecondary, marginLeft: 8 }]}>
-                      {visitorType === 'contractor' ? 'Work Location / Project' : 'Destination Office'} <Text style={{ color: '#D32F2F' }}>*</Text>
-                    </Text>
-                  </View>
-                  <View style={[styles.fieldInput, { borderColor: colors.border, borderWidth: 1, marginTop: 12 }]}>
-                    {visitorType === 'contractor' ? (
-                      <TextInput
-                        style={[styles.fieldInputText, { color: colors.text }]}
-                        placeholder="Enter work location or project site"
-                        placeholderTextColor={colors.textSecondary}
-                        value={workLocation}
-                        onChangeText={setWorkLocation}
-                      />
-                    ) : (
+                  <Text style={[styles.fieldLabel, { color: colors.textSecondary, marginBottom: 12 }]}>
+                    Destination Office
+                  </Text>
+                  <View style={[styles.checkboxGroup, { backgroundColor: colors.background, borderColor: colors.border }]}>
+                    {offices.map((office, index) => (
                       <TouchableOpacity
-                        style={styles.dropdownTouchable}
-                        onPress={() => setShowOfficeModal(true)}
+                        key={index}
+                        style={[
+                          styles.checkboxItem,
+                          {
+                            borderBottomColor: index < offices.length - 1 ? colors.border : 'transparent',
+                          },
+                        ]}
+                        onPress={() => toggleDestinationOffice(office)}
+                        activeOpacity={0.7}
                       >
-                        <Text style={[styles.fieldInputText, { color: destinationOffice ? colors.text : colors.textSecondary }]}>
-                          {destinationOffice || 'Select destination office'}
+                        <View
+                          style={[
+                            styles.checkbox,
+                            {
+                              borderColor: colors.primary,
+                              backgroundColor: selectedDestinationOffices.includes(office)
+                                ? colors.primary
+                                : 'transparent',
+                            },
+                          ]}
+                        >
+                          {selectedDestinationOffices.includes(office) && (
+                            <MaterialIcons name="check" size={16} color="#FFFFFF" />
+                          )}
+                        </View>
+                        <Text
+                          style={[
+                            styles.checkboxLabel,
+                            {
+                              color: colors.text,
+                              fontWeight: selectedDestinationOffices.includes(office) ? '600' : '400',
+                            },
+                          ]}
+                        >
+                          {office}
                         </Text>
-                        <MaterialIcons name="expand-more" size={24} color={colors.textSecondary} />
                       </TouchableOpacity>
-                    )}
+                    ))}
                   </View>
-                </View>
-
-                {/* Office Selection Modal */}
-                <Modal
-                  visible={showOfficeModal}
-                  transparent
-                  animationType="slide"
-                  onRequestClose={() => setShowOfficeModal(false)}
-                >
-                  <View style={[styles.modalContainer, { backgroundColor: 'rgba(0, 0, 0, 0.5)' }]}>
-                    <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
-                      <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
-                        <Text style={[styles.modalTitle, { color: colors.text }]}>Select Destination Office</Text>
-                        <TouchableOpacity onPress={() => setShowOfficeModal(false)}>
-                          <MaterialIcons name="close" size={24} color={colors.text} />
-                        </TouchableOpacity>
-                      </View>
-                      <ScrollView style={styles.modalList}>
-                        {offices.map((office, index) => (
-                          <TouchableOpacity
-                            key={index}
-                            style={[
-                              styles.officeOption,
-                              { borderBottomColor: colors.border, backgroundColor: destinationOffice === office ? colors.background : 'transparent' }
-                            ]}
-                            onPress={() => {
-                              setDestinationOffice(office);
-                              setShowOfficeModal(false);
-                            }}
-                          >
-                            <View style={styles.officeOptionContent}>
-                              <MaterialIcons
-                                name={destinationOffice === office ? 'check-circle' : 'circle'}
-                                size={20}
-                                color={destinationOffice === office ? colors.primary : colors.textSecondary}
-                              />
-                              <Text style={[styles.officeOptionText, { color: colors.text, marginLeft: 12 }]}>
-                                {office}
-                              </Text>
-                            </View>
-                          </TouchableOpacity>
-                        ))}
-                      </ScrollView>
-                    </View>
-                  </View>
-                </Modal>
-
-                {/* Phone Number Field */}
-                <View style={[styles.detailsCard, { backgroundColor: colors.surface }]}>
-                  <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
-                    Phone Number <Text style={{ color: colors.textSecondary }}>(Optional)</Text>
-                  </Text>
-                  <TextInput
-                    style={[styles.fieldInput, { borderColor: colors.border, borderWidth: 1, color: colors.text, marginTop: 12, paddingHorizontal: 12, paddingVertical: 12, borderRadius: 8 }]}
-                    placeholder="Enter phone number"
-                    placeholderTextColor={colors.textSecondary}
-                    value={phoneNumber}
-                    onChangeText={setPhoneNumber}
-                    keyboardType="phone-pad"
-                  />
-                </View>
-
-                {/* Reason for Visit Field */}
-                <View style={[styles.detailsCard, { backgroundColor: colors.surface }]}>
-                  <View style={styles.fieldHeader}>
-                    <MaterialIcons name="description" size={18} color={colors.primary} />
-                    <Text style={[styles.fieldLabel, { color: colors.textSecondary, marginLeft: 8 }]}>
-                      Reason For Visit <Text style={{ color: '#D32F2F' }}>*</Text>
-                    </Text>
-                  </View>
-                  <TextInput
-                    style={[styles.fieldInput, { borderColor: colors.border, borderWidth: 1, color: colors.text, marginTop: 12, paddingHorizontal: 12, paddingVertical: 12, borderRadius: 8, minHeight: 100, textAlignVertical: 'top' }]}
-                    placeholder="Enter reason for visit"
-                    placeholderTextColor={colors.textSecondary}
-                    value={reasonForVisit}
-                    onChangeText={setReasonForVisit}
-                    multiline
-                    numberOfLines={4}
-                  />
                 </View>
 
                 {/* Generate QR Ticket Button */}
                 <TouchableOpacity
                   style={[styles.generateButton, { backgroundColor: colors.primary, marginHorizontal: 20 }]}
-                  onPress={() => {
-                    const requiredField = visitorType === 'contractor' ? workLocation : destinationOffice;
-                    if (!requiredField || !reasonForVisit) {
-                      alert('Please fill in all required fields');
+                  onPress={async () => {
+                    const hasRequiredFields = normalVisitorFirstName && normalVisitorLastName && normalVisitorContactNo && selectedDestinationOffices.length > 0;
+                    if (!hasRequiredFields) {
+                      alert('Please fill in all required fields: First Name, Last Name, Contact No, and select at least one Destination Office');
                       return;
                     }
-                    alert(`${visitorType === 'contractor' ? 'Contractor' : 'Visitor'} registered successfully!\n\nQR Ticket Generated`);
-                    router.back();
+                    
+                    try {
+                      setIsCreatingEnrollee(true);
+                      
+                      // Convert office names to IDs
+                      const selectedOfficeIds = await officeService.getOfficeIds(selectedDestinationOffices);
+                      
+                      if (selectedOfficeIds.length === 0) {
+                        Alert.alert('Error', 'Could not find selected offices. Please try again.');
+                        return;
+                      }
+                      
+                      // Register normal visitor and get QR data
+                      const result = await normalVisitorService.registerAndGenerateQRTicket({
+                        firstName: normalVisitorFirstName,
+                        lastName: normalVisitorLastName,
+                        addressHouseNo: normalVisitorHouseNo,
+                        addressStreet: normalVisitorStreet,
+                        addressBarangay: normalVisitorBarangay,
+                        addressMunicipality: normalVisitorCity,
+                        addressProvince: normalVisitorProvince,
+                        addressRegion: normalVisitorRegion,
+                        contactNo: normalVisitorContactNo,
+                        facePhotoUri: capturedFacePhoto || undefined,
+                        idPhotoUri: capturedIdPhoto || undefined,
+                        selectedOfficeIds: selectedOfficeIds,
+                      });
+                      
+                      if (result) {
+                        const ticketData = {
+                          qrToken: result.qrToken,
+                          passNumber: result.passNumber,
+                          controlNumber: result.controlNumber,
+                          visitorId: result.visitorId,
+                          visitId: result.visitId,
+                          firstName: normalVisitorFirstName,
+                          lastName: normalVisitorLastName,
+                          contactNo: normalVisitorContactNo,
+                          offices: selectedDestinationOffices.map((name, index) => ({ id: selectedOfficeIds[index] || index, name })),
+                        };
+                        
+                        // Navigate to QR ticket display
+                        router.push({
+                          pathname: '/guard/qr-ticket',
+                          params: { data: JSON.stringify(ticketData) },
+                        });
+                      } else {
+                        Alert.alert('Error', 'Failed to generate QR ticket');
+                      }
+                    } catch (error) {
+                      console.error('Error generating QR ticket:', error);
+                      Alert.alert('Error', 'Failed to generate QR ticket. Please try again.');
+                    } finally {
+                      setIsCreatingEnrollee(false);
+                    }
                   }}
+                  disabled={isCreatingEnrollee}
                   activeOpacity={0.8}
                 >
-                  <Text style={styles.generateButtonText}>Generate QR Ticket</Text>
+                  {isCreatingEnrollee ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.generateButtonText}>Generate QR Ticket</Text>
+                  )}
                 </TouchableOpacity>
               </>
             )}
@@ -1904,5 +2294,30 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: '#FFFFFF',
+  },
+  checkboxGroup: {
+    borderWidth: 1,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  checkboxItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderBottomWidth: 1,
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 4,
+    borderWidth: 2,
+    marginRight: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  checkboxLabel: {
+    flex: 1,
+    fontSize: 14,
   },
 });

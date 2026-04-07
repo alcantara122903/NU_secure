@@ -1,10 +1,8 @@
-import { createClient } from '@supabase/supabase-js';
+/**
+ * DEPRECATED: Backward compatibility re-export
+ * This file is maintained for compatibility with existing code.
+ * New code should import from: @/services/database
+ */
 
-const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
-const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
+export { supabase } from './database/supabase';
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error('Missing Supabase environment variables');
-}
-
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
