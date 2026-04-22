@@ -5,13 +5,13 @@ import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
-    Alert,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  Alert,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -109,7 +109,7 @@ export default function VisitorInfoScreen() {
             </View>
           </View>
 
-          {/* Visitor Details */}
+          {/* Visitor Details */}   
           <Text style={styles.visitorName}>{visitorName}</Text>
           <Text style={styles.visitorId}>{visitorId}</Text>
         </View>

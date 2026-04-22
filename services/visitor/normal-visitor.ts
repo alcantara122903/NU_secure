@@ -5,6 +5,7 @@
 
 import type { VisitorRegistrationData } from '@/types/visitor';
 import { supabase } from '../database/supabase';
+import { uploadFacePhoto } from '../storage/upload';
 
 /**
  * Generate a random token for QR code
@@ -79,15 +80,54 @@ export const normalVisitorService = {
         console.log(`✅ Address created: address_id=${addressId}`);
       }
 
-      // STEP 2: Create visitor record
+      // STEP 2: Create visitor record with photo uploads
       console.log('\n📝 STEP 2: Creating visitor record...');
       const passNumber = generatePassNumber();
       const controlNumber = generateControlNumber();
       console.log(`   pass_number: ${passNumber}, control_number: ${controlNumber}`);
 
+      // Upload face photo only
+      let visitorPhotoUrl: string | null = null;
+      if (visitorData.facePhotoUri) {
+        console.log('\n📤 STEP 2: Uploading face photo...');
+        const uploadResult = await uploadFacePhoto(visitorData.facePhotoUri);
+        if (uploadResult.success && uploadResult.publicUrl) {
+          visitorPhotoUrl = uploadResult.publicUrl;
+          console.log(`   ✅ Face photo uploaded: ${visitorPhotoUrl}`);
+        } else {
+          console.warn('   ⚠️ Face photo upload failed');
+          console.warn(`      Error: ${uploadResult.error}`);
+        }
+      } else {
+        console.log('\n📤 STEP 2: No face photo URI provided');
+      }
+
+      // Get current user from session
+      console.log('\n👤 Fetching current guard user...');
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      let guardUserId: number | null = null;
+      
+      if (authUser) {
+        // Query guard_user table to get user_id by email
+        const { data: guardUser, error: guardError } = await supabase
+          .from('guard_user')
+          .select('user_id')
+          .eq('email', authUser.email)
+          .single();
+        
+        if (guardUser) {
+          guardUserId = guardUser.user_id;
+          console.log(`✅ Guard user found: user_id=${guardUserId}`);
+        } else {
+          console.warn(`⚠️ Guard user not found for email: ${authUser.email}`);
+        }
+      } else {
+        console.warn('⚠️ No auth user session found');
+      }
+
       // Attempt insert with retry logic for sequence issues
-      let visitorData_db = null;
-      let visitorError = null;
+      let visitorData_db: any = null;
+      let visitorError: any = null;
       
       for (let attempt = 1; attempt <= 3; attempt++) {
         console.log(`   Attempt ${attempt}/3...`);
@@ -101,6 +141,7 @@ export const normalVisitorService = {
             pass_number: passNumber,
             control_number: controlNumber,
             address_id: addressId || null,
+            visitor_photo_with_id_url: visitorPhotoUrl || null,
             created_at: new Date().toISOString(),
           }])
           .select('visitor_id');
@@ -150,7 +191,7 @@ export const normalVisitorService = {
         return null;
       }
 
-      console.log(`✅ Visitor created: visitor_id=${visitorId}, pass=${passNumber}, control=${controlNumber}`);
+      console.log(`✅ Visitor created: visitor_id=${visitorId}, pass=${passNumber}, control=${controlNumber}${visitorPhotoUrl ? `, photo=${visitorPhotoUrl}` : ''}`);
 
       // STEP 3: Create visit record
       console.log('\n📝 STEP 3: Creating visit record...');
@@ -168,9 +209,11 @@ export const normalVisitorService = {
           .from('visit')
           .insert([{
             visitor_id: visitorId,
-            visit_type_id: 2,
+            visit_type_id: 3, // Normal visitor visit type
             primary_office_id: primaryOfficeId,
             qr_token: qrToken,
+            guard_user_id: guardUserId,
+            purpose_reason: visitorData.reasonForVisit || null,
             entry_time: new Date().toISOString(),
           }])
           .select('visit_id');

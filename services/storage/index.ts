@@ -3,8 +3,7 @@
  */
 
 export {
-    deleteStorageFile, generatePhotoFilename, getPublicUrl, imageUriToBlob, storageService,
-    StorageService, uploadFacePhoto,
+    deleteStorageFile, generatePhotoFilename, uploadFacePhoto,
     uploadIdPhoto, uploadImage, type UploadResult
 } from './upload';
 

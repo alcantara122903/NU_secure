@@ -119,33 +119,37 @@ export function cleanField(text: string): string {
 
 /**
  * Normalize OCR-corrupted address tokens
- * Fixes common character confusions: 5→S, 8→B, ELK→BLK
- * Only corrects when the token clearly looks like a corrupted word
+ * Fixes common character confusions: 5→S, 8→B, ELK→BLK (address context only)
+ * Thoroughly handles all corruption patterns to ensure proper field classification
  */
 function normalizeAddressToken(token: string): string {
   if (!token || token.length === 0) return '';
   
   let normalized = token.trim();
   
-  // Fix 5→S at word boundaries: letter-5 followed by space or end of string
-  // Examples: "ITAA5" → "ITAAS", "BATANGA5 CITY" → "BATANGAS CITY", "GULOD ITAA5" → "GULOD ITAAS"
+  // === FIX 5→S (very common OCR corruption) ===
+  // Handle multiple patterns to catch all cases
+  
+  // Pattern 1: "A5" at end of word or string (ITAA5, BATANGA5)
+  // This is the most common: last letter is A, corrupted to 5
+  normalized = normalized.replace(/A5(\s|$)/g, 'AS$1');
+  
+  // Pattern 2: Any letter followed by 5 at word boundary
   normalized = normalized.replace(/([A-Z])5(\s|$)/g, '$1S$2');
   
-  // Fix 5→S surrounded by letters (between letters)
-  // Example: "BATANGA5CITY" → "BATANGASCITY"
+  // Pattern 3: Digit 5 between letters (no space separator): BATANGA5CITY → BATANGASCITY
   normalized = normalized.replace(/([A-Z])5([A-Z])/g, '$1S$2');
   
-  // Fix 8→B at start of word
-  // Examples: "8ATANGAS" → "BATANGAS"
+  // === FIX 8→B (common OCR confusion) ===
+  // Pattern 1: 8 at start or after space, followed by vowel
   normalized = normalized.replace(/^8([AEIOU])/i, 'B$1');
-  
-  // Fix 8→B after space (new word after space)
   normalized = normalized.replace(/(\s)8([AEIOU])/g, '$1B$2');
   
-  // Fix 8→B in middle of words when surrounded by letters
+  // Pattern 2: 8 between letters
   normalized = normalized.replace(/([A-Z])8([A-Z])/g, '$1B$2');
   
-  // Fix common OCR issue: ELK → BLK (block in addresses)
+  // === FIX ELK→BLK (address context: "Block" in addresses) ===
+  // Only replace when it's clearly the word "ELK" (not part of another word)
   normalized = normalized.replace(/\bELK\b/gi, 'BLK');
   
   return normalized;
@@ -195,11 +199,18 @@ function isValidHouseNumber(text: string): boolean {
  */
 function isLikelyBarangay(text: string): boolean {
   const upper = text.toUpperCase();
-  if (BARANGAY_KEYWORDS.some(kw => upper.includes(kw))) return true;
-  const words = text.split(/\s+/).length;
-  if (words <= 3 && text.length < 40 && !upper.includes('CITY') && !upper.includes('PROVINCE')) {
+  // CRITICAL: Check for barangay keywords FIRST - these are definitive
+  if (BARANGAY_KEYWORDS.some(kw => upper.includes(kw))) {
+    console.log(`[Barangay] ✅ Keyword match found in "${upper}"`);
     return true;
   }
+  // Fallback: Generic pattern for barangay names
+  const words = text.split(/\s+/).length;
+  if (words <= 3 && text.length < 40 && !upper.includes('CITY') && !upper.includes('PROVINCE')) {
+    console.log(`[Barangay] ✅ Generic pattern match for "${upper}" (${words} words, ${text.length} chars)`);
+    return true;
+  }
+  console.log(`[Barangay] ❌ Not a barangay: "${upper}" (${words} words, ${text.length} chars, keywords: ${!BARANGAY_KEYWORDS.some(kw => upper.includes(kw))})`);
   return false;
 }
 
@@ -227,10 +238,22 @@ function hasCorruptedCityKeyword(text: string): boolean {
  */
 function isLikelyCityOrMunicipality(text: string): boolean {
   const upper = text.toUpperCase();
-  if (upper.includes('CITY') || upper.includes('MUNICIPALITY') || upper.includes('MUNI')) return true;
-  if (KNOWN_CITIES.some(city => upper.includes(city))) return true;
-  // Also check if text looks like a known city even with corrupted keywords
-  if (upper.includes('CIT') || upper.includes('CRY') || upper.includes('MUN')) return true;
+  // Check for explicit keywords first
+  if (upper.includes('CITY') || upper.includes('MUNICIPALITY') || upper.includes('MUNI')) {
+    console.log(`[City] ✅ Explicit keyword found in "${upper}"`);
+    return true;
+  }
+  // Check against known cities
+  if (KNOWN_CITIES.some(city => upper.includes(city))) {
+    console.log(`[City] ✅ Known city match found in "${upper}"`); 
+    return true;
+  }
+  // Check for corrupted keywords
+  if (upper.includes('CIT') || upper.includes('CRY') || upper.includes('MUN')) {
+    console.log(`[City] ✅ Corrupted keyword found in "${upper}"`);
+    return true;
+  }
+  console.log(`[City] ❌ Not a city: "${upper}"`);
   return false;
 }
 
@@ -270,7 +293,9 @@ function parseAddressComponents(addressString: string): Partial<ParsedIDData> {
     .split(',')
     .map(p => p.trim())
     .filter(p => p.length > 1)
-    .filter(p => p.length > 0);
+    .filter(p => p.length > 0)
+    // CRITICAL: Normalize each part BEFORE classification to fix OCR corruption
+    .map(p => normalizeAddressToken(p));
   
   console.log(`[AddressParser] Normalized address and split into ${parts.length} part(s):`);
   parts.forEach((p, idx) => console.log(`   [${idx}] "${p}"`));
@@ -307,6 +332,9 @@ function parseAddressComponents(addressString: string): Partial<ParsedIDData> {
       components.addressHouseNo = part;
     } else if (type === 'province' && !components.addressProvince) {
       components.addressProvince = part;
+      // Auto-populate region from province
+      const provinceUpper = part.toUpperCase();
+      components.addressRegion = PROVINCE_TO_REGION[provinceUpper] || '';
     } else if (type === 'municipality' && !components.addressCityMunicipality) {
       components.addressCityMunicipality = part;
     } else if (type === 'barangay' && !components.addressBarangay) {
@@ -734,18 +762,27 @@ function parseGenericID(lines: string[]): Partial<ParsedIDData> {
     // Pattern 1: BARANGAY, CITY or BARANGAY. CITY format
     // Example: "GULOD ITAAS. BATANGAS CITY" or "GULOD ITAAS, BATANGAS CITY" or "GULOD ITAAS. BATANGAS cry" (corrupted)
     // After normalization: "GULOD ITAAS. BATANGAS CITY" → barangay="GULOD ITAAS", city="BATANGAS CITY"
-    if ((line.includes(',') || line.includes('.')) && hasCorruptedCityKeyword(line)) {
+    const hasDelimiter = line.includes(',') || line.includes('.');
+    const hasCityKeyword = hasCorruptedCityKeyword(line);
+    console.log(`[Generic] Checking Pattern 1 (BARANGAY. CITY format):`);
+    console.log(`[Generic]   hasDelimiter: ${hasDelimiter} (line="${line}")`);
+    console.log(`[Generic]   hasCityKeyword: ${hasCityKeyword}`);
+    
+    if (hasDelimiter && hasCityKeyword) {
       console.log(`[Generic] 🔍 Pattern 1 matched (has delimiter + CITY/MUNICIPALITY keyword, including corrupted ones)`);
       // Split by comma or period
       const parts = line.split(/[,.]/).map(p => p.trim());
-      console.log(`[Generic] Split into ${parts.length} parts`);
+      console.log(`[Generic] Split into ${parts.length} parts: [${parts.map(p => `"${p}"`).join(', ')}]`);
       
       if (parts.length >= 2) {
         // First part = barangay (normalize OCR issues)
         let barangayRaw = cleanField(parts[0]);
         let barangayNormalized = normalizeAddressToken(barangayRaw);
         
-        console.log(`[Generic] Part[0] raw="${barangayRaw}" → normalized="${barangayNormalized}"`);
+        console.log(`[Generic] Part[0] classification:`);
+        console.log(`[Generic]   raw="${barangayRaw}"`);
+        console.log(`[Generic]   normalized="${barangayNormalized}"`);
+        console.log(`[Generic]   isLikelyBarangay(normalized)=${isLikelyBarangay(barangayNormalized)}`);
         
         // Validate it's actually a barangay
         if (isLikelyBarangay(barangayNormalized)) {
@@ -753,6 +790,8 @@ function parseGenericID(lines: string[]): Partial<ParsedIDData> {
           console.log(`[Generic] ✅ BARANGAY FOUND: "${barangayRaw}" → "${addressBarangay}"`);
         } else {
           console.log(`[Generic] ⊘ First part doesn't look like barangay: "${barangayRaw}"`);
+          console.log(`[Generic]   BARANGAY_KEYWORDS check: ${BARANGAY_KEYWORDS.some(kw => barangayNormalized.toUpperCase().includes(kw))}`);
+          console.log(`[Generic]   Word count: ${barangayNormalized.split(/\s+/).length}, Length: ${barangayNormalized.length}`);
         }
         
         // Second part = City/Municipality (normalize then validate)
@@ -763,15 +802,23 @@ function parseGenericID(lines: string[]): Partial<ParsedIDData> {
         cityRaw = cityRaw.replace(/cry$/i, 'city').replace(/citv$/i, 'city').replace(/citi$/i, 'city');
         let cityNormalized = normalizeAddressToken(cityRaw);
         
-        console.log(`[Generic] Part[1] raw="${parts[1]}" → cleaned="${cityRaw}" → normalized="${cityNormalized}"`);
+        console.log(`[Generic] Part[1] classification:`);
+        console.log(`[Generic]   raw="${parts[1]}"`);
+        console.log(`[Generic]   cleaned="${cityRaw}"`);
+        console.log(`[Generic]   normalized="${cityNormalized}"`);
+        console.log(`[Generic]   isLikelyCityOrMunicipality(normalized)=${isLikelyCityOrMunicipality(cityNormalized)}`);
         
         if (isLikelyCityOrMunicipality(cityNormalized)) {
           addressCityMunicipality = cityNormalized;
           console.log(`[Generic] ✅ CITY FOUND: "${cityRaw}" → "${addressCityMunicipality}"`);
         } else {
           console.log(`[Generic] ⊘ Part doesn't look like city: "${cityRaw}"`);
+          console.log(`[Generic]   Keyword check (CITY): ${cityNormalized.toUpperCase().includes('CITY')}`);
+          console.log(`[Generic]   Known cities check: ${KNOWN_CITIES.some(city => cityNormalized.toUpperCase().includes(city))}`);
         }
       }
+    } else if (hasDelimiter || hasCityKeyword) {
+      console.log(`[Generic] ⊘ Pattern 1 not matched: hasDelimiter=${hasDelimiter}, hasCityKeyword=${hasCityKeyword}`);
     }
     
     // Pattern 2: PROVINCE, ZIPCODE format

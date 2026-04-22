@@ -1,17 +1,22 @@
 /**
- * Normal Visitor QR Ticket Display
- * Shows token, pass number, control number, and visitor details
+ * Unified QR Ticket Display Screen
+ * Handles all visitor types: enrollee, contractor, normal_visitor
  * Route: app/guard/qr-ticket.tsx
  */
 
 import { useThemeColor } from '@/hooks/use-theme-color';
 import { MaterialIcons } from '@expo/vector-icons';
+import * as Print from 'expo-print';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import * as Sharing from 'expo-sharing';
 import { useEffect, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Image, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-interface QRTicketData {
+type VisitorType = 'enrollee' | 'contractor' | 'normal_visitor';
+
+interface VisitorQRTicketData {
+  type: VisitorType;
   qrToken: string;
   passNumber: string;
   controlNumber: string;
@@ -21,13 +26,23 @@ interface QRTicketData {
   lastName: string;
   contactNo: string;
   offices: Array<{ id: number; name: string }>;
+  // Contractor-specific
+  contractorId?: number;
+  companyName?: string;
+  purpose?: string;
+  address?: string;
+  // Enrollee-specific
+  enrolleeId?: number;
+  enrolleeStatus?: string;
 }
 
 export default function QRTicketScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
-  const [ticketData, setTicketData] = useState<QRTicketData | null>(null);
+  const [ticketData, setTicketData] = useState<VisitorQRTicketData | null>(null);
   const [isGenerating, setIsGenerating] = useState(true);
+  const [isPrinting, setIsPrinting] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
 
   const colors = {
     primary: useThemeColor({}, 'primary'),
@@ -52,6 +67,463 @@ export default function QRTicketScreen() {
     setIsGenerating(false);
   }, []);
 
+  const handlePrintTicket = async () => {
+    if (!ticketData) return;
+
+    try {
+      setIsPrinting(true);
+      const visitorName = `${ticketData.firstName} ${ticketData.lastName}`;
+      const officesList = ticketData.offices.map((o, i) => `${i + 1}. ${o.name}`).join('<br/>');
+      
+      // Build type-specific content
+      let typeSpecificHtml = '';
+      if (ticketData.type === 'contractor') {
+        typeSpecificHtml = `
+          <div class="section">
+            <div class="section-title">Company Information</div>
+            <div class="info-row">
+              <div class="info-label">Company Name:</div>
+              <div class="info-value">${ticketData.companyName || 'N/A'}</div>
+            </div>
+            <div class="info-row">
+              <div class="info-label">Purpose:</div>
+              <div class="info-value">${ticketData.purpose || 'N/A'}</div>
+            </div>
+            ${ticketData.address ? `
+            <div class="info-row">
+              <div class="info-label">Address:</div>
+              <div class="info-value">${ticketData.address}</div>
+            </div>
+            ` : ''}
+          </div>
+        `;
+      } else if (ticketData.type === 'enrollee') {
+        typeSpecificHtml = `
+          <div class="section">
+            <div class="section-title">Enrollee Information</div>
+            ${ticketData.enrolleeStatus ? `
+            <div class="info-row">
+              <div class="info-label">Status:</div>
+              <div class="info-value">${ticketData.enrolleeStatus}</div>
+            </div>
+            ` : ''}
+          </div>
+        `;
+      }
+
+      const htmlContent = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <title>QR Pass - ${visitorName}</title>
+            <meta charset="utf-8">
+            <style>
+              body { 
+                font-family: Arial, sans-serif; 
+                margin: 0; 
+                padding: 20px;
+                background-color: #fff;
+              }
+              .container { 
+                max-width: 800px; 
+                margin: 0 auto; 
+                background-color: white; 
+                padding: 30px; 
+                border: 1px solid #ddd;
+                border-radius: 8px;
+              }
+              .header { 
+                text-align: center; 
+                border-bottom: 3px solid #1976d2; 
+                padding-bottom: 20px; 
+                margin-bottom: 30px; 
+              }
+              .header-title { 
+                font-size: 28px; 
+                font-weight: bold; 
+                color: #1976d2; 
+                margin: 0;
+              }
+              .badge {
+                display: inline-block;
+                background-color: #E3F2FD;
+                color: #1976d2;
+                padding: 6px 12px;
+                border-radius: 20px;
+                font-size: 12px;
+                font-weight: bold;
+                margin-top: 10px;
+              }
+              .header-subtitle { 
+                font-size: 14px; 
+                color: #666; 
+                margin: 8px 0 0 0;
+              }
+              .section { 
+                margin-bottom: 24px; 
+              }
+              .section-title { 
+                font-size: 16px; 
+                font-weight: bold; 
+                color: #1976d2; 
+                margin-bottom: 12px;
+                border-bottom: 1px solid #1976d2;
+                padding-bottom: 8px;
+              }
+              .info-row { 
+                display: flex; 
+                padding: 10px 0; 
+                border-bottom: 1px solid #eee;
+              }
+              .info-label { 
+                font-size: 12px; 
+                font-weight: bold; 
+                color: #666; 
+                width: 150px;
+              }
+              .info-value { 
+                font-size: 14px; 
+                color: #333; 
+                flex: 1;
+                word-break: break-word;
+              }
+              .qr-section { 
+                text-align: center; 
+                padding: 30px; 
+                background-color: #f5f5f5; 
+                border: 2px dashed #1976d2;
+                border-radius: 8px;
+                margin: 30px 0;
+              }
+              .qr-label { 
+                font-size: 14px; 
+                font-weight: bold; 
+                color: #1976d2; 
+                margin-bottom: 15px;
+              }
+              .qr-code { 
+                width: 300px; 
+                height: 300px; 
+                margin: 0 auto 15px;
+              }
+              .office-list { 
+                list-style: none; 
+                padding: 0; 
+                margin: 0;
+              }
+              .office-item { 
+                padding: 10px 0; 
+                border-bottom: 1px solid #eee;
+              }
+              .office-item:last-child { 
+                border-bottom: none; 
+              }
+              .footer { 
+                text-align: center; 
+                font-size: 12px; 
+                color: #999; 
+                margin-top: 30px; 
+                border-top: 1px solid #eee; 
+                padding-top: 15px;
+              }
+            </style>
+          </head>
+          <body>
+            <div class="container">
+              <div class="header">
+                <p class="header-title">QR Pass</p>
+                <div class="badge">${ticketData.type === 'contractor' ? 'Contractor' : ticketData.type === 'enrollee' ? 'Enrollee' : 'Visitor'}</div>
+                <p class="header-subtitle">Visitor Management System</p>
+              </div>
+
+              <div class="section">
+                <div class="section-title">Visitor Information</div>
+                <div class="info-row">
+                  <div class="info-label">Full Name:</div>
+                  <div class="info-value">${visitorName}</div>
+                </div>
+                <div class="info-row">
+                  <div class="info-label">Pass Number:</div>
+                  <div class="info-value">${ticketData.passNumber}</div>
+                </div>
+                <div class="info-row">
+                  <div class="info-label">Control Number:</div>
+                  <div class="info-value">${ticketData.controlNumber}</div>
+                </div>
+                <div class="info-row">
+                  <div class="info-label">Contact Number:</div>
+                  <div class="info-value">${ticketData.contactNo}</div>
+                </div>
+              </div>
+
+              ${typeSpecificHtml}
+
+              <div class="section">
+                <div class="section-title">Authorized Offices</div>
+                <ul class="office-list">
+                  ${officesList}
+                </ul>
+              </div>
+
+              <div class="qr-section">
+                <div class="qr-label">Scan QR Code for Verification</div>
+                <img src="https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(ticketData.qrToken)}" alt="QR Code" class="qr-code" />
+              </div>
+
+              <div class="section">
+                <div class="section-title">QR Token</div>
+                <div class="info-row">
+                  <div class="info-value" style="word-break: break-all; font-family: monospace; font-size: 11px;">${ticketData.qrToken}</div>
+                </div>
+              </div>
+
+              <div class="footer">
+                <p>Generated on ${new Date().toLocaleString()}</p>
+                <p>Visitor ID: ${ticketData.visitorId}</p>
+              </div>
+            </div>
+          </body>
+        </html>
+      `;
+
+      const result = await Print.printAsync({
+        html: htmlContent,
+        printerUrl: undefined,
+      });
+
+      Alert.alert('Success', 'Ticket printed successfully');
+    } catch (error) {
+      console.error('Error printing ticket:', error);
+      Alert.alert('Print Error', 'Failed to print ticket. Please try again.');
+    } finally {
+      setIsPrinting(false);
+    }
+  };
+
+  const handleDownloadTicket = async () => {
+    if (!ticketData) return;
+
+    try {
+      setIsDownloading(true);
+      const visitorName = `${ticketData.firstName} ${ticketData.lastName}`;
+      const officesList = ticketData.offices.map((o, i) => `${i + 1}. ${o.name}`).join('<br/>');
+      
+      // Build type-specific content
+      let typeSpecificHtml = '';
+      if (ticketData.type === 'contractor') {
+        typeSpecificHtml = `
+          <div class="section">
+            <div class="section-title">Company Information</div>
+            <div class="info-row">
+              <div class="info-label">Company Name:</div>
+              <div class="info-value">${ticketData.companyName || 'N/A'}</div>
+            </div>
+            <div class="info-row">
+              <div class="info-label">Purpose:</div>
+              <div class="info-value">${ticketData.purpose || 'N/A'}</div>
+            </div>
+            ${ticketData.address ? `
+            <div class="info-row">
+              <div class="info-label">Address:</div>
+              <div class="info-value">${ticketData.address}</div>
+            </div>
+            ` : ''}
+          </div>
+        `;
+      } else if (ticketData.type === 'enrollee') {
+        typeSpecificHtml = `
+          <div class="section">
+            <div class="section-title">Enrollee Information</div>
+            ${ticketData.enrolleeStatus ? `
+            <div class="info-row">
+              <div class="info-label">Status:</div>
+              <div class="info-value">${ticketData.enrolleeStatus}</div>
+            </div>
+            ` : ''}
+          </div>
+        `;
+      }
+
+      const htmlContent = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <title>QR Pass - ${visitorName}</title>
+            <meta charset="utf-8">
+            <style>
+              body { 
+                font-family: Arial, sans-serif; 
+                margin: 0; 
+                padding: 20px;
+                background-color: #fff;
+              }
+              .container { 
+                max-width: 800px; 
+                margin: 0 auto; 
+                background-color: white; 
+                padding: 30px; 
+                border: 1px solid #ddd;
+                border-radius: 8px;
+              }
+              .header { 
+                text-align: center; 
+                border-bottom: 3px solid #1976d2; 
+                padding-bottom: 20px; 
+                margin-bottom: 30px; 
+              }
+              .header-title { 
+                font-size: 28px; 
+                font-weight: bold; 
+                color: #1976d2; 
+                margin: 0;
+              }
+              .badge {
+                display: inline-block;
+                background-color: #E3F2FD;
+                color: #1976d2;
+                padding: 6px 12px;
+                border-radius: 20px;
+                font-size: 12px;
+                font-weight: bold;
+                margin-top: 10px;
+              }
+              .header-subtitle { 
+                font-size: 14px; 
+                color: #666; 
+                margin: 8px 0 0 0;
+              }
+              .section { 
+                margin-bottom: 24px; 
+              }
+              .section-title { 
+                font-size: 16px; 
+                font-weight: bold; 
+                color: #1976d2; 
+                margin-bottom: 12px;
+                border-bottom: 1px solid #1976d2;
+                padding-bottom: 8px;
+              }
+              .info-row { 
+                display: flex; 
+                padding: 10px 0; 
+                border-bottom: 1px solid #eee;
+              }
+              .info-label { 
+                font-size: 12px; 
+                font-weight: bold; 
+                color: #666; 
+                width: 150px;
+              }
+              .info-value { 
+                font-size: 14px; 
+                color: #333; 
+                flex: 1;
+                word-break: break-word;
+              }
+              .qr-section { 
+                text-align: center; 
+                padding: 30px; 
+                background-color: #f5f5f5; 
+                border: 2px dashed #1976d2;
+                border-radius: 8px;
+                margin: 30px 0;
+              }
+              .qr-label { 
+                font-size: 14px; 
+                font-weight: bold; 
+                color: #1976d2; 
+                margin-bottom: 15px;
+              }
+              .qr-image { 
+                max-width: 300px; 
+                height: auto; 
+                display: inline-block;
+                margin: 15px 0;
+              }
+              .footer { 
+                text-align: center; 
+                font-size: 10px; 
+                color: #999; 
+                margin-top: 30px; 
+                border-top: 1px solid #ddd; 
+                padding-top: 15px;
+              }
+            </style>
+          </head>
+          <body>
+            <div class="container">
+              <div class="header">
+                <div class="header-title">QR PASS</div>
+                <div class="badge">${ticketData.type === 'contractor' ? 'CONTRACTOR' : ticketData.type === 'enrollee' ? 'ENROLLEE' : 'VISITOR'}</div>
+                <div class="header-subtitle">Visitor ID: ${ticketData.visitorId}</div>
+              </div>
+              
+              <div class="section">
+                <div class="section-title">Visitor Information</div>
+                <div class="info-row">
+                  <div class="info-label">Name:</div>
+                  <div class="info-value">${visitorName}</div>
+                </div>
+                <div class="info-row">
+                  <div class="info-label">Contact:</div>
+                  <div class="info-value">${ticketData.contactNo}</div>
+                </div>
+                <div class="info-row">
+                  <div class="info-label">Pass Number:</div>
+                  <div class="info-value">${ticketData.passNumber}</div>
+                </div>
+                <div class="info-row">
+                  <div class="info-label">Control Number:</div>
+                  <div class="info-value">${ticketData.controlNumber}</div>
+                </div>
+              </div>
+              
+              ${typeSpecificHtml}
+              
+              <div class="qr-section">
+                <div class="qr-label">Scan this code at each office</div>
+                <img src="https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(ticketData.qrToken)}" alt="QR Code" class="qr-image" />
+                <div style="font-size: 10px; color: #666; margin-top: 10px;">Token: ${ticketData.qrToken}</div>
+              </div>
+              
+              <div class="section">
+                <div class="section-title">Offices to Visit</div>
+                <div style="padding: 10px 0;">${officesList}</div>
+              </div>
+              
+              <div class="footer">
+                <p>Generated on ${new Date().toLocaleString()}</p>
+                <p>Visitor ID: ${ticketData.visitorId}</p>
+              </div>
+            </div>
+          </body>
+        </html>
+      `;
+
+      // Generate PDF
+      const { uri } = await Print.printToFileAsync({
+        html: htmlContent,
+      });
+
+      // Share/Download the PDF
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, {
+          mimeType: 'application/pdf',
+          dialogTitle: `QR_Ticket_${ticketData.visitorId}.pdf`,
+          UTI: 'com.adobe.pdf',
+        });
+        Alert.alert('Success', 'QR ticket downloaded successfully');
+      } else {
+        Alert.alert('Info', 'Download not available on this device');
+      }
+    } catch (error) {
+      console.error('Error downloading ticket:', error);
+      Alert.alert('Download Error', 'Failed to download ticket. Please try again.');
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
   if (isGenerating || !ticketData) {
     return (
       <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
@@ -64,12 +536,20 @@ export default function QRTicketScreen() {
   }
 
   const visitorName = `${ticketData.firstName} ${ticketData.lastName}`;
+  const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(
+    ticketData.qrToken
+  )}`;
+  
+  // Determine type label and success message
+  const typeLabel = ticketData.type === 'contractor' ? 'Contractor' : 
+                    ticketData.type === 'enrollee' ? 'Enrollee' : 'Visitor';
+  const successMessage = `${typeLabel} Registered Successfully`;
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         {/* Header */}
-        <View style={styles.header}>
+        <View style={[styles.header, { backgroundColor: colors.primary }]}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
             <MaterialIcons name="arrow-back" size={24} color="#FFFFFF" />
           </TouchableOpacity>
@@ -79,29 +559,37 @@ export default function QRTicketScreen() {
 
         {/* Main Ticket Card */}
         <View style={[styles.ticketCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          {/* Success Banner */}
+          {/* Success Banner with Type Badge */}
           <View style={[styles.successBanner, { backgroundColor: '#E8F5E9' }]}>
             <MaterialIcons name="check-circle" size={24} color="#4CAF50" />
-            <Text style={[styles.successText, { color: '#2E7D32' }]}>
-              Visitor Registered Successfully
-            </Text>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.successText, { color: '#2E7D32' }]}>{successMessage}</Text>
+              <View style={[styles.typeBadge, { backgroundColor: colors.primary }]}>
+                <Text style={styles.typeBadgeText}>{typeLabel}</Text>
+              </View>
+            </View>
           </View>
 
-          {/* QR Code Section */}
+          {/* QR Code Section with Visual QR */}
           <View style={[styles.qrSection, { backgroundColor: colors.background, borderColor: colors.border }]}>
             <Text style={[styles.qrLabel, { color: colors.textSecondary }]}>Scan this code at each office</Text>
             <View style={styles.qrContainer}>
-              <View style={[styles.qrTokenBox, { backgroundColor: colors.surface, borderColor: colors.primary }]}>
-                <Text style={[styles.qrTokenLabel, { color: colors.textSecondary }]}>QR Token:</Text>
-                <Text style={[styles.qrTokenText, { color: colors.text }]}>{ticketData.qrToken}</Text>
-              </View>
+              <Image source={{ uri: qrCodeUrl }} style={styles.qrImage} />
+            </View>
+            
+            {/* QR Token Display */}
+            <View style={[styles.tokenBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <Text style={[styles.tokenLabel, { color: colors.textSecondary }]}>QR Token</Text>
+              <Text style={[styles.tokenValue, { color: colors.primary }]} selectable>
+                {ticketData.qrToken}
+              </Text>
             </View>
           </View>
 
           {/* Visitor Information */}
           <View style={styles.infoSection}>
             <View style={styles.infoItem}>
-              <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Visitor Name</Text>
+              <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Full Name</Text>
               <Text style={[styles.infoValue, { color: colors.text }]}>{visitorName}</Text>
             </View>
 
@@ -124,6 +612,47 @@ export default function QRTicketScreen() {
             </View>
           </View>
 
+          {/* Contractor-Specific Section */}
+          {ticketData.type === 'contractor' && (
+            <View style={styles.contractorSection}>
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>Company Information</Text>
+              
+              {ticketData.companyName && (
+                <View style={styles.infoItem}>
+                  <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Company Name</Text>
+                  <Text style={[styles.infoValue, { color: colors.text }]}>{ticketData.companyName}</Text>
+                </View>
+              )}
+
+              {ticketData.purpose && (
+                <View style={styles.infoItem}>
+                  <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Purpose</Text>
+                  <Text style={[styles.infoValue, { color: colors.text }]}>{ticketData.purpose}</Text>
+                </View>
+              )}
+
+              {ticketData.address && (
+                <View style={styles.infoItem}>
+                  <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Address</Text>
+                  <Text style={[styles.infoValue, { color: colors.text }]}>{ticketData.address}</Text>
+                </View>
+              )}
+            </View>
+          )}
+
+          {/* Enrollee-Specific Section */}
+          {ticketData.type === 'enrollee' && ticketData.enrolleeStatus && (
+            <View style={styles.enrolleeSection}>
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>Enrollee Status</Text>
+              <View style={[styles.statusBadge, { backgroundColor: '#E8F5E9', borderColor: '#4CAF50' }]}>
+                <MaterialIcons name="info" size={18} color="#4CAF50" />
+                <Text style={{ color: '#2E7D32', fontWeight: '600', marginLeft: 8 }}>
+                  {ticketData.enrolleeStatus}
+                </Text>
+              </View>
+            </View>
+          )}
+
           {/* Destination Offices */}
           <View style={styles.officesSection}>
             <Text style={[styles.sectionTitle, { color: colors.text }]}>Destination Offices to Visit</Text>
@@ -138,12 +667,7 @@ export default function QRTicketScreen() {
                     },
                   ]}
                 >
-                  <View
-                    style={[
-                      styles.officeNumber,
-                      { backgroundColor: colors.primary },
-                    ]}
-                  >
+                  <View style={[styles.officeNumber, { backgroundColor: colors.primary }]}>
                     <Text style={styles.officeNumberText}>{index + 1}</Text>
                   </View>
                   <Text style={[styles.officeName, { color: colors.text }]}>{office.name}</Text>
@@ -162,31 +686,50 @@ export default function QRTicketScreen() {
           </View>
         </View>
 
-        {/* Action Buttons */}
-        <TouchableOpacity
-          style={[styles.printButton, { backgroundColor: colors.primary }]}
-          onPress={() => {
-            Alert.alert('Print', 'Printing QR Ticket (feature coming soon)');
-          }}
-        >
-          <MaterialIcons name="print" size={20} color="#FFFFFF" />
-          <Text style={styles.printButtonText}>Print Ticket</Text>
-        </TouchableOpacity>
+        {/* Download & Print Buttons */}
+        <View style={styles.actionButtonsContainer}>
+          {/* Download Button */}
+          <TouchableOpacity
+            style={[styles.actionButton, { backgroundColor: '#2196F3', flex: 1, marginRight: 10 }]}
+            onPress={handleDownloadTicket}
+            disabled={isDownloading}
+            activeOpacity={0.8}
+          >
+            <MaterialIcons name="download" size={22} color="#FFFFFF" />
+            <Text style={styles.actionButtonText}>{isDownloading ? 'Downloading...' : 'Download'}</Text>
+          </TouchableOpacity>
 
+          {/* Print Button */}
+          <TouchableOpacity
+            style={[styles.actionButton, { backgroundColor: '#FF9800', flex: 1, marginLeft: 10 }]}
+            onPress={handlePrintTicket}
+            disabled={isPrinting}
+            activeOpacity={0.8}
+          >
+            <MaterialIcons name="print" size={22} color="#FFFFFF" />
+            <Text style={styles.actionButtonText}>{isPrinting ? 'Printing...' : 'Print'}</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Complete & Return Button */}
         <TouchableOpacity
-          style={[styles.returnButton, { borderColor: colors.primary, backgroundColor: colors.background }]}
+          style={[styles.generateButton, { backgroundColor: '#4CAF50', marginHorizontal: 20 }]}
           onPress={() => {
             Alert.alert(
-              'Return to Dashboard',
-              'This ticket has been saved. You can retrieve it anytime.',
+              'Ticket Saved',
+              `${typeLabel} ticket has been generated and saved.\n\nVisitor: ${visitorName}`,
               [
-                { text: 'Cancel', style: 'cancel' },
-                { text: 'Return', onPress: () => router.replace('/(tabs)') },
+                {
+                  text: 'OK',
+                  onPress: () => router.replace('/guard/dashboard'),
+                },
               ]
             );
           }}
+          activeOpacity={0.8}
         >
-          <Text style={[styles.returnButtonText, { color: colors.primary }]}>Return to Dashboard</Text>
+          <MaterialIcons name="check-circle" size={24} color="#FFFFFF" />
+          <Text style={styles.generateButtonText}>Complete & Return</Text>
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
@@ -206,6 +749,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 24,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
   },
   backButton: {
     padding: 8,
@@ -249,7 +794,18 @@ const styles = StyleSheet.create({
   successText: {
     fontSize: 14,
     fontWeight: '600',
-    flex: 1,
+  },
+  typeBadge: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    marginTop: 6,
+  },
+  typeBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
   qrSection: {
     alignItems: 'center',
@@ -268,6 +824,10 @@ const styles = StyleSheet.create({
     padding: 16,
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
+  },
+  qrImage: {
+    width: 300,
+    height: 300,
   },
   infoSection: {
     paddingHorizontal: 16,
@@ -310,6 +870,30 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 1,
   },
+  contractorSection: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#E0E0E0',
+    marginTop: 12,
+  },
+  enrolleeSection: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#E0E0E0',
+    marginTop: 12,
+  },
+  statusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
   officesSection: {
     paddingHorizontal: 16,
     paddingVertical: 16,
@@ -349,6 +933,25 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
+  tokenBox: {
+    marginTop: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: 'center',
+  },
+  tokenLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    marginBottom: 6,
+  },
+  tokenValue: {
+    fontSize: 12,
+    fontWeight: '600',
+    letterSpacing: 0.5,
+    fontFamily: 'monospace',
+  },
   instructionsBox: {
     flexDirection: 'row',
     gap: 12,
@@ -365,50 +968,60 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     flex: 1,
   },
-  printButton: {
+  generateButton: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 14,
-    borderRadius: 8,
-    marginBottom: 12,
-    gap: 8,
-  },
-  printButtonText: {
-    color: '#FFFFFF',
-    fontWeight: '700',
-    fontSize: 16,
-  },
-  returnButton: {
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 14,
-    borderRadius: 8,
-    borderWidth: 2,
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    gap: 10,
     marginBottom: 20,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.15,
+        shadowRadius: 3,
+      },
+      android: {
+        elevation: 3,
+      },
+    }),
   },
-  returnButtonText: {
-    fontWeight: '700',
+  generateButtonText: {
     fontSize: 16,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
-  qrTokenBox: {
-    paddingHorizontal: 12,
+  actionButtonsContainer: {
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    marginVertical: 12,
+    gap: 0,
+  },
+  actionButton: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
     paddingVertical: 12,
     borderRadius: 8,
-    borderWidth: 2,
-    alignItems: 'center',
-    minWidth: 250,
+    gap: 8,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 3,
+      },
+      android: {
+        elevation: 2,
+      },
+    }),
   },
-  qrTokenLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-    marginBottom: 8,
-  },
-  qrTokenText: {
+  actionButtonText: {
     fontSize: 14,
     fontWeight: '700',
-    fontFamily: 'monospace',
-    textAlign: 'center',
-    lineHeight: 20,
+    color: '#FFFFFF',
   },
 });

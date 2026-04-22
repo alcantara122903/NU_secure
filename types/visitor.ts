@@ -25,8 +25,10 @@ export interface IDExtractionData {
   addressCityMunicipality?: string;
   addressProvince?: string;
   addressRegion?: string;
+  contactNo?: string;
   confidence?: 'high' | 'medium' | 'low';
   detectedIdType?: string;
+  rawOcrText?: string;
 }
 
 export interface Enrollee {
@@ -68,4 +70,5 @@ export interface VisitorRegistrationData {
   contactNo?: string;
   facePhotoUri?: string;
   idPhotoUri?: string;
+  reasonForVisit?: string;
 }

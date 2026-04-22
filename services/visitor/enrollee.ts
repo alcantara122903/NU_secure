@@ -13,6 +13,7 @@ import {
     parseIDText,
     validateParsedData
 } from '../ocr/parsers/parser-registry';
+import { uploadFacePhoto } from '../storage/upload';
 
 
 export const enrolleeService = {
@@ -21,7 +22,7 @@ export const enrolleeService = {
    * 
    * Supports 17 different Philippine ID types
    */
-  async extractDataFromID(base64Image: string): Promise<(IDExtractionData & { confidence: 'high' | 'medium' | 'low' }) | null> {
+  async extractDataFromID(base64Image: string): Promise<IDExtractionData | null> {
     try {
       console.log('\n\n========== ID EXTRACTION PROCESS STARTED ==========\n');
       
@@ -33,6 +34,12 @@ export const enrolleeService = {
       
       if (!ocrRawText) {
         console.error('\n❌ STEP 1 FAILED: OCR.Space did not return text');
+        console.error('\n💡 Troubleshooting suggestions:');
+        console.error('   1. Check internet connection - OCR.Space needs connectivity');
+        console.error('   2. Image may be too blurry or poorly lit - try retaking the photo');
+        console.error('   3. ID may be at an angle - ensure it\'s straight and well-centered');
+        console.error('   4. Try uploading from gallery instead of camera');
+        console.error('   5. If problem persists, you can enter information manually in Step 3');
         return null;
       }
 
@@ -116,8 +123,10 @@ export const enrolleeService = {
         addressCityMunicipality: parsedData.addressCityMunicipality,
         addressProvince: parsedData.addressProvince,
         addressRegion: parsedData.addressRegion,
+        contactNo: parsedData.contactNo || '',
         confidence: parsedData.confidence,
         detectedIdType: parsedData.detectedIdType,
+        rawOcrText: ocrRawText,
       };
     } catch (error) {
       console.error('\n❌ EXTRACTION ERROR: Exception thrown');
@@ -167,12 +176,60 @@ export const enrolleeService = {
       // Create visitor record
       console.log('\n👤 Creating visitor record...');
       
+      // Upload face photo only
+      let photoUrl: string | null = null;
+      
+      if (enrolleeData.facePhotoUri) {
+        console.log('\n📤 Uploading face photo...');
+        console.log(`   URI type: ${typeof enrolleeData.facePhotoUri}`);
+        console.log(`   URI length: ${enrolleeData.facePhotoUri.length}`);
+        console.log(`   URI preview: ${enrolleeData.facePhotoUri.substring(0, 80)}...`);
+        
+        const uploadResult = await uploadFacePhoto(enrolleeData.facePhotoUri);
+        
+        console.log('   Upload result:', {
+          success: uploadResult.success,
+          error: uploadResult.error,
+          publicUrl: uploadResult.publicUrl?.substring(0, 80) + '...',
+        });
+        
+        if (uploadResult.success && uploadResult.publicUrl) {
+          photoUrl = uploadResult.publicUrl;
+          console.log(`   ✅ Face photo uploaded successfully`);
+          console.log(`   URL saved: ${photoUrl}`);
+        } else {
+          console.warn(`   ⚠️ Face photo upload failed: ${uploadResult.error}`);
+        }
+      }
+      // Get current user from session
+      console.log('\n👤 Fetching current guard user...');
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      let guardUserId: number | null = null;
+      
+      if (authUser) {
+        // Query guard_user table to get user_id by email
+        const { data: guardUser, error: guardError } = await supabase
+          .from('guard_user')
+          .select('user_id')
+          .eq('email', authUser.email)
+          .single();
+        
+        if (guardUser) {
+          guardUserId = guardUser.user_id;
+          console.log(`✅ Guard user found: user_id=${guardUserId}`);
+        } else {
+          console.warn(`⚠️ Guard user not found for email: ${authUser.email}`);
+        }
+      } else {
+        console.warn('⚠️ No auth user session found');
+      }
+      
       const visitorPayload = {
         first_name: enrolleeData.firstName,
         last_name: enrolleeData.lastName,
         contact_no: enrolleeData.contactNo || null,
-        // Use storage file path if available (from new storage service)
-        visitor_photo_with_id_url: enrolleeData.idPhotoUri || null,
+        // Save uploaded photo URL or null if no photo
+        visitor_photo_with_id_url: photoUrl || null,
         pass_number: enrolleeData.passNumber,
         control_number: enrolleeData.controlNumber,
         address_id: addressId || null,
@@ -181,7 +238,7 @@ export const enrolleeService = {
       
       console.log('   Payload:', JSON.stringify(visitorPayload, null, 2));
 
-      const { data: visitorData, error: visitorError } = await supabase
+      const { data: visitorData, error: visitorError }: any = await supabase
         .from('visitor')
         .insert([visitorPayload])
         .select()
@@ -212,7 +269,6 @@ export const enrolleeService = {
       
       const enrolleePayload = {
         visitor_id: visitorData.visitor_id,
-        status: 'pending',
         updated_at: new Date().toISOString(),
       };
       
@@ -246,10 +302,10 @@ export const enrolleeService = {
       
       const visitPayload = {
         visitor_id: visitorData.visitor_id,
-        enrollee_id: enrolleeRecData.enrollee_id,
+        visit_type_id: 1, // Enrollee visit type
         qr_token: enrolleeData.qrToken,
-        status: 'pending',
-        created_at: new Date().toISOString(),
+        guard_user_id: guardUserId,
+        entry_time: new Date().toISOString(),
       };
       
       console.log('   Payload:', JSON.stringify(visitPayload));
@@ -266,6 +322,22 @@ export const enrolleeService = {
         console.warn('   Continuing anyway as visit record is not blocking...');
       } else if (visitData && visitData.visit_id) {
         console.log(`✅ Visit record created with ID: ${visitData.visit_id}`);
+      }
+
+      // Create enrollee_progress records for each active step
+      console.log('\n📊 Creating enrollee progress tracking records...');
+      try {
+        const progressRecords = await this.createEnrolleeProgressRecords(enrolleeRecData.enrollee_id);
+        if (progressRecords && progressRecords.length > 0) {
+          console.log(`✅ Progress tracking created for ${progressRecords.length} enrollment steps`);
+        } else if (progressRecords === null) {
+          console.warn('⚠️ Progress records is NULL - check logs above for details');
+        } else {
+          console.warn('⚠️ Progress records returned empty array');
+        }
+      } catch (progressError) {
+        console.error('❌ ERROR creating progress tracking records:');
+        console.error('   Error:', progressError);
       }
 
       console.log('\n✅ === ENROLLEE CREATION COMPLETED SUCCESSFULLY ===\n');
@@ -299,7 +371,7 @@ export const enrolleeService = {
         .from('enrollee')
         .select(`
           enrollee_id,
-          status,
+          enrollee_status_id,
           visitor:visitor(*)
         `)
         .eq('enrollee_id', enrolleeId)
@@ -318,13 +390,129 @@ export const enrolleeService = {
   },
 
   /**
-   * Get enrollee steps
+   * Create enrollee_progress records for a new enrollee
+   * Automatically creates progress tracking for all active enrollment steps
+   * Works with or without step_status data
+   */
+  async createEnrolleeProgressRecords(enrolleeId: number): Promise<any[] | null> {
+    try {
+      console.log(`\n📊 Creating progress records for enrollee_id: ${enrolleeId}`);
+
+      // Try to get a valid step_status_id (optional)
+      let pendingStatusId: number | null = null;
+      const { data: allStatuses } = await supabase
+        .from('step_status')
+        .select('step_status_id, step_status_name');
+
+      if (allStatuses && allStatuses.length > 0) {
+        // Try to find a pending status
+        let pendingStatus = allStatuses.find((s: any) => 
+          s.step_status_name?.toLowerCase().includes('pending') || 
+          s.step_status_name?.toLowerCase().includes('not started')
+        );
+        
+        if (!pendingStatus) {
+          pendingStatus = allStatuses[0];
+        }
+        
+        pendingStatusId = pendingStatus.step_status_id;
+        console.log(`   ✅ Found step status: ${pendingStatus.step_status_name} (ID: ${pendingStatusId})`);
+      } else {
+        console.log(`   ℹ️ No step_status records found - will create progress records without status_id`);
+      }
+
+      // Step 2: Fetch all active enrollment steps
+      const { data: steps, error: stepsError } = await supabase
+        .from('enrollee_step')
+        .select('step_id, step_name, step_order, office_id')
+        .eq('is_active', true)
+        .order('step_order', { ascending: true });
+
+      if (stepsError) {
+        console.error('❌ Error fetching enrollment steps:', stepsError);
+        return null;
+      }
+
+      if (!steps || steps.length === 0) {
+        console.warn('⚠️ No active enrollment steps found in enrollee_step table');
+        console.warn('   Check that enrollee_step records have is_active = true');
+        return [];
+      }
+
+      console.log(`   Found ${steps.length} active enrollment steps`);
+
+      // Step 3: Create progress records for each step
+      // Include step_status_id only if available
+      const progressPayloads = steps.map((step: any) => {
+        const payload: any = {
+          enrollee_id: enrolleeId,
+          step_id: step.step_id,
+          completed_at: null,
+        };
+        
+        // Only add step_status_id if we found one
+        if (pendingStatusId !== null) {
+          payload.step_status_id = pendingStatusId;
+        }
+        
+        return payload;
+      });
+
+      console.log(`   Creating ${progressPayloads.length} progress records...`);
+      console.log(`   Payloads:`, JSON.stringify(progressPayloads, null, 2));
+
+      const { data: progressData, error: progressError } = await supabase
+        .from('enrollee_progress')
+        .insert(progressPayloads)
+        .select();
+
+      if (progressError) {
+        console.error('❌ Error creating progress records:', progressError);
+        console.error('   Error details:', progressError.message);
+        return null;
+      }
+
+      console.log(`   Insert completed. progressData:`, JSON.stringify(progressData));
+
+      if (progressData && progressData.length > 0) {
+        console.log(`✅ Created ${progressData.length} progress records:`);
+        progressData.forEach((p: any) => console.log(`   - Progress ID: ${p.progress_id}, Step: ${p.step_id}`));
+      } else {
+        console.warn('⚠️ Insert succeeded but no data returned from select()');
+        console.warn(`   progressData is: ${progressData === null ? 'null' : 'empty array'}`);
+      }
+
+      return progressData;
+    } catch (error) {
+      console.error('❌ Error in createEnrolleeProgressRecords:', error);
+      return null;
+    }
+  },
+
+  /**
+   * Get enrollee steps with progress status
+   * Joins enrollee_progress with enrollee_step to get all steps for this enrollee
    */
   async getEnrolleeSteps(enrolleeId: number): Promise<any[] | null> {
     try {
+      console.log(`📚 Fetching enrollee steps for enrollee_id: ${enrolleeId}`);
+      
       const { data, error } = await supabase
         .from('enrollee_progress')
-        .select('*')
+        .select(`
+          progress_id,
+          enrollee_id,
+          completed_at,
+          step:enrollee_step(
+            step_id,
+            step_name,
+            step_order,
+            office_id
+          ),
+          status:step_status(
+            step_status_name
+          )
+        `)
         .eq('enrollee_id', enrolleeId);
 
       if (error) {
@@ -332,7 +520,30 @@ export const enrolleeService = {
         return null;
       }
 
-      return data || [];
+      // Transform data to match UI expectations
+      const transformedData = data?.map((progress: any) => ({
+        progress_id: progress.progress_id,
+        step_id: progress.step?.step_id,
+        step_name: progress.step?.step_name,
+        step_order: progress.step?.step_order,
+        office_id: progress.step?.office_id,
+        status: progress.completed_at ? 'completed' : 'pending', // If completed_at exists, it's completed
+        completed_at: progress.completed_at,
+        step_status_name: progress.status?.step_status_name,
+      })) || [];
+
+      // Sort by step_order (client-side to ensure correct order)
+      const sortedData = transformedData.sort((a: any, b: any) => {
+        return (a.step_order || 0) - (b.step_order || 0);
+      });
+
+      if (sortedData && sortedData.length > 0) {
+        console.log(`✅ Found ${sortedData.length} enrollee steps:`, sortedData);
+      } else {
+        console.warn('⚠️ No enrollee progress found for this enrollee');
+      }
+
+      return sortedData;
     } catch (error) {
       console.error('❌ Error in getEnrolleeSteps:', error);
       return null;

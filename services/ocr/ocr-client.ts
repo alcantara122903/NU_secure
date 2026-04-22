@@ -12,6 +12,7 @@
  */
 
 import { OCR_SETTINGS } from '@/constants/ocr';
+import { validateAndPrepareImageForOCR } from '@/utils/image-compression';
 
 /**
  * Parse base64 image string - extract clean base64 and mime type
@@ -62,6 +63,13 @@ const parseBase64Image = (base64: string): { cleanBase64: string; mimeType: stri
  */
 export const extractTextFromImageViaOCR = async (base64Image: string): Promise<string | null> => {
   try {
+    // Validate and prepare image
+    const { base64: preparedBase64, sizeKB, warnings } = await validateAndPrepareImageForOCR(base64Image);
+    
+    if (warnings.length > 0) {
+      console.warn('⚠️ Image warnings:', warnings);
+    }
+    
     const apiKey = process.env.EXPO_PUBLIC_OCR_API_KEY;
 
     if (!apiKey) {
@@ -72,12 +80,10 @@ export const extractTextFromImageViaOCR = async (base64Image: string): Promise<s
 
     console.log('\n========== OCR.Space API Request ==========');
     console.log('📤 Sending image to OCR.Space API...');
+    console.log(`   Image size: ${sizeKB} KB`);
+    console.log(`   Input prefix: ${preparedBase64.substring(0, 50)}...`);
 
-    const imageSizeKB = (base64Image.length / 1024).toFixed(2);
-    console.log(`   Input size: ${imageSizeKB} KB`);
-    console.log(`   Input prefix: ${base64Image.substring(0, 50)}...`);
-
-    const parsed = parseBase64Image(base64Image);
+    const parsed = parseBase64Image(preparedBase64);
     if (!parsed) {
       console.error('❌ [VALIDATION] Failed to parse base64 image');
       return null;
@@ -88,27 +94,35 @@ export const extractTextFromImageViaOCR = async (base64Image: string): Promise<s
     console.log(`   Mime type: ${mimeType}`);
     console.log(`   Clean base64 length: ${cleanBase64.length} chars`);
 
-    const base64imageValue = `data:${mimeType};base64,${cleanBase64}`;
-    console.log(`   Final base64image (first 100 chars): ${base64imageValue.substring(0, 100)}...`);
+    // Remove data: prefix if present - send only base64
+    const base64ForAPI = cleanBase64;
+    
+    console.log(`   Final base64 (first 100 chars): ${base64ForAPI.substring(0, 100)}...`);
 
-    const formData = new FormData();
-    formData.append('apikey', apiKey);
-    formData.append('language', 'eng');
-    formData.append('isoverlayrequired', 'false');
-    formData.append('base64image', base64imageValue);
-    formData.append('filetype', 'JPG');
+    // Use URL-encoded form data (more compatible with React Native/Expo than FormData)
+    const params = new URLSearchParams();
+    params.append('apikey', apiKey);
+    params.append('base64image', `data:${mimeType};base64,${base64ForAPI}`);
+    params.append('language', 'eng');
+    params.append('isoverlayrequired', 'false');
 
-    console.log('✅ FormData prepared');
-    console.log('   Fields: apikey, language, isoverlayrequired, base64image, filetype');
+    console.log('✅ Request payload prepared');
+    console.log('   Method: URL-encoded form data');
+    console.log('   Fields: apikey, base64image, language, isoverlayrequired');
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), OCR_SETTINGS.REQUEST_TIMEOUT);
 
-    console.log(`⏳ Sending request to OCR.Space (timeout: ${OCR_SETTINGS.REQUEST_TIMEOUT}ms)...`);
+    console.log(`⏳ Sending request to OCR.Space (timeout: ${OCR_SETTINGS.REQUEST_TIMEOUT / 1000}s)...`);
+    console.log('   ⚠️ Please wait - this may take 30-60 seconds for slower networks');
 
     const response = await fetch(OCR_SETTINGS.API_ENDPOINT, {
       method: 'POST',
-      body: formData,
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Accept': 'application/json',
+      },
+      body: params.toString(),
       signal: controller.signal,
     });
 
@@ -196,16 +210,19 @@ export const testOCRConnection = async (): Promise<{ success: boolean; message: 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-    const formData = new FormData();
+    const params = new URLSearchParams();
     const apiKey = process.env.EXPO_PUBLIC_OCR_API_KEY;
     if (apiKey) {
-      formData.append('apikey', apiKey);
+      params.append('apikey', apiKey);
     }
-    formData.append('url', 'https://api.ocr.space/screenshot');
+    params.append('url', 'https://api.ocr.space/screenshot');
 
     const response = await fetch(OCR_SETTINGS.API_ENDPOINT, {
       method: 'POST',
-      body: formData,
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: params.toString(),
       signal: controller.signal,
     });
 
