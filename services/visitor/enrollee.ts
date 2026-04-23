@@ -304,38 +304,102 @@ export const enrolleeService = {
         console.log(`   Record: ${JSON.stringify(visitorData)}`);
       }
 
-      // Create enrollee record
-      console.log('\n📝 Creating enrollee record...');
-      
-      const enrolleePayload = {
-        visitor_id: visitorData.visitor_id,
-        updated_at: new Date().toISOString(),
-      };
-      
-      console.log('   Payload:', JSON.stringify(enrolleePayload));
-
-      const { data: enrolleeRecData, error: enrolleeError } = await supabase
+      // Check if enrollee already exists for this visitor
+      console.log('\n🔍 CHECKING FOR EXISTING ENROLLEE RECORD');
+      const { data: existingEnrollee, error: lookupError } = await supabase
         .from('enrollee')
-        .insert([enrolleePayload])
-        .select()
+        .select('enrollee_id, visitor_id, updated_at')
+        .eq('visitor_id', visitorData.visitor_id)
         .single();
 
-      if (enrolleeError) {
-        console.error('\n❌ ENROLLEE CREATION FAILED');
-        console.error('   Error code:', enrolleeError.code);
-        console.error('   Error message:', enrolleeError.message);
-        console.error('   Error details:', enrolleeError.details);
-        console.error('\n   🔍 DIAGNOSTIC INFO:');
-        console.error(`   - Tried to create enrollee for visitor_id: ${visitorData.visitor_id}`);
-        throw new Error(`Enrollee creation failed: ${enrolleeError.message}`);
-      }
+      let enrolleeRecData: any;
+      
+      if (existingEnrollee) {
+        // Enrollee already exists - return existing record instead of creating duplicate
+        console.log('\n♻️ REUSING EXISTING ENROLLEE RECORD');
+        console.log(`   Enrollee ID: ${existingEnrollee.enrollee_id}`);
+        console.log(`   Visitor ID: ${existingEnrollee.visitor_id}`);
+        console.log(`   Last updated: ${existingEnrollee.updated_at}`);
+        enrolleeRecData = existingEnrollee;
+        console.log('\n✅ Existing enrollee returned - no duplicate created');
+      } else if (lookupError && lookupError.code !== 'PGRST116') {
+        // Some other error occurred (not "no rows found")
+        console.warn('⚠️ Error checking for existing enrollee:', lookupError.message);
+        // Continue with creating new enrollee
+        
+        // Create enrollee record
+        console.log('\n📝 Creating enrollee record...');
+        
+        const enrolleePayload = {
+          visitor_id: visitorData.visitor_id,
+          updated_at: new Date().toISOString(),
+        };
+        
+        console.log('   Payload:', JSON.stringify(enrolleePayload));
 
-      if (!enrolleeRecData || !enrolleeRecData.enrollee_id) {
-        console.error('\n❌ ENROLLEE CREATED BUT NO DATA RETURNED');
-        throw new Error('Enrollee was created but database returned null');
-      }
+        const { data: newEnrolleeRec, error: enrolleeError } = await supabase
+          .from('enrollee')
+          .insert([enrolleePayload])
+          .select()
+          .single();
 
-      console.log(`✅ Enrollee created with ID: ${enrolleeRecData.enrollee_id}`);
+        if (enrolleeError) {
+          console.error('\n❌ ENROLLEE CREATION FAILED');
+          console.error('   Error code:', enrolleeError.code);
+          console.error('   Error message:', enrolleeError.message);
+          console.error('   Error details:', enrolleeError.details);
+          console.error('\n   🔍 DIAGNOSTIC INFO:');
+          console.error(`   - Tried to create enrollee for visitor_id: ${visitorData.visitor_id}`);
+          console.error('   - Possible causes:');
+          console.error('     1. Enrollee already exists for this visitor (unique constraint)');
+          console.error('     2. Database connection issue');
+          console.error('     3. RLS policy blocking INSERT');
+          throw new Error(`Enrollee creation failed: ${enrolleeError.message}`);
+        }
+
+        if (!newEnrolleeRec || !newEnrolleeRec.enrollee_id) {
+          console.error('\n❌ ENROLLEE CREATED BUT NO DATA RETURNED');
+          throw new Error('Enrollee was created but database returned null');
+        }
+
+        enrolleeRecData = newEnrolleeRec;
+        console.log(`✅ New enrollee created with ID: ${enrolleeRecData.enrollee_id}`);
+      } else {
+        // No existing enrollee found (PGRST116 = no rows), create new one
+        // Create enrollee record
+        console.log('\n📝 Creating enrollee record...');
+        
+        const enrolleePayload = {
+          visitor_id: visitorData.visitor_id,
+          updated_at: new Date().toISOString(),
+        };
+        
+        console.log('   Payload:', JSON.stringify(enrolleePayload));
+
+        const { data: newEnrolleeRec, error: enrolleeError } = await supabase
+          .from('enrollee')
+          .insert([enrolleePayload])
+          .select()
+          .single();
+
+        if (enrolleeError) {
+          console.error('\n❌ ENROLLEE CREATION FAILED');
+          console.error('   Error code:', enrolleeError.code);
+          console.error('   Error message:', enrolleeError.message);
+          console.error('   Error details:', enrolleeError.details);
+          console.error('\n   🔍 DIAGNOSTIC INFO:');
+          console.error(`   - Tried to create enrollee for visitor_id: ${visitorData.visitor_id}`);
+          throw new Error(`Enrollee creation failed: ${enrolleeError.message}`);
+        }
+
+        if (!newEnrolleeRec || !newEnrolleeRec.enrollee_id) {
+          console.error('\n❌ ENROLLEE CREATED BUT NO DATA RETURNED');
+          throw new Error('Enrollee was created but database returned null');
+        }
+
+        enrolleeRecData = newEnrolleeRec;
+        console.log(`✅ New enrollee created with ID: ${enrolleeRecData.enrollee_id}`);
+      }
 
       // Create visit record
       console.log('\n🎫 Creating visit record...');
