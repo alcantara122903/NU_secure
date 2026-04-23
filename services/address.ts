@@ -16,7 +16,9 @@ export interface AddressData {
 
 export const addressService = {
   /**
-   * Create a new address record
+   * Create a new address record or return existing if duplicate
+   * First checks if the exact same address already exists (deduplication)
+   * If found, returns existing address_id. If not, creates new record.
    * Returns the address_id for linking to visitors
    */
   async createAddress(addressData: AddressData): Promise<number | null> {
@@ -28,6 +30,33 @@ export const addressService = {
         return null;
       }
 
+      console.log('🔍 Checking for existing address with same details...');
+
+      // STEP 1: Check if address already exists (deduplication)
+      const { data: existingAddresses, error: queryError } = await supabase
+        .from('address')
+        .select('address_id')
+        .eq('house_no', addressData.houseNo || null)
+        .eq('street', addressData.street || null)
+        .eq('barangay', addressData.barangay || null)
+        .eq('city_municipality', addressData.cityMunicipality || null)
+        .eq('province', addressData.province || null)
+        .eq('region', addressData.region || null);
+
+      if (queryError) {
+        console.error('❌ Error checking for existing address:', queryError);
+        // Continue with new creation if check fails
+      }
+
+      // If exact address exists, reuse it
+      if (existingAddresses && existingAddresses.length > 0) {
+        const existingId = existingAddresses[0].address_id;
+        console.log(`✅ Address already exists! Reusing address_id: ${existingId}`);
+        return existingId;
+      }
+
+      // STEP 2: Address doesn't exist, create new one
+      console.log('📝 Creating new address record...');
       const { data, error } = await supabase
         .from('address')
         .insert([
@@ -48,7 +77,7 @@ export const addressService = {
         throw error;
       }
 
-      console.log(`✅ Address created with ID: ${data.address_id}`);
+      console.log(`✅ New address created with ID: ${data.address_id}`);
       return data.address_id;
     } catch (error) {
       console.error('Address service error:', error);
@@ -105,6 +134,50 @@ export const addressService = {
     } catch (error) {
       console.error('Update address error:', error);
       return false;
+    }
+  },
+
+  /**
+   * Find existing address without creating a new one
+   * Useful for checking if an address already exists
+   * Returns address_id if found, null if not found
+   */
+  async findExistingAddress(addressData: AddressData): Promise<number | null> {
+    try {
+      // Don't search if all fields are empty
+      const hasData = Object.values(addressData).some(val => val && val.trim().length > 0);
+      if (!hasData) {
+        console.warn('⚠️ Address data is empty, cannot search');
+        return null;
+      }
+
+      console.log('🔍 Searching for existing address...');
+
+      const { data: existingAddresses, error } = await supabase
+        .from('address')
+        .select('address_id')
+        .eq('house_no', addressData.houseNo || null)
+        .eq('street', addressData.street || null)
+        .eq('barangay', addressData.barangay || null)
+        .eq('city_municipality', addressData.cityMunicipality || null)
+        .eq('province', addressData.province || null)
+        .eq('region', addressData.region || null);
+
+      if (error) {
+        console.error('❌ Error searching for address:', error);
+        return null;
+      }
+
+      if (existingAddresses && existingAddresses.length > 0) {
+        console.log(`✅ Found existing address_id: ${existingAddresses[0].address_id}`);
+        return existingAddresses[0].address_id;
+      }
+
+      console.log('✅ No existing address found');
+      return null;
+    } catch (error) {
+      console.error('Find address error:', error);
+      return null;
     }
   },
 
