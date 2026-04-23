@@ -12,16 +12,6 @@
     "dist": true,
     ".expo": true
   },
-  "json.schemas": [
-    {
-      "fileMatch": ["app.json"],
-      "schema": {
-        "type": "object"
-      }
-    }
-  ],
-  "files.associations": {
-    "app.json": "json"
-  }
+  "json.validate.enable": false
 }
 }
