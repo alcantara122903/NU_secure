@@ -93,8 +93,8 @@ export const enrolleeService = {
       const formattedData = formatParsedData(parsedData);
       const message = getConfidenceMessage(parsedData.confidence);
       
-      const extractedFields = [];
-      const missingFields = [];
+      const extractedFields: string[] = [];
+      const missingFields: string[] = [];
       
       if (formattedData.firstName) extractedFields.push('firstName');
       else missingFields.push('firstName');
@@ -124,7 +124,7 @@ export const enrolleeService = {
         addressCityMunicipality: parsedData.addressCityMunicipality,
         addressProvince: parsedData.addressProvince,
         addressRegion: parsedData.addressRegion,
-        contactNo: parsedData.contactNo || '',
+        contactNo: (parsedData as any).contactNo || '',
         confidence: parsedData.confidence,
         detectedIdType: parsedData.detectedIdType,
         rawOcrText: ocrRawText,

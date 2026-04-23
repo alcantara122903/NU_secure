@@ -201,8 +201,8 @@ export const visitorLookupService = {
 
       if (visits && visits.length > 0) {
         console.log(`✅ Found ${visits.length} visit record(s) for this visitor`);
-        visits.forEach((v, idx) => {
-          console.log(`   [${idx + 1}] ${v.visit_type?.visit_type_name || 'Unknown'} - ${v.entry_time}`);
+        visits.forEach((v: any, idx) => {
+          console.log(`   [${idx + 1}] ${(v.visit_type as any)?.visit_type_name || 'Unknown'} - ${v.entry_time}`);
         });
       } else {
         console.log('✅ No visit history found for this visitor');

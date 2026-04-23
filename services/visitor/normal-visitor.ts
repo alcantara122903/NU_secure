@@ -219,8 +219,8 @@ export const normalVisitorService = {
       const primaryOfficeId = visitorData.selectedOfficeIds[0];
 
       // Attempt insert with retry logic
-      let visitData = null;
-      let visitError = null;
+      let visitData: any = null;
+      let visitError: any = null;
 
       for (let attempt = 1; attempt <= 3; attempt++) {
         console.log(`   Attempt ${attempt}/3...`);
@@ -246,7 +246,7 @@ export const normalVisitorService = {
           break;
         }
 
-        console.log(`   ⚠️ Attempt ${attempt} failed: ${visitError.message}`);
+        console.log(`   ⚠️ Attempt ${attempt} failed: ${(visitError as any)?.message}`);
 
         // On last attempt, try to fetch existing visit by qr_token
         if (attempt === 3) {
@@ -259,7 +259,7 @@ export const normalVisitorService = {
 
           if (existing?.visit_id) {
             console.log(`   ✅ Found existing visit: visit_id=${existing.visit_id}`);
-            visitData = [existing];
+            visitData = [existing] as any;
             visitError = null;
             break;
           }
@@ -272,11 +272,11 @@ export const normalVisitorService = {
       }
 
       if (visitError) {
-        console.error('❌ Visit creation failed:', visitError.message);
+        console.error('❌ Visit creation failed:', (visitError as any)?.message);
         return null;
       }
 
-      const visitId = visitData?.[0]?.visit_id;
+      const visitId = (visitData as any)?.[0]?.visit_id;
       if (!visitId) {
         console.error('❌ No visit ID returned');
         return null;
@@ -295,7 +295,7 @@ export const normalVisitorService = {
       }));
 
       // Attempt insert with retry logic
-      let expectationError = null;
+      let expectationError: any = null;
 
       for (let attempt = 1; attempt <= 3; attempt++) {
         console.log(`   Attempt ${attempt}/3...`);
@@ -311,7 +311,7 @@ export const normalVisitorService = {
           break;
         }
 
-        console.log(`   ⚠️ Attempt ${attempt} failed: ${expectationError.message}`);
+        console.log(`   ⚠️ Attempt ${attempt} failed: ${(expectationError as any)?.message}`);
 
         // Wait before retry
         if (attempt < 3) {
@@ -320,7 +320,7 @@ export const normalVisitorService = {
       }
 
       if (expectationError) {
-        console.error('❌ Office expectation creation failed:', expectationError.message);
+        console.error('❌ Office expectation creation failed:', (expectationError as any)?.message);
         console.warn('⚠️ Visitor and visit records were created, but office route could not be set up');
       } else {
         console.log(`✅ Office expectations created: ${visitorData.selectedOfficeIds.length} office(s) added to route`);
