@@ -428,19 +428,19 @@ export const enrolleeService = {
         console.log(`✅ Visit record created with ID: ${visitData.visit_id}`);
       }
 
-      // Create enrollee_progress records for each active step
-      console.log('\n📊 Creating enrollee progress tracking records...');
+      // Handle progress: Resume if exists, or initialize if new enrollee
+      console.log('\n📊 PROGRESS HANDLING: Resume or Initialize');
       try {
-        const progressRecords = await this.createEnrolleeProgressRecords(enrolleeRecData.enrollee_id);
+        const progressRecords = await this.resumeOrInitializeProgress(enrolleeRecData.enrollee_id);
         if (progressRecords && progressRecords.length > 0) {
-          console.log(`✅ Progress tracking created for ${progressRecords.length} enrollment steps`);
+          console.log(`✅ Progress handled for ${progressRecords.length} enrollment steps`);
         } else if (progressRecords === null) {
           console.warn('⚠️ Progress records is NULL - check logs above for details');
         } else {
           console.warn('⚠️ Progress records returned empty array');
         }
       } catch (progressError) {
-        console.error('❌ ERROR creating progress tracking records:');
+        console.error('❌ ERROR handling progress:');
         console.error('   Error:', progressError);
       }
 
@@ -489,6 +489,166 @@ export const enrolleeService = {
       return data;
     } catch (error) {
       console.error('❌ Error in getEnrolleeById:', error);
+      return null;
+    }
+  },
+
+  /**
+   * Resume or initialize enrollee progress
+   * 
+   * If enrollee already has progress from a previous visit, resume it
+   * If no progress exists, initialize all steps as pending
+   * 
+   * TRANSACTION-SAFE: Checks and creates atomically
+   */
+  async resumeOrInitializeProgress(enrolleeId: number): Promise<any[] | null> {
+    try {
+      console.log(`\n📋 RESUME/INITIALIZE PROGRESS for enrollee_id: ${enrolleeId}`);
+
+      // STEP 1: Check if progress records already exist for this enrollee
+      console.log('   Step 1: Checking for existing progress...');
+      const { data: existingProgress, error: checkError } = await supabase
+        .from('enrollee_progress')
+        .select('progress_id, step_id, completed_at, step_status_id')
+        .eq('enrollee_id', enrolleeId)
+        .order('step_id', { ascending: true });
+
+      if (checkError) {
+        console.error('❌ Error checking progress:', checkError);
+        return null;
+      }
+
+      // STEP 2: If progress exists, return it (RESUME)
+      if (existingProgress && existingProgress.length > 0) {
+        console.log(`\n✅ RESUME MODE: Found ${existingProgress.length} existing progress records`);
+        
+        // Fetch full progress data with step details for resuming
+        const { data: fullProgress, error: fetchError } = await supabase
+          .from('enrollee_progress')
+          .select(`
+            progress_id,
+            enrollee_id,
+            step_id,
+            completed_at,
+            step_status_id,
+            step:enrollee_step(
+              step_id,
+              step_name,
+              step_order,
+              office_id
+            ),
+            status:step_status(
+              step_status_id,
+              step_status_name
+            )
+          `)
+          .eq('enrollee_id', enrolleeId)
+          .order('step_id', { ascending: true });
+
+        if (fetchError) {
+          console.error('❌ Error fetching full progress:', fetchError);
+          return null;
+        }
+
+        // Log progress summary
+        console.log('   Progress Summary:');
+        fullProgress?.forEach((p: any) => {
+          const status = p.completed_at ? '✅ COMPLETED' : '⏳ PENDING';
+          console.log(`     - Step ${p.step?.step_order}: ${p.step?.step_name} [${status}]`);
+        });
+
+        console.log('\n✅ Progress RESUMED - all previous work preserved\n');
+        return fullProgress || [];
+      }
+
+      // STEP 3: No progress exists - INITIALIZE new progress records
+      console.log('   Step 1 Result: No progress found');
+      console.log('\n📊 INITIALIZE MODE: Creating new progress records...');
+
+      // Get pending status ID
+      let pendingStatusId: number | null = null;
+      const { data: allStatuses } = await supabase
+        .from('step_status')
+        .select('step_status_id, step_status_name');
+
+      if (allStatuses && allStatuses.length > 0) {
+        let pendingStatus = allStatuses.find((s: any) => 
+          s.step_status_name?.toLowerCase().includes('pending') || 
+          s.step_status_name?.toLowerCase().includes('not started')
+        );
+        
+        if (!pendingStatus) {
+          pendingStatus = allStatuses[0];
+        }
+        
+        pendingStatusId = pendingStatus.step_status_id;
+        console.log(`   Found step status: ${pendingStatus.step_status_name} (ID: ${pendingStatusId})`);
+      }
+
+      // Fetch all active enrollment steps
+      const { data: steps, error: stepsError } = await supabase
+        .from('enrollee_step')
+        .select('step_id, step_name, step_order, office_id')
+        .eq('is_active', true)
+        .order('step_order', { ascending: true });
+
+      if (stepsError) {
+        console.error('❌ Error fetching enrollment steps:', stepsError);
+        return null;
+      }
+
+      if (!steps || steps.length === 0) {
+        console.warn('⚠️ No active enrollment steps found');
+        return [];
+      }
+
+      console.log(`   Found ${steps.length} active enrollment steps to initialize`);
+
+      // Create progress payloads for all steps
+      const progressPayloads = steps.map((step: any) => ({
+        enrollee_id: enrolleeId,
+        step_id: step.step_id,
+        completed_at: null,
+        step_status_id: pendingStatusId,
+      }));
+
+      // Insert progress records
+      const { data: newProgress, error: insertError } = await supabase
+        .from('enrollee_progress')
+        .insert(progressPayloads)
+        .select(`
+          progress_id,
+          enrollee_id,
+          step_id,
+          completed_at,
+          step_status_id,
+          step:enrollee_step(
+            step_id,
+            step_name,
+            step_order,
+            office_id
+          ),
+          status:step_status(
+            step_status_id,
+            step_status_name
+          )
+        `);
+
+      if (insertError) {
+        console.error('❌ Error creating progress records:', insertError);
+        return null;
+      }
+
+      console.log(`✅ INITIALIZED ${newProgress?.length || 0} progress records`);
+      newProgress?.forEach((p: any) => {
+        console.log(`   - Step ${p.step?.step_order}: ${p.step?.step_name} [⏳ PENDING]`);
+      });
+
+      console.log('\n✅ Progress INITIALIZED - ready to begin enrollment\n');
+      return newProgress || [];
+
+    } catch (error) {
+      console.error('❌ Error in resumeOrInitializeProgress:', error);
       return null;
     }
   },
@@ -700,6 +860,130 @@ export const enrolleeService = {
       return true;
     } catch (error) {
       console.error('❌ Error in updateVisitStatus:', error);
+      return false;
+    }
+  },
+
+  /**
+   * Get next incomplete step for an enrollee
+   * Returns the first step that is not completed (completed_at is null)
+   */
+  async getNextIncompleteStep(enrolleeId: number): Promise<any | null> {
+    try {
+      const { data, error } = await supabase
+        .from('enrollee_progress')
+        .select(`
+          progress_id,
+          step_id,
+          completed_at,
+          step:enrollee_step(
+            step_id,
+            step_name,
+            step_order,
+            office_id
+          )
+        `)
+        .eq('enrollee_id', enrolleeId)
+        .is('completed_at', null)
+        .order('step_id', { ascending: true })
+        .limit(1)
+        .single();
+
+      if (error) {
+        if (error.code === 'PGRST116') {
+          // No rows found - all steps are complete
+          console.log(`✅ All steps completed for enrollee ${enrolleeId}`);
+          return null;
+        }
+        console.error('❌ Error fetching next incomplete step:', error);
+        return null;
+      }
+
+      const stepData = data?.step as any;
+      console.log(`📍 Next incomplete step: ${stepData?.step_name} (Order: ${stepData?.step_order})`);
+      return data;
+    } catch (error) {
+      console.error('❌ Error in getNextIncompleteStep:', error);
+      return null;
+    }
+  },
+
+  /**
+   * Get progress summary for an enrollee
+   * Shows: completed count, pending count, total count
+   * Used for progress bar and UI display
+   */
+  async getProgressSummary(enrolleeId: number): Promise<any | null> {
+    try {
+      const { data: steps, error } = await supabase
+        .from('enrollee_progress')
+        .select(`
+          progress_id,
+          completed_at,
+          step:enrollee_step(step_order)
+        `)
+        .eq('enrollee_id', enrolleeId)
+        .order('step_id', { ascending: true });
+
+      if (error) {
+        console.error('❌ Error fetching progress summary:', error);
+        return null;
+      }
+
+      if (!steps || steps.length === 0) {
+        return {
+          total_steps: 0,
+          completed_steps: 0,
+          pending_steps: 0,
+          progress_percentage: 0,
+          all_completed: false,
+        };
+      }
+
+      const completedCount = steps.filter((s: any) => s.completed_at !== null).length;
+      const totalCount = steps.length;
+      const pendingCount = totalCount - completedCount;
+
+      const summary = {
+        total_steps: totalCount,
+        completed_steps: completedCount,
+        pending_steps: pendingCount,
+        progress_percentage: Math.round((completedCount / totalCount) * 100),
+        all_completed: completedCount === totalCount,
+      };
+
+      console.log(`📊 Progress: ${completedCount}/${totalCount} steps (${summary.progress_percentage}%)`);
+      return summary;
+    } catch (error) {
+      console.error('❌ Error in getProgressSummary:', error);
+      return null;
+    }
+  },
+
+  /**
+   * Mark a step as completed
+   * Sets completed_at timestamp for a progress record
+   */
+  async markStepAsCompleted(progressId: number): Promise<boolean> {
+    try {
+      console.log(`✅ Marking progress ${progressId} as completed...`);
+
+      const { error } = await supabase
+        .from('enrollee_progress')
+        .update({
+          completed_at: new Date().toISOString(),
+        })
+        .eq('progress_id', progressId);
+
+      if (error) {
+        console.error('❌ Error marking step as completed:', error);
+        return false;
+      }
+
+      console.log(`✅ Step marked as completed`);
+      return true;
+    } catch (error) {
+      console.error('❌ Error in markStepAsCompleted:', error);
       return false;
     }
   },
