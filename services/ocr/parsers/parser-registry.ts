@@ -199,14 +199,20 @@ function isValidHouseNumber(text: string): boolean {
  */
 function isLikelyBarangay(text: string): boolean {
   const upper = text.toUpperCase();
+  // Reject very short text (less than 3 characters is too short for a barangay name)
+  if (text.length < 3) {
+    console.log(`[Barangay] ❌ Text too short (${text.length} chars): "${upper}"`);
+    return false;
+  }
   // CRITICAL: Check for barangay keywords FIRST - these are definitive
   if (BARANGAY_KEYWORDS.some(kw => upper.includes(kw))) {
     console.log(`[Barangay] ✅ Keyword match found in "${upper}"`);
     return true;
   }
   // Fallback: Generic pattern for barangay names
-  const words = text.split(/\s+/).length;
-  if (words <= 3 && text.length < 40 && !upper.includes('CITY') && !upper.includes('PROVINCE')) {
+  // STRICTER: Require at least 3 characters AND (2-3 words OR contains a known barangay pattern)
+  const words = text.split(/\s+/).filter(w => w.length > 0).length;
+  if (words >= 1 && words <= 3 && text.length >= 4 && text.length < 40 && !upper.includes('CITY') && !upper.includes('MUNICIPALITY') && !upper.includes('PROVINCE')) {
     console.log(`[Barangay] ✅ Generic pattern match for "${upper}" (${words} words, ${text.length} chars)`);
     return true;
   }
@@ -238,6 +244,11 @@ function hasCorruptedCityKeyword(text: string): boolean {
  */
 function isLikelyCityOrMunicipality(text: string): boolean {
   const upper = text.toUpperCase();
+  // Reject very short text (city/municipality names should be at least 3-4 characters)
+  if (text.length < 3) {
+    console.log(`[City] ❌ Text too short (${text.length} chars): "${upper}"`);
+    return false;
+  }
   // Check for explicit keywords first
   if (upper.includes('CITY') || upper.includes('MUNICIPALITY') || upper.includes('MUNI')) {
     console.log(`[City] ✅ Explicit keyword found in "${upper}"`);
@@ -248,12 +259,12 @@ function isLikelyCityOrMunicipality(text: string): boolean {
     console.log(`[City] ✅ Known city match found in "${upper}"`); 
     return true;
   }
-  // Check for corrupted keywords
-  if (upper.includes('CIT') || upper.includes('CRY') || upper.includes('MUN')) {
+  // Check for corrupted keywords (but require minimum length for safety)
+  if (text.length >= 4 && (upper.includes('CIT') || upper.includes('CRY') || upper.includes('MUN'))) {
     console.log(`[City] ✅ Corrupted keyword found in "${upper}"`);
     return true;
   }
-  console.log(`[City] ❌ Not a city: "${upper}"`);
+  console.log(`[City] ❌ Not a city: "${upper}" (length: ${text.length} chars)`);
   return false;
 }
 

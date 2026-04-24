@@ -2,12 +2,12 @@ import { Colors } from '@/constants/colors';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { cameraService } from '@/services/camera';
 import { officeService } from '@/services/office';
+import { buildQRTicketPayloadV1 } from '@/lib/qr-ticket-payload';
+import { supabase } from '@/services/database';
 import { contractorService, enrolleeService, normalVisitorService } from '@/services/visitor';
 import { runOCRDiagnostics } from '@/utils/diagnostics';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
-import * as Print from 'expo-print';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import * as Sharing from 'expo-sharing';
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -33,7 +33,6 @@ export default function RegisterVisitorScreen() {
   const [step, setStep] = useState(1);
   const [visitorName, setVisitorName] = useState('John Smith');
   const [visitorDepartment, setVisitorDepartment] = useState('Engineering');
-  const [qrCodeData, setQrCodeData] = useState('');
   const [visitorId, setVisitorId] = useState('ID978444');
   const [destinationOffice, setDestinationOffice] = useState('');
   const [selectedDestinationOffices, setSelectedDestinationOffices] = useState<string[]>([]);
@@ -94,10 +93,7 @@ export default function RegisterVisitorScreen() {
   const [passNumber, setPassNumber] = useState('');
   const [controlNumber, setControlNumber] = useState('');
   const [contactNumber, setContactNumber] = useState('');
-  const [enrolleeId, setEnrolleeId] = useState<number | null>(null);
-  const [masterQrCode, setMasterQrCode] = useState('');
   const [isCreatingEnrollee, setIsCreatingEnrollee] = useState(false);
-  const [enrolleeSteps, setEnrolleeSteps] = useState<any[]>([]);
   const [ocrExtractionFailed, setOcrExtractionFailed] = useState(false);
 
   const offices = [
@@ -121,19 +117,6 @@ export default function RegisterVisitorScreen() {
         : [...prev, office]
     );
   };
-
-  // Generate QR code data when reaching step 2 for enrollees
-  useEffect(() => {
-    if (step === 2 && visitorType === 'enrollee' && !qrCodeData) {
-      const enrolleeQRData = btoa(JSON.stringify({
-        visitorName,
-        visitorType: 'enrollee',
-        timestamp: new Date().toISOString(),
-        registrationId: `ENR-${Date.now()}`,
-      }));
-      setQrCodeData(enrolleeQRData);
-    }
-  }, [step, visitorType, qrCodeData, visitorName]);
 
   // Generate pass number and control number when entering Step 2
   useEffect(() => {
@@ -239,10 +222,24 @@ export default function RegisterVisitorScreen() {
         });
 
         if (result) {
-          // Prepare ticket data for display
+          const route = selectedContractorDestinationOffices.map((name, index) => ({
+            order: index + 1,
+            office_id: selectedOfficeIds[index] ?? index,
+            office_name: name,
+          }));
+          const qrPayload = buildQRTicketPayloadV1({
+            kind: 'contractor',
+            qr_token: result.qrToken,
+            visit_id: result.visitId,
+            visitor_id: result.visitorId,
+            control_number: result.controlNumber,
+            route,
+          });
+
           const ticketData = {
-            type: 'contractor',
+            type: 'contractor' as const,
             qrToken: result.qrToken,
+            qrPayload,
             passNumber: result.passNumber,
             controlNumber: result.controlNumber,
             visitorId: result.visitorId,
@@ -255,8 +252,7 @@ export default function RegisterVisitorScreen() {
             offices: selectedContractorDestinationOffices.map((name, index) => ({ id: selectedOfficeIds[index] || index, name })),
           };
 
-          // Navigate to unified QR ticket display
-          router.push({
+          router.replace({
             pathname: '/guard/qr-ticket',
             params: { data: JSON.stringify(ticketData) },
           });
@@ -291,10 +287,24 @@ export default function RegisterVisitorScreen() {
         });
 
         if (result) {
-          // Prepare ticket data for display
+          const route = selectedDestinationOffices.map((name, index) => ({
+            order: index + 1,
+            office_id: selectedOfficeIds[index] ?? index,
+            office_name: name,
+          }));
+          const qrPayload = buildQRTicketPayloadV1({
+            kind: 'normal_visitor',
+            qr_token: result.qrToken,
+            visit_id: result.visitId,
+            visitor_id: result.visitorId,
+            control_number: result.controlNumber,
+            route,
+          });
+
           const ticketData = {
-            type: 'normal',
+            type: 'normal' as const,
             qrToken: result.qrToken,
+            qrPayload,
             passNumber: result.passNumber,
             controlNumber: result.controlNumber,
             visitorId: result.visitorId,
@@ -306,8 +316,7 @@ export default function RegisterVisitorScreen() {
             offices: selectedDestinationOffices.map((name, index) => ({ id: selectedOfficeIds[index] || index, name })),
           };
 
-          // Navigate to unified QR ticket display
-          router.push({
+          router.replace({
             pathname: '/guard/qr-ticket',
             params: { data: JSON.stringify(ticketData) },
           });
@@ -353,23 +362,27 @@ export default function RegisterVisitorScreen() {
     }
   };
 
-  // Fetch enrollee steps from database
-  const fetchEnrolleeSteps = async (enrolleeId: number) => {
+  const handleUploadIdPhoto = async () => {
     try {
-      console.log('📋 Fetching enrollee steps from database...');
-      
-      const steps = await enrolleeService.getEnrolleeSteps(enrolleeId);
+      setIsCapturingIdPhoto(true);
+      console.log('📱 Opening photo library for ID upload');
 
-      if (steps && steps.length > 0) {
-        setEnrolleeSteps(steps);
-        console.log('✅ Enrollee steps loaded from database:', steps);
-      } else {
-        console.warn('⚠️ No enrollee steps found in database');
-        setEnrolleeSteps([]);
+      const result = await cameraService.pickPhoto();
+
+      if (!result.success) {
+        Alert.alert('Upload Error', result.error || 'Failed to upload ID photo');
+        setIsCapturingIdPhoto(false);
+        return;
       }
+
+      console.log('✅ ID photo uploaded successfully');
+      setCapturedIdPhoto(result.base64 || null);
+      setIdPhotoPreview(result.uri || null);
+      setIsCapturingIdPhoto(false);
     } catch (error) {
-      console.error('❌ Error fetching enrollee steps:', error);
-      setEnrolleeSteps([]);
+      console.error('❌ Error uploading ID photo:', error);
+      Alert.alert('Error', 'Failed to upload ID photo. Please try again.');
+      setIsCapturingIdPhoto(false);
     }
   };
 
@@ -605,34 +618,59 @@ export default function RegisterVisitorScreen() {
       }
 
       console.log('✅ Enrollee created:', enrolleeResult.enrollee_id);
-      
-      // Set enrollee ID
-      setEnrolleeId(enrolleeResult.enrollee_id);
 
-      // Fetch enrollee steps from database
-      await fetchEnrolleeSteps(enrolleeResult.enrollee_id);
+      const steps = (await enrolleeService.getEnrolleeSteps(enrolleeResult.enrollee_id)) ?? [];
 
-      // Create Master QR Code data containing all visitor info and visit tracking token
-      const masterQrData = {
-        enrolleeId: enrolleeResult.enrollee_id,
-        visitorId: enrolleeResult.visitor_id,
-        visitId: enrolleeResult.visit_id,
-        qrToken: qrToken,
-        passNumber: pass,
-        controlNumber: control,
-        firstName: extractedFirstName,
-        lastName: extractedLastName,
-        address: extractedAddress,
-        contactNo: contactNumber,
-        registrationDate: new Date().toISOString(),
-        status: 'pending',
-      };
+      let qrPayload: string | undefined;
+      if (enrolleeResult.visit_id && steps && steps.length > 0) {
+        const officeIds = [...new Set(steps.map((s: { office_id?: number }) => s.office_id).filter((id): id is number => id != null))];
+        const { data: officeRows } =
+          officeIds.length > 0
+            ? await supabase.from('office').select('office_id, office_name').in('office_id', officeIds)
+            : { data: [] as { office_id: number; office_name: string }[] };
+        const nameMap = new Map((officeRows || []).map((o) => [o.office_id, o.office_name]));
+        const route = steps.map((s: { office_id: number; step_order?: number; step_name?: string }, i: number) => ({
+          order: s.step_order ?? i + 1,
+          office_id: s.office_id,
+          office_name: (nameMap.get(s.office_id) as string) || s.step_name || `Office ${s.office_id}`,
+        }));
+        qrPayload = buildQRTicketPayloadV1({
+          kind: 'enrollee',
+          qr_token: qrToken,
+          visit_id: enrolleeResult.visit_id,
+          visitor_id: enrolleeResult.visitor_id,
+          control_number: control,
+          route,
+        });
+      }
 
-      // Encode Master QR code data
-      const encodedQrData = btoa(JSON.stringify(masterQrData));
-      setMasterQrCode(encodedQrData);
+      const ticketOffices =
+        steps?.map((s: { office_id: number; step_name?: string; step_order?: number }) => ({
+          id: s.office_id,
+          name: s.step_name || `Step ${s.step_order ?? ''}`,
+        })) ?? [];
 
-      console.log('✅ Enrollee created with Master QR code');
+      router.replace({
+        pathname: '/guard/qr-ticket',
+        params: {
+          data: JSON.stringify({
+            type: 'enrollee',
+            qrToken,
+            qrPayload,
+            passNumber: pass,
+            controlNumber: control,
+            visitorId: enrolleeResult.visitor_id,
+            visitId: enrolleeResult.visit_id,
+            firstName: extractedFirstName,
+            lastName: extractedLastName,
+            contactNo: contactNumber || '',
+            offices: ticketOffices,
+            enrolleeId: enrolleeResult.enrollee_id,
+          }),
+        },
+      });
+
+      console.log('✅ Enrollee created with office-route QR');
       console.log('Enrollee ID:', enrolleeResult.enrollee_id);
       console.log('QR Token (for office scanning):', qrToken);
       console.log('Pass Number:', pass);
@@ -643,315 +681,6 @@ export default function RegisterVisitorScreen() {
       console.error('❌ Error creating enrollee:', error);
       Alert.alert('Error', 'Failed to create enrollee. Please try again.');
       setIsCreatingEnrollee(false);
-    }
-  };
-
-  // Generate HTML content for QR code ticket
-  const generateQRTicketHTML = async () => {
-    try {
-      // Generate QR code URL using online API (no canvas needed)
-      const enrolleeIdStr = String(enrolleeId);
-      console.log('📱 Generating QR code for enrollee ID:', enrolleeIdStr);
-      
-      // Using qrserver.com API to generate QR code
-      const qrCodeImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(enrolleeIdStr)}`;
-      
-      console.log('✅ QR Code URL generated:', qrCodeImageUrl);
-
-      const html = `
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <style>
-              * {
-                margin: 0;
-                padding: 0;
-                box-sizing: border-box;
-              }
-              body {
-                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                background-color: #f8f9fa;
-                padding: 20px;
-              }
-              .ticket {
-                max-width: 700px;
-                margin: 0 auto;
-                background-color: white;
-                padding: 40px 30px;
-                border-radius: 12px;
-                box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-                text-align: center;
-              }
-              .header {
-                font-size: 28px;
-                font-weight: bold;
-                color: #003D99;
-                margin-bottom: 10px;
-                letter-spacing: 1px;
-              }
-              .status {
-                color: #4CAF50;
-                font-size: 14px;
-                font-weight: 600;
-                margin-bottom: 30px;
-              }
-              .qr-section {
-                margin: 40px 0;
-                padding: 30px;
-                background-color: #f5f7fa;
-                border-radius: 10px;
-                border: 2px dashed #003D99;
-              }
-              .qr-label {
-                color: #666;
-                font-size: 13px;
-                margin-bottom: 15px;
-                font-weight: 600;
-                text-transform: uppercase;
-                letter-spacing: 0.5px;
-              }
-              .qr-container {
-                display: flex;
-                justify-content: center;
-                align-items: center;
-                margin: 20px 0;
-                background-color: white;
-                padding: 15px;
-                border-radius: 8px;
-                border: 1px solid #ddd;
-              }
-              .qr-image {
-                width: 250px;
-                height: 250px;
-                display: block;
-              }
-              .qr-note {
-                font-size: 12px;
-                color: #666;
-                margin-top: 15px;
-                font-style: italic;
-              }
-              .enrollee-id {
-                font-size: 20px;
-                font-weight: bold;
-                color: #FFFFFF;
-                background: linear-gradient(135deg, #003D99 0%, #0052CC 100%);
-                padding: 15px 20px;
-                border-radius: 8px;
-                margin: 25px 0;
-                letter-spacing: 1px;
-              }
-              .info-section {
-                margin: 30px 0;
-                text-align: left;
-              }
-              .info-item {
-                margin: 12px 0;
-                padding: 12px 15px;
-                background-color: #f9f9f9;
-                border-left: 4px solid #003D99;
-                border-radius: 4px;
-              }
-              .info-label {
-                font-size: 11px;
-                color: #666;
-                font-weight: 700;
-                text-transform: uppercase;
-                letter-spacing: 0.5px;
-                margin-bottom: 4px;
-              }
-              .info-value {
-                font-size: 15px;
-                color: #333;
-                font-weight: 500;
-              }
-              .footer {
-                font-size: 12px;
-                color: #999;
-                margin-top: 35px;
-                padding-top: 20px;
-                border-top: 1px solid #eee;
-              }
-              .footer p {
-                margin: 6px 0;
-                line-height: 1.5;
-              }
-              .divider {
-                height: 2px;
-                background-color: #e0e0e0;
-                margin: 20px 0;
-              }
-            </style>
-          </head>
-          <body>
-            <div class="ticket">
-              <div class="header">ENROLLMENT PASS</div>
-              <div class="status">✓ Registration Confirmed</div>
-              
-              <div class="qr-section">
-                <div class="qr-label">QR Code - Enrollment Status</div>
-                <div class="qr-container">
-                  <img src="${qrCodeImageUrl}" alt="QR Code for Enrollment" class="qr-image" />
-                </div>
-                <div class="qr-note">Scan this code to check enrollment status at any office</div>
-              </div>
-
-              <div class="enrollee-id">ID: ${enrolleeIdStr}</div>
-
-              <div class="info-section">
-                <div class="info-item">
-                  <div class="info-label">Full Name</div>
-                  <div class="info-value">${extractedFirstName} ${extractedLastName}</div>
-                </div>
-                
-                <div class="info-item">
-                  <div class="info-label">Address</div>
-                  <div class="info-value">${extractedAddress || 'N/A'}</div>
-                </div>
-
-                <div class="info-item">
-                  <div class="info-label">Pass Number</div>
-                  <div class="info-value">${passNumber}</div>
-                </div>
-
-                <div class="info-item">
-                  <div class="info-label">Control Number</div>
-                  <div class="info-value">${controlNumber}</div>
-                </div>
-
-                <div class="info-item">
-                  <div class="info-label">Registration Date</div>
-                  <div class="info-value">${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</div>
-                </div>
-              </div>
-
-              <div class="divider"></div>
-
-              <div class="footer">
-                <p><strong>Important:</strong> This pass is required for enrollment verification.</p>
-                <p>Please present this document at each required office for the enrollment process.</p>
-                <p style="margin-top: 15px; color: #aaa; font-size: 10px;">Issued by NU-SECURE Visitor Management System</p>
-              </div>
-            </div>
-          </body>
-        </html>
-      `;
-      
-      console.log('📄 HTML generated successfully for PDF');
-      return html;
-    } catch (error) {
-      console.error('❌ Error generating QR code:', error);
-      // Fallback HTML without QR code
-      const html = `
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <meta charset="UTF-8">
-            <style>
-              body { font-family: Arial, sans-serif; margin: 20px; background-color: #f8f9fa; }
-              .ticket { max-width: 600px; margin: 0 auto; background-color: white; padding: 30px; border-radius: 10px; }
-              .header { font-size: 24px; font-weight: bold; color: #003D99; margin-bottom: 10px; }
-              .status { color: #4CAF50; font-size: 14px; margin-bottom: 30px; }
-              .enrollee-id { font-size: 18px; font-weight: bold; color: #003D99; background-color: #E3F2FD; padding: 10px; border-radius: 5px; margin: 15px 0; }
-              .info-item { margin: 15px 0; padding: 10px; background-color: #f9f9f9; border-left: 4px solid #003D99; }
-              .error-note { background-color: #fff3cd; border: 1px solid #ffc107; padding: 10px; border-radius: 5px; margin-top: 20px; color: #856404; }
-            </style>
-          </head>
-          <body>
-            <div class="ticket">
-              <div class="header">ENROLLMENT PASS</div>
-              <div class="status">✓ Registration Confirmed</div>
-              <div class="enrollee-id">ID: ${enrolleeId}</div>
-              <div class="info-item"><strong>Name:</strong> ${extractedFirstName} ${extractedLastName}</div>
-              <div class="info-item"><strong>Address:</strong> ${extractedAddress || 'N/A'}</div>
-              <div class="info-item"><strong>Pass Number:</strong> ${passNumber}</div>
-              <div class="info-item"><strong>Control Number:</strong> ${controlNumber}</div>
-              <div class="error-note">Note: QR Code could not be generated. Please contact support if you need the QR code.</div>
-            </div>
-          </body>
-        </html>
-      `;
-      return html;
-    }
-  };
-
-  // Handle Print QR Code
-  const handlePrintQRCode = async () => {
-    try {
-      console.log('🖨️ Preparing to print QR code...');
-      const html = await generateQRTicketHTML();
-      
-      // On web and mobile, generate PDF and open print dialog
-      if (Platform.OS === 'web') {
-        // For web, open print dialog directly
-        try {
-          await Print.printAsync({
-            html: html,
-          });
-          console.log('✅ Print dialog opened');
-          Alert.alert('Success', 'Print dialog opened. Use your browser\'s print function.');
-        } catch (webError) {
-          console.warn('Web print fallback:', webError);
-          // Fallback: generate PDF and download
-          const { uri } = await Print.printToFileAsync({ html });
-          if (await Sharing.isAvailableAsync()) {
-            await Sharing.shareAsync(uri, {
-              mimeType: 'application/pdf',
-              dialogTitle: `Enrollee_${enrolleeId}_QR_Code_Print`,
-            });
-          }
-        }
-      } else {
-        // For mobile, generate PDF then print
-        const { uri } = await Print.printToFileAsync({ html });
-        // Open share dialog so user can print or save
-        if (await Sharing.isAvailableAsync()) {
-          await Sharing.shareAsync(uri, {
-            mimeType: 'application/pdf',
-            dialogTitle: `Print Enrollee_${enrolleeId}_QR_Code`,
-          });
-        } else {
-          await Print.printAsync({ html });
-        }
-        console.log('✅ Print dialog opened');
-        Alert.alert('Success', 'Print dialog opened');
-      }
-    } catch (error) {
-      console.error('❌ Print error:', error);
-      Alert.alert('Print Not Available', 'Please use the Download button to save the file, then print it manually.');
-    }
-  };
-
-  // Handle Download QR Code
-  const handleDownloadQRCode = async () => {
-    try {
-      console.log('📥 Preparing to download QR code...');
-      const html = await generateQRTicketHTML();
-      
-      // Generate PDF
-      const { uri } = await Print.printToFileAsync({
-        html: html,
-      });
-
-      console.log('📄 PDF created at:', uri);
-
-      // Share/Download the PDF
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(uri, {
-          mimeType: 'application/pdf',
-          dialogTitle: `Enrollee_${enrolleeId}_QR_Code.pdf`,
-          UTI: 'com.adobe.pdf',
-        });
-        console.log('✅ Download/Share completed');
-        Alert.alert('Success', 'QR code ticket downloaded/shared successfully');
-      } else {
-        Alert.alert('Info', 'Download not available on this device');
-      }
-    } catch (error) {
-      console.error('❌ Download error:', error);
-      Alert.alert('Error', 'Failed to download QR code. Please try again.');
     }
   };
 
@@ -978,145 +707,6 @@ export default function RegisterVisitorScreen() {
       >
         {step === 3 && (
           <>
-            {masterQrCode ? (
-              <>
-                {/* === QR CODE TICKET DISPLAY === */}
-                <View style={[styles.detailsCard, { backgroundColor: colors.surface }]}>
-                  <Text style={[styles.detailsTitle, { color: colors.text }]}>
-                    Registration Complete ✓
-                  </Text>
-
-                  {visitorType === 'enrollee' && (
-                    <View style={[styles.enrolleeInfoBox, { backgroundColor: colors.background, borderColor: colors.primary, borderWidth: 2 }]}>
-                      <Text style={[styles.enrolleeInfoLabel, { color: colors.textSecondary }]}>
-                        Enrollee ID
-                      </Text>
-                      <Text style={[styles.enrolleeInfoValue, { color: colors.primary }]}>
-                        {enrolleeId}
-                      </Text>
-                    </View>
-                  )}
-
-                  <View style={styles.enrolleeDetailsGrid}>
-                    <View style={styles.enrolleeDetailItem}>
-                      <Text style={[styles.enrolleeDetailLabel, { color: colors.textSecondary }]}>
-                        Name
-                      </Text>
-                      <Text style={[styles.enrolleeDetailValue, { color: colors.text }]}>
-                        {extractedFirstName} {extractedLastName}
-                      </Text>
-                    </View>
-
-                    <View style={styles.enrolleeDetailItem}>
-                      <Text style={[styles.enrolleeDetailLabel, { color: colors.textSecondary }]}>
-                        Type
-                      </Text>
-                      <Text style={[styles.enrolleeDetailValue, { color: colors.text }]}>
-                        {visitorTypeInfo.label}
-                      </Text>
-                    </View>
-                  </View>
-                </View>
-
-                {/* Master QR Code Section */}
-                <View style={[styles.qrCodeContainer, { backgroundColor: colors.surface, borderColor: colors.primary }]}>
-                  <View style={styles.qrCodeBox}>
-                    <Text style={[styles.qrCodeTitle, { color: colors.primary }]}>
-                      QR Ticket
-                    </Text>
-                    <View style={[styles.qrCodePlaceholder, { backgroundColor: colors.background, borderColor: colors.border }]}>
-                      <MaterialIcons name="qr-code-2" size={80} color={colors.primary} />
-                    </View>
-                    
-                    {/* QR Token */}
-                    <View style={[styles.enrolleeInfoBox, { backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border }]}>
-                      <Text style={[styles.enrolleeInfoLabel, { color: colors.textSecondary }]}>
-                        QR Token
-                      </Text>
-                      <Text style={[styles.qrCodeText, { color: colors.text, fontFamily: 'monospace', fontSize: 11 }]} numberOfLines={2}>
-                        {masterQrCode ? masterQrCode.substring(0, 50) + '...' : 'Generating...'}
-                      </Text>
-                    </View>
-
-                    {/* Pass Number */}
-                    <View style={[styles.enrolleeInfoBox, { backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border, marginTop: 8 }]}>
-                      <Text style={[styles.enrolleeInfoLabel, { color: colors.textSecondary }]}>
-                        Pass Number
-                      </Text>
-                      <Text style={[styles.qrCodeText, { color: colors.primary, fontWeight: '700' }]}>
-                        {passNumber || 'Auto-generated'}
-                      </Text>
-                    </View>
-
-                    {/* Control Number */}
-                    <View style={[styles.enrolleeInfoBox, { backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border, marginTop: 8 }]}>
-                      <Text style={[styles.enrolleeInfoLabel, { color: colors.textSecondary }]}>
-                        Control Number
-                      </Text>
-                      <Text style={[styles.qrCodeText, { color: colors.primary, fontWeight: '700' }]}>
-                        {controlNumber || 'Auto-generated'}
-                      </Text>
-                    </View>
-                    
-                    <Text style={[styles.qrCodeLabel, { color: colors.textSecondary }]}>
-                      Scan for visitor information
-                    </Text>
-                  </View>
-
-                  <View style={[styles.qrCodeInfo, { backgroundColor: '#E3F2FD', borderLeftColor: colors.primary, borderLeftWidth: 4 }]}>
-                    <MaterialIcons name="info" size={18} color={colors.primary} />
-                    <Text style={[styles.qrCodeInfoText, { color: colors.primary, marginLeft: 10 }]}>
-                      Offices scan this QR code to log visitor activity.
-                    </Text>
-                  </View>
-                </View>
-
-                {/* Download & Print Buttons */}
-                <View style={styles.actionButtonsContainer}>
-                  {/* Download Button */}
-                  <TouchableOpacity
-                    style={[styles.actionButton, { backgroundColor: '#2196F3', flex: 1, marginRight: 10 }]}
-                    onPress={handleDownloadQRCode}
-                    activeOpacity={0.8}
-                  >
-                    <MaterialIcons name="download" size={22} color="#FFFFFF" />
-                    <Text style={styles.actionButtonText}>Download</Text>
-                  </TouchableOpacity>
-
-                  {/* Print Button */}
-                  <TouchableOpacity
-                    style={[styles.actionButton, { backgroundColor: '#FF9800', flex: 1, marginLeft: 10 }]}
-                    onPress={handlePrintQRCode}
-                    activeOpacity={0.8}
-                  >
-                    <MaterialIcons name="print" size={22} color="#FFFFFF" />
-                    <Text style={styles.actionButtonText}>Print</Text>
-                  </TouchableOpacity>
-                </View>
-
-                {/* Complete Registration Button */}
-                <TouchableOpacity
-                  style={[styles.generateButton, { backgroundColor: '#4CAF50', marginHorizontal: 20 }]}
-                  onPress={() => {
-                    Alert.alert(
-                      'Registration Successful',
-                      `Visitor: ${extractedFirstName} ${extractedLastName}\nType: ${visitorTypeInfo.label}\n\nQR Ticket generated and ready.`,
-                      [
-                        {
-                          text: 'OK',
-                          onPress: () => router.back(),
-                        },
-                      ]
-                    );
-                  }}
-                  activeOpacity={0.8}
-                >
-                  <MaterialIcons name="check-circle" size={28} color="#FFFFFF" />
-                  <Text style={styles.generateButtonText}>Done</Text>
-                </TouchableOpacity>
-              </>
-            ) : (
-              <>
                 {!photoPreview ? (
                   <>
                     {/* Camera Frame Card */}
@@ -1233,8 +823,6 @@ export default function RegisterVisitorScreen() {
                     </View>
                   </>
                 )}
-              </>
-            )}
           </>
         )}
 
@@ -1251,26 +839,44 @@ export default function RegisterVisitorScreen() {
                     Position ID in frame
                   </Text>
                   <Text style={[styles.cameraSubtitle, { color: colors.textSecondary }]}>
-                    Capture clear photo of the visitor's ID document
+                    Capture or upload a clear photo of the visitor&apos;s ID document
                   </Text>
                 </View>
 
-                {/* Capture ID Button */}
-                <TouchableOpacity
-                  style={[styles.captureButton, { backgroundColor: colors.primary }]}
-                  onPress={handleCaptureIdPhoto}
-                  disabled={isCapturingIdPhoto}
-                  activeOpacity={0.8}
-                >
-                  {isCapturingIdPhoto ? (
-                    <ActivityIndicator size="small" color="#FFFFFF" />
-                  ) : (
-                    <>
-                      <MaterialIcons name="photo-camera" size={28} color="#FFFFFF" />
-                      <Text style={styles.captureButtonText}>Capture ID</Text>
-                    </>
-                  )}
-                </TouchableOpacity>
+                {/* Capture ID and Upload Photo Buttons */}
+                <View style={styles.buttonGroup}>
+                  <TouchableOpacity
+                    style={[styles.captureButton, { backgroundColor: colors.primary, flex: 1, marginRight: 10 }]}
+                    onPress={handleCaptureIdPhoto}
+                    disabled={isCapturingIdPhoto}
+                    activeOpacity={0.8}
+                  >
+                    {isCapturingIdPhoto ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <>
+                        <MaterialIcons name="photo-camera" size={28} color="#FFFFFF" />
+                        <Text style={styles.captureButtonText}>Capture ID</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.captureButton, { backgroundColor: '#2196F3', flex: 1, marginLeft: 10 }]}
+                    onPress={handleUploadIdPhoto}
+                    disabled={isCapturingIdPhoto}
+                    activeOpacity={0.8}
+                  >
+                    {isCapturingIdPhoto ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <>
+                        <MaterialIcons name="cloud-upload" size={28} color="#FFFFFF" />
+                        <Text style={styles.captureButtonText}>Upload Photo</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                </View>
 
                 {/* Diagnostic Button */}
                 <TouchableOpacity
@@ -1366,8 +972,6 @@ export default function RegisterVisitorScreen() {
             {visitorType === 'enrollee' ? (
               /* Enrollee Flow - Confirm Info & Generate Master QR Code */
               <>
-                {!masterQrCode ? (
-                  <>
                     {/* Enrollee Information - Always Editable */}
                     <View style={[styles.detailsCard, { backgroundColor: colors.surface }]}>
                       <Text style={[styles.detailsTitle, { color: colors.text }]}>
@@ -1811,208 +1415,6 @@ export default function RegisterVisitorScreen() {
                         <Text style={styles.generateButtonText}>Continue to Photo</Text>
                       </>
                     </TouchableOpacity>
-                  </>
-                ) : (
-                  <>
-                    {/* Master QR Code Display */}
-                    <View style={[styles.detailsCard, { backgroundColor: colors.surface }]}>
-                      <Text style={[styles.detailsTitle, { color: colors.text }]}>
-                        Enrollment Complete ✓
-                      </Text>
-
-                      <View style={[styles.enrolleeInfoBox, { backgroundColor: colors.background, borderColor: colors.primary, borderWidth: 2 }]}>
-                        <Text style={[styles.enrolleeInfoLabel, { color: colors.textSecondary }]}>
-                          Enrollee ID
-                        </Text>
-                        <Text style={[styles.enrolleeInfoValue, { color: colors.primary }]}>
-                          {enrolleeId}
-                        </Text>
-                      </View>
-
-                      <View style={styles.enrolleeDetailsGrid}>
-                        <View style={styles.enrolleeDetailItem}>
-                          <Text style={[styles.enrolleeDetailLabel, { color: colors.textSecondary }]}>
-                            Name
-                          </Text>
-                          <Text style={[styles.enrolleeDetailValue, { color: colors.text }]}>
-                            {extractedFirstName} {extractedLastName}
-                          </Text>
-                        </View>
-
-                        <View style={styles.enrolleeDetailItem}>
-                          <Text style={[styles.enrolleeDetailLabel, { color: colors.textSecondary }]}>
-                            Address
-                          </Text>
-                          <Text style={[styles.enrolleeDetailValue, { color: colors.text }]}>
-                            {extractedAddress}
-                          </Text>
-                        </View>
-                      </View>
-                    </View>
-
-                    {/* Master QR Code Section */}
-                    <View style={[styles.qrCodeContainer, { backgroundColor: colors.surface, borderColor: colors.primary }]}>
-                      <View style={styles.qrCodeBox}>
-                        <Text style={[styles.qrCodeTitle, { color: colors.primary }]}>
-                          Enrollee QR Code
-                        </Text>
-                        <View style={[styles.qrCodePlaceholder, { backgroundColor: colors.background, borderColor: colors.border }]}>
-                          <MaterialIcons name="qr-code-2" size={80} color={colors.primary} />
-                        </View>
-                        
-                        {/* QR Token */}
-                        <View style={[styles.enrolleeInfoBox, { backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border }]}>
-                          <Text style={[styles.enrolleeInfoLabel, { color: colors.textSecondary }]}>
-                            QR Token
-                          </Text>
-                          <Text style={[styles.qrCodeText, { color: colors.text, fontFamily: 'monospace', fontSize: 11 }]} numberOfLines={2}>
-                            {masterQrCode ? masterQrCode.substring(0, 50) + '...' : 'Generating...'}
-                          </Text>
-                        </View>
-
-                        {/* Pass Number */}
-                        <View style={[styles.enrolleeInfoBox, { backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border, marginTop: 8 }]}>
-                          <Text style={[styles.enrolleeInfoLabel, { color: colors.textSecondary }]}>
-                            Pass Number
-                          </Text>
-                          <Text style={[styles.qrCodeText, { color: colors.primary, fontWeight: '700' }]}>
-                            {passNumber || 'Auto-generated'}
-                          </Text>
-                        </View>
-
-                        {/* Control Number */}
-                        <View style={[styles.enrolleeInfoBox, { backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border, marginTop: 8 }]}>
-                          <Text style={[styles.enrolleeInfoLabel, { color: colors.textSecondary }]}>
-                            Control Number
-                          </Text>
-                          <Text style={[styles.qrCodeText, { color: colors.primary, fontWeight: '700' }]}>
-                            {controlNumber || 'Auto-generated'}
-                          </Text>
-                        </View>
-
-                        {/* Enrollee ID */}
-                        <View style={[styles.enrolleeInfoBox, { backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border, marginTop: 8 }]}>
-                          <Text style={[styles.enrolleeInfoLabel, { color: colors.textSecondary }]}>
-                            Enrollee ID
-                          </Text>
-                          <Text style={[styles.qrCodeText, { color: colors.text }]}>
-                            {enrolleeId}
-                          </Text>
-                        </View>
-                        
-                        <Text style={[styles.qrCodeLabel, { color: colors.textSecondary }]}>
-                          Scan for enrollment status
-                        </Text>
-                      </View>
-
-                      <View style={[styles.qrCodeInfo, { backgroundColor: '#E3F2FD', borderLeftColor: colors.primary, borderLeftWidth: 4 }]}>
-                        <MaterialIcons name="info" size={18} color={colors.primary} />
-                        <Text style={[styles.qrCodeInfoText, { color: colors.primary, marginLeft: 10 }]}>
-                          Offices scan this QR code when the enrollee visits. This updates the activity status in real-time.
-                        </Text>
-                      </View>
-                    </View>
-
-                    {/* Enrollment Steps List - From Database */}
-                    <View style={[styles.detailsCard, { backgroundColor: colors.surface }]}>
-                      <Text style={[styles.detailsTitle, { color: colors.text }]}>
-                        Enrollment Status
-                      </Text>
-
-                      <View style={styles.stepsList}>
-                        {enrolleeSteps && enrolleeSteps.length > 0 ? (
-                          enrolleeSteps.map((step, index) => {
-                            const isCompleted = step.status === 'completed';
-                            const bgColor = isCompleted ? '#4CAF50' : '#FF9800';
-                            const statusText = isCompleted ? '✓ Completed' : 'Pending';
-                            const statusColor = isCompleted ? '#4CAF50' : '#FF9800';
-
-                            return (
-                              <View key={index} style={styles.stepsListItem}>
-                                <View style={[styles.stepsListNumber, { backgroundColor: bgColor }]}>
-                                  <MaterialIcons 
-                                    name={isCompleted ? 'check' : 'schedule'} 
-                                    size={20} 
-                                    color="#FFFFFF" 
-                                  />
-                                </View>
-                                <View style={styles.stepsListContent}>
-                                  <Text style={[styles.stepsListTitle, { color: colors.text }]}>
-                                    {step.step_name}
-                                  </Text>
-                                  <Text style={[styles.stepsListStatus, { color: statusColor }]}>
-                                    {statusText}
-                                  </Text>
-                                </View>
-                              </View>
-                            );
-                          })
-                        ) : (
-                          <Text style={[styles.instructionText, { color: colors.textSecondary, marginVertical: 10 }]}>
-                            Loading enrollment steps...
-                          </Text>
-                        )}
-                      </View>
-
-                      {/* Overall Status */}
-                      <View style={[styles.enrolleeInfoBox, { backgroundColor: colors.background, borderColor: colors.primary, borderWidth: 1, marginTop: 16 }]}>
-                        <Text style={[styles.enrolleeInfoLabel, { color: colors.textSecondary }]}>
-                          Overall Status
-                        </Text>
-                        <Text style={[styles.enrolleeInfoValue, { color: colors.primary }]}>
-                          PENDING
-                        </Text>
-                        <Text style={[styles.instructionText, { color: colors.textSecondary, textAlign: 'center', marginTop: 8 }]}>
-                          Updates when offices scan the QR code
-                        </Text>
-                      </View>
-                    </View>
-
-                    {/* Download & Print Buttons */}
-                    <View style={styles.actionButtonsContainer}>
-                      {/* Download Button */}
-                      <TouchableOpacity
-                        style={[styles.actionButton, { backgroundColor: '#2196F3', flex: 1, marginRight: 10 }]}
-                        onPress={handleDownloadQRCode}
-                        activeOpacity={0.8}
-                      >
-                        <MaterialIcons name="download" size={22} color="#FFFFFF" />
-                        <Text style={styles.actionButtonText}>Download</Text>
-                      </TouchableOpacity>
-
-                      {/* Print Button */}
-                      <TouchableOpacity
-                        style={[styles.actionButton, { backgroundColor: '#FF9800', flex: 1, marginLeft: 10 }]}
-                        onPress={handlePrintQRCode}
-                        activeOpacity={0.8}
-                      >
-                        <MaterialIcons name="print" size={22} color="#FFFFFF" />
-                        <Text style={styles.actionButtonText}>Print</Text>
-                      </TouchableOpacity>
-                    </View>
-
-                    {/* Complete Enrollment Button */}
-                    <TouchableOpacity
-                      style={[styles.generateButton, { backgroundColor: '#4CAF50', marginHorizontal: 20 }]}
-                      onPress={() => {
-                        Alert.alert(
-                          'Enrollment Successful',
-                          `Enrollee ${extractedFirstName} ${extractedLastName}\nID: ${enrolleeId}\n\nMaster QR Code generated and ready for office scans.`,
-                          [
-                            {
-                              text: 'OK',
-                              onPress: () => router.back(),
-                            },
-                          ]
-                        );
-                      }}
-                      activeOpacity={0.8}
-                    >
-                      <MaterialIcons name="check-circle" size={24} color="#FFFFFF" />
-                      <Text style={styles.generateButtonText}>Complete & Return</Text>
-                    </TouchableOpacity>
-                  </>
-                )}
               </>
             ) : visitorType === 'contractor' ? (
               /* Contractor Flow - Form Fields */

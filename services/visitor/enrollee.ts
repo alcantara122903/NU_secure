@@ -444,6 +444,10 @@ export const enrolleeService = {
         console.error('   Error:', progressError);
       }
 
+      if (visitData?.visit_id) {
+        await this.syncOfficeExpectationsForEnrolleeVisit(visitData.visit_id, enrolleeRecData.enrollee_id);
+      }
+
       console.log('\n✅ === ENROLLEE CREATION COMPLETED SUCCESSFULLY ===\n');
 
       return {
@@ -463,6 +467,76 @@ export const enrolleeService = {
       console.error('4. Check Supabase RLS policies allow INSERT on visitor table');
       console.error('5. Verify your EXPO_PUBLIC_SUPABASE_ANON_KEY is correct\n');
       return null;
+    }
+  },
+
+  /**
+   * Mirror enrollee step offices into office_expectation so office scanners
+   * use the same route model as normal visitors.
+   */
+  async syncOfficeExpectationsForEnrolleeVisit(visitId: number, enrolleeId: number): Promise<void> {
+    try {
+      const { data: existing } = await supabase
+        .from('office_expectation')
+        .select('expectation_id')
+        .eq('visit_id', visitId)
+        .limit(1);
+
+      if (existing && existing.length > 0) {
+        return;
+      }
+
+      const { data: progressList, error } = await supabase
+        .from('enrollee_progress')
+        .select(
+          `
+          progress_id,
+          step:enrollee_step(step_id, step_order, office_id)
+        `,
+        )
+        .eq('enrollee_id', enrolleeId);
+
+      if (error || !progressList?.length) {
+        console.warn('[syncOfficeExpectationsForEnrolleeVisit] no progress:', error?.message);
+        return;
+      }
+
+      const sorted = [...progressList].sort(
+        (a: any, b: any) => (a.step?.step_order ?? 0) - (b.step?.step_order ?? 0),
+      );
+
+      const rows = sorted
+        .map((row: any, index: number) => {
+          const oid = row.step?.office_id;
+          if (oid == null) {
+            return null;
+          }
+          return {
+            visit_id: visitId,
+            office_id: oid,
+            expected_order: row.step?.step_order ?? index + 1,
+            expectation_status_id: 1,
+            created_at: new Date().toISOString(),
+          };
+        })
+        .filter(Boolean) as Record<string, unknown>[];
+
+      if (!rows.length) {
+        return;
+      }
+
+      const { error: insErr } = await supabase.from('office_expectation').insert(rows);
+      if (insErr) {
+        console.warn('[syncOfficeExpectationsForEnrolleeVisit] insert failed:', insErr.message);
+        return;
+      }
+
+      const firstOfficeId = sorted[0]?.step?.office_id;
+      if (firstOfficeId) {
+        await supabase.from('visit').update({ primary_office_id: firstOfficeId }).eq('visit_id', visitId);
+      }
+    } catch (e) {
+      console.warn('[syncOfficeExpectationsForEnrolleeVisit] unexpected', e);
     }
   },
 

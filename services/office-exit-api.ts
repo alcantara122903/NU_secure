@@ -1,9 +1,13 @@
+import { parseQrTicketRaw } from '@/lib/qr-ticket-payload';
 import { supabase } from '@/services/database/supabase';
+import { resolveValidationStatusId } from '@/services/office-flow/db-status-lookups';
 
 export interface ExitScanRequest {
   qrToken: string;
   rawQrValue: string;
   scannedByUserId: number;
+  /** Gate guard exit does not use `office_staff`; office flow validates destination vs staff office. */
+  scannerContext?: 'office' | 'guard';
 }
 
 export interface ExitScanResult {
@@ -26,6 +30,10 @@ export interface ExitScanResult {
     exitTime: string;
     durationMinutes: number;
     exitStatusId: number | null;
+    /** Resolved from `exit_status` after update. */
+    exitStatusName?: string | null;
+    /** From `visit.destination_text` when set. */
+    destinationText?: string | null;
     officeScanInserted?: boolean;
   };
   debug?: {
@@ -110,37 +118,76 @@ const readErrorContextBody = async (context: unknown): Promise<unknown> => {
   }
 };
 
+const VISIT_EXIT_SELECT =
+  'visit_id, visitor_id, guard_user_id, primary_office_id, purpose_reason, destination_text, entry_time, exit_time, exit_status_id, qr_token, duration_minutes';
+
 const resolveScanByDatabase = async (payload: ExitScanRequest): Promise<ExitScanResult> => {
   const candidates = buildCandidates(payload);
+  const isGuard = payload.scannerContext === 'guard';
 
-  const { data: officeStaff, error: officeStaffError } = await supabase
-    .from('office_staff')
-    .select('staff_id, user_id, office_id, position')
-    .eq('user_id', payload.scannedByUserId)
-    .maybeSingle();
+  let officeStaff: { staff_id: number; user_id: number; office_id: number; position: string | null } | null = null;
 
-  if (officeStaffError || !officeStaff) {
-    return {
-      success: false,
-      message: 'Office account is not linked to this user.',
-      errorCode: 'OFFICE_STAFF_NOT_FOUND',
-      debug: {
-        functionName: OFFICE_EXIT_SCAN_FUNCTION,
-        method: 'POST',
-        requestBody: payload,
-        rawError: officeStaffError?.message,
-      },
-    };
+  if (!isGuard) {
+    const { data: officeStaffRow, error: officeStaffError } = await supabase
+      .from('office_staff')
+      .select('staff_id, user_id, office_id, position')
+      .eq('user_id', payload.scannedByUserId)
+      .maybeSingle();
+
+    if (officeStaffError || !officeStaffRow) {
+      return {
+        success: false,
+        message: 'Office account is not linked to this user.',
+        errorCode: 'OFFICE_STAFF_NOT_FOUND',
+        debug: {
+          functionName: OFFICE_EXIT_SCAN_FUNCTION,
+          method: 'POST',
+          requestBody: payload,
+          rawError: officeStaffError?.message,
+        },
+      };
+    }
+
+    officeStaff = officeStaffRow;
   }
 
   let visit: any | null = null;
   let visitor: any | null = null;
 
+  const v1 = parseQrTicketRaw(payload.rawQrValue.trim());
+  if (v1.payload != null && v1.qr_token) {
+    const { data: visitFromTicket } = await supabase
+      .from('visit')
+      .select(VISIT_EXIT_SELECT)
+      .eq('visit_id', v1.payload.visit_id)
+      .eq('qr_token', v1.qr_token)
+      .is('exit_time', null)
+      .maybeSingle();
+    if (visitFromTicket) {
+      visit = visitFromTicket;
+    }
+  }
+
+  if (visit && !visitor) {
+    const { data: visitVisitor } = await supabase
+      .from('visitor')
+      .select('visitor_id, first_name, last_name, pass_number, control_number')
+      .eq('visitor_id', visit.visitor_id)
+      .maybeSingle();
+    if (visitVisitor) {
+      visitor = visitVisitor;
+    }
+  }
+
   for (const candidate of candidates) {
+    if (visit) {
+      break;
+    }
     const { data: byToken } = await supabase
       .from('visit')
-      .select('visit_id, visitor_id, guard_user_id, primary_office_id, purpose_reason, entry_time, exit_time, exit_status_id, qr_token')
+      .select(VISIT_EXIT_SELECT)
       .eq('qr_token', candidate)
+      .is('exit_time', null)
       .maybeSingle();
 
     if (byToken) {
@@ -168,7 +215,7 @@ const resolveScanByDatabase = async (payload: ExitScanRequest): Promise<ExitScan
       if (visitor) {
         const { data: activeVisit } = await supabase
           .from('visit')
-          .select('visit_id, visitor_id, guard_user_id, primary_office_id, purpose_reason, entry_time, exit_time, exit_status_id, qr_token')
+          .select(VISIT_EXIT_SELECT)
           .eq('visitor_id', visitor.visitor_id)
           .is('exit_time', null)
           .order('entry_time', { ascending: false })
@@ -229,27 +276,36 @@ const resolveScanByDatabase = async (payload: ExitScanRequest): Promise<ExitScan
     .eq('office_id', visit.primary_office_id)
     .maybeSingle();
 
-  const { data: expectations } = await supabase
-    .from('office_expectation')
-    .select('office_id, expected_order, expectation_status_id, arrived_at')
-    .eq('visit_id', visit.visit_id)
-    .order('expected_order', { ascending: true });
+  let isCorrectDestination = true;
+  let destinationStatusLabel = 'Facility exit';
+  let expectedOffice: { office_id: number; office_name: string } | null = null;
 
-  const pendingExpectation =
-    expectations?.find((entry: any) => !entry.arrived_at) ||
-    expectations?.find((entry: any) => entry.expectation_status_id === 1) ||
-    null;
+  if (isGuard) {
+    expectedOffice = destinationOffice;
+  } else {
+    const { data: expectations } = await supabase
+      .from('office_expectation')
+      .select('office_id, expected_order, expectation_status_id, arrived_at')
+      .eq('visit_id', visit.visit_id)
+      .order('expected_order', { ascending: true });
 
-  const expectedOfficeId = pendingExpectation?.office_id ?? visit.primary_office_id;
+    const pendingExpectation =
+      expectations?.find((entry: any) => !entry.arrived_at) ||
+      expectations?.find((entry: any) => entry.expectation_status_id === 1) ||
+      null;
 
-  const { data: expectedOffice } = await supabase
-    .from('office')
-    .select('office_id, office_name')
-    .eq('office_id', expectedOfficeId)
-    .maybeSingle();
+    const expectedOfficeId = pendingExpectation?.office_id ?? visit.primary_office_id;
 
-  const isCorrectDestination = Number(expectedOfficeId) === Number(officeStaff.office_id);
-  const destinationStatusLabel = isCorrectDestination ? 'Correct destination' : 'Wrong destination';
+    const { data: expectedOfficeRow } = await supabase
+      .from('office')
+      .select('office_id, office_name')
+      .eq('office_id', expectedOfficeId)
+      .maybeSingle();
+
+    expectedOffice = expectedOfficeRow;
+    isCorrectDestination = officeStaff ? Number(expectedOfficeId) === Number(officeStaff.office_id) : false;
+    destinationStatusLabel = isCorrectDestination ? 'Correct destination' : 'Wrong destination';
+  }
 
   const { data: guardUser } = await supabase
     .from('users')
@@ -261,33 +317,66 @@ const resolveScanByDatabase = async (payload: ExitScanRequest): Promise<ExitScan
     ? `${guardUser.first_name || ''} ${guardUser.last_name || ''}`.trim() || guardUser.email || null
     : null;
 
-  let officeScanInserted = false;
-  const { data: validationRows } = await supabase
-    .from('validation_status')
-    .select('validation_status_id, status_name')
+  const exitTime = new Date();
+  const entryTime = new Date(visit.entry_time || exitTime.toISOString());
+  const durationMinutes = Math.max(0, Math.floor((exitTime.getTime() - entryTime.getTime()) / 60000));
+
+  const { data: exitStatusRows } = await supabase
+    .from('exit_status')
+    .select('exit_status_id, exit_status_name')
     .limit(20);
 
-  const preferred = (validationRows || []).find((row: any) => {
-    const name = normalize(row.status_name).toLowerCase();
-    return isCorrectDestination
-      ? ['correct', 'valid', 'approved'].includes(name)
-      : ['wrong', 'invalid', 'rejected'].includes(name);
+  const preferredExitStatus = (exitStatusRows || []).find((row: any) => {
+    const name = normalize(row.exit_status_name).toLowerCase();
+    return ['exited', 'completed', 'done'].includes(name);
   });
 
-  const validationStatusId = preferred?.validation_status_id || validationRows?.[0]?.validation_status_id || null;
+  const exitStatusId = preferredExitStatus?.exit_status_id || exitStatusRows?.[0]?.exit_status_id || null;
+  const exitStatusName =
+    (exitStatusRows || []).find((row: { exit_status_id: number }) => row.exit_status_id === exitStatusId)
+      ?.exit_status_name ?? preferredExitStatus?.exit_status_name ?? null;
 
-  const { error: officeScanError } = await supabase
-    .from('office_scan')
-    .insert({
-      visit_id: visit.visit_id,
-      office_id: officeStaff.office_id,
-      scanned_by_user_id: payload.scannedByUserId,
-      scan_time: new Date().toISOString(),
-      validation_status_id: validationStatusId,
-      remarks: isCorrectDestination
-        ? 'Office scan validated: correct destination'
-        : 'Office scan validated: wrong destination',
-    });
+  const { error: visitUpdateError } = await supabase
+    .from('visit')
+    .update({
+      exit_time: exitTime.toISOString(),
+      duration_minutes: durationMinutes,
+      exit_status_id: exitStatusId,
+    })
+    .eq('visit_id', visit.visit_id);
+
+  if (visitUpdateError) {
+    return {
+      success: false,
+      message: 'Failed to update visit exit status.',
+      errorCode: 'VISIT_UPDATE_FAILED',
+      debug: {
+        functionName: OFFICE_EXIT_SCAN_FUNCTION,
+        method: 'POST',
+        requestBody: payload,
+        rawError: visitUpdateError.message,
+      },
+    };
+  }
+
+  let officeScanInserted = false;
+  const validationStatusId = await resolveValidationStatusId({ favorable: isCorrectDestination });
+
+  const scanOfficeId = isGuard ? visit.primary_office_id : officeStaff?.office_id ?? null;
+  const scanRemarks = isGuard
+    ? 'Guard facility exit scan'
+    : isCorrectDestination
+      ? 'Office scan validated: correct destination'
+      : 'Office scan validated: wrong destination';
+
+  const { error: officeScanError } = await supabase.from('office_scan').insert({
+    visit_id: visit.visit_id,
+    office_id: scanOfficeId,
+    scanned_by_user_id: payload.scannedByUserId,
+    scan_time: new Date().toISOString(),
+    validation_status_id: validationStatusId,
+    remarks: scanRemarks,
+  });
 
   if (!officeScanError) {
     officeScanInserted = true;
@@ -307,13 +396,15 @@ const resolveScanByDatabase = async (payload: ExitScanRequest): Promise<ExitScan
       destinationOffice: destinationOffice?.office_name || null,
       expectedOffice: expectedOffice?.office_name || null,
       purposeReason: visit.purpose_reason || null,
+      destinationText: visit.destination_text || null,
       entryTime: visit.entry_time || null,
       registeredBy,
       isCorrectDestination,
       destinationStatusLabel,
-      exitTime: visit.exit_time || new Date().toISOString(),
-      durationMinutes: Number(visit.duration_minutes || 0),
-      exitStatusId: visit.exit_status_id || null,
+      exitTime: exitTime.toISOString(),
+      durationMinutes,
+      exitStatusId,
+      exitStatusName: exitStatusName || null,
       officeScanInserted,
     },
     debug: {
@@ -335,6 +426,10 @@ export const officeExitApiService = {
     console.log(`   Body: ${JSON.stringify(payload, null, 2)}`);
     console.log(`   Raw QR Value: ${payload.rawQrValue}`);
     console.log(`   Parsed QR Value: ${payload.qrToken}`);
+
+    if (payload.scannerContext === 'guard') {
+      return resolveScanByDatabase(payload);
+    }
 
     try {
       const { data, error } = await supabase.functions.invoke<ExitScanResult>(OFFICE_EXIT_SCAN_FUNCTION, {

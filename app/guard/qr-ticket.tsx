@@ -4,20 +4,23 @@
  * Route: app/guard/qr-ticket.tsx
  */
 
-import { useThemeColor } from '@/hooks/use-theme-color';
+import { Colors } from '@/constants/colors';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { MaterialIcons } from '@expo/vector-icons';
 import * as Print from 'expo-print';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
-import { useEffect, useState } from 'react';
-import { Alert, Image, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
+import { Alert, Dimensions, Image, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-type VisitorType = 'enrollee' | 'contractor' | 'normal_visitor';
+type VisitorType = 'enrollee' | 'contractor' | 'normal_visitor' | 'normal';
 
 interface VisitorQRTicketData {
   type: VisitorType;
   qrToken: string;
+  /** JSON v1 payload encoded in the QR image (offices route + ids). Falls back to qrToken when absent. */
+  qrPayload?: string;
   passNumber: string;
   controlNumber: string;
   visitorId: number;
@@ -25,7 +28,7 @@ interface VisitorQRTicketData {
   firstName: string;
   lastName: string;
   contactNo: string;
-  offices: Array<{ id: number; name: string }>;
+  offices: { id: number; name: string }[];
   // Contractor-specific
   contractorId?: number;
   companyName?: string;
@@ -39,33 +42,36 @@ interface VisitorQRTicketData {
 export default function QRTicketScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
+  const colorScheme = useColorScheme() ?? 'light';
+  const colors = Colors[colorScheme];
   const [ticketData, setTicketData] = useState<VisitorQRTicketData | null>(null);
   const [isGenerating, setIsGenerating] = useState(true);
   const [isPrinting, setIsPrinting] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
 
-  const colors = {
-    primary: useThemeColor({}, 'primary'),
-    surface: useThemeColor({}, 'surface'),
-    text: useThemeColor({}, 'text'),
-    textSecondary: useThemeColor({}, 'textSecondary'),
-    border: useThemeColor({}, 'border'),
-    background: useThemeColor({}, 'background'),
-  };
+  const qrDisplaySize = useMemo(
+    () => Math.min(280, Math.round(Dimensions.get('window').width - 72)),
+    []
+  );
+
+  const paramsDataKey = typeof params.data === 'string' ? params.data : params.data?.[0] ?? '';
 
   useEffect(() => {
-    if (params?.data) {
-      try {
-        const data = JSON.parse(params.data as string);
-        setTicketData(data);
-      } catch (error) {
-        console.error('Error parsing ticket data:', error);
-        Alert.alert('Error', 'Failed to load ticket data');
-        router.back();
-      }
+    if (!paramsDataKey) {
+      setIsGenerating(false);
+      return;
     }
-    setIsGenerating(false);
-  }, []);
+    try {
+      const data = JSON.parse(paramsDataKey) as VisitorQRTicketData;
+      setTicketData(data);
+    } catch (error) {
+      console.error('Error parsing ticket data:', error);
+      Alert.alert('Error', 'Failed to load ticket data');
+      router.back();
+    } finally {
+      setIsGenerating(false);
+    }
+  }, [paramsDataKey, router]);
 
   const handlePrintTicket = async () => {
     if (!ticketData) return;
@@ -202,9 +208,13 @@ export default function QRTicketScreen() {
                 margin-bottom: 15px;
               }
               .qr-code { 
-                width: 300px; 
-                height: 300px; 
+                width: 400px; 
+                height: 400px; 
                 margin: 0 auto 15px;
+                padding: 25px;
+                background-color: white;
+                border-radius: 8px;
+                display: block;
               }
               .office-list { 
                 list-style: none; 
@@ -267,13 +277,13 @@ export default function QRTicketScreen() {
 
               <div class="qr-section">
                 <div class="qr-label">Scan QR Code for Verification</div>
-                <img src="https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(ticketData.qrToken)}" alt="QR Code" class="qr-code" />
+                <img src="https://api.qrserver.com/v1/create-qr-code/?size=600x600&margin=30&data=${encodeURIComponent(ticketData.qrPayload ?? ticketData.qrToken)}" alt="QR Code" class="qr-code" />
               </div>
 
               <div class="section">
                 <div class="section-title">QR Token</div>
                 <div class="info-row">
-                  <div class="info-value" style="word-break: break-all; font-family: monospace; font-size: 11px;">${ticketData.qrToken}</div>
+                  <div class="info-value" style="word-break: break-all; font-family: monospace; font-size: 11px;">${(ticketData.qrPayload ?? ticketData.qrToken).substring(0, 400)}${(ticketData.qrPayload ?? ticketData.qrToken).length > 400 ? '…' : ''}</div>
                 </div>
               </div>
 
@@ -286,7 +296,7 @@ export default function QRTicketScreen() {
         </html>
       `;
 
-      const result = await Print.printAsync({
+      await Print.printAsync({
         html: htmlContent,
         printerUrl: undefined,
       });
@@ -435,10 +445,13 @@ export default function QRTicketScreen() {
                 margin-bottom: 15px;
               }
               .qr-image { 
-                max-width: 300px; 
+                max-width: 400px; 
                 height: auto; 
                 display: inline-block;
                 margin: 15px 0;
+                padding: 25px;
+                background-color: white;
+                border-radius: 8px;
               }
               .footer { 
                 text-align: center; 
@@ -482,8 +495,8 @@ export default function QRTicketScreen() {
               
               <div class="qr-section">
                 <div class="qr-label">Scan this code at each office</div>
-                <img src="https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(ticketData.qrToken)}" alt="QR Code" class="qr-image" />
-                <div style="font-size: 10px; color: #666; margin-top: 10px;">Token: ${ticketData.qrToken}</div>
+                <img src="https://api.qrserver.com/v1/create-qr-code/?size=600x600&margin=30&data=${encodeURIComponent(ticketData.qrPayload ?? ticketData.qrToken)}" alt="QR Code" class="qr-image" />
+                <div style="font-size: 10px; color: #666; margin-top: 10px;">${ticketData.qrPayload ? 'Digital ticket (JSON)' : 'Token'}: ${(ticketData.qrPayload ?? ticketData.qrToken).substring(0, 200)}…</div>
               </div>
               
               <div class="section">
@@ -536,9 +549,15 @@ export default function QRTicketScreen() {
   }
 
   const visitorName = `${ticketData.firstName} ${ticketData.lastName}`;
-  const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(
-    ticketData.qrToken
+  const qrEncoded = ticketData.qrPayload ?? ticketData.qrToken;
+  const qrPx = Math.max(200, qrDisplaySize);
+  const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=${qrPx}x${qrPx}&margin=16&data=${encodeURIComponent(
+    qrEncoded
   )}`;
+  const tokenRef =
+    ticketData.qrToken.length > 14
+      ? `…${ticketData.qrToken.slice(-12)}`
+      : ticketData.qrToken;
   
   // Determine type label and success message
   const typeLabel = ticketData.type === 'contractor' ? 'Contractor' : 
@@ -559,30 +578,48 @@ export default function QRTicketScreen() {
 
         {/* Main Ticket Card */}
         <View style={[styles.ticketCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          {/* Success Banner with Type Badge */}
-          <View style={[styles.successBanner, { backgroundColor: '#E8F5E9' }]}>
-            <MaterialIcons name="check-circle" size={24} color="#4CAF50" />
+          <View
+            style={[
+              styles.successBanner,
+              {
+                backgroundColor: colorScheme === 'dark' ? 'rgba(77, 148, 255, 0.12)' : 'rgba(0, 61, 153, 0.06)',
+                borderBottomWidth: StyleSheet.hairlineWidth,
+                borderBottomColor: colors.border,
+              },
+            ]}
+          >
+            <MaterialIcons name="check-circle" size={24} color={colors.primary} />
             <View style={{ flex: 1 }}>
-              <Text style={[styles.successText, { color: '#2E7D32' }]}>{successMessage}</Text>
+              <Text style={[styles.successText, { color: colors.text }]}>{successMessage}</Text>
               <View style={[styles.typeBadge, { backgroundColor: colors.primary }]}>
                 <Text style={styles.typeBadgeText}>{typeLabel}</Text>
               </View>
             </View>
           </View>
 
-          {/* QR Code Section with Visual QR */}
           <View style={[styles.qrSection, { backgroundColor: colors.background, borderColor: colors.border }]}>
-            <Text style={[styles.qrLabel, { color: colors.textSecondary }]}>Scan this code at each office</Text>
+            <Text style={[styles.qrLabel, { color: colors.textSecondary }]}>
+              Present this code at each stop on your route
+            </Text>
             <View style={styles.qrContainer}>
-              <Image source={{ uri: qrCodeUrl }} style={styles.qrImage} />
+              <Image
+                source={{ uri: qrCodeUrl }}
+                style={[styles.qrImage, { width: qrPx, height: qrPx }]}
+              />
             </View>
-            
-            {/* QR Token Display */}
+
             <View style={[styles.tokenBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <Text style={[styles.tokenLabel, { color: colors.textSecondary }]}>QR Token</Text>
-              <Text style={[styles.tokenValue, { color: colors.primary }]} selectable>
-                {ticketData.qrToken}
+              <Text style={[styles.tokenLabel, { color: colors.textSecondary }]}>
+                {ticketData.qrPayload ? 'Token reference (support)' : 'QR token'}
               </Text>
+              <Text style={[styles.tokenValue, { color: colors.primary }]} selectable numberOfLines={2}>
+                {ticketData.qrPayload ? tokenRef : ticketData.qrToken}
+              </Text>
+              {ticketData.qrPayload ? (
+                <Text style={[styles.tokenHint, { color: colors.textSecondary }]}>
+                  The square code carries your visit and route for office check-in.
+                </Text>
+              ) : null}
             </View>
           </View>
 
@@ -614,7 +651,7 @@ export default function QRTicketScreen() {
 
           {/* Contractor-Specific Section */}
           {ticketData.type === 'contractor' && (
-            <View style={styles.contractorSection}>
+            <View style={[styles.contractorSection, { borderTopColor: colors.border }]}>
               <Text style={[styles.sectionTitle, { color: colors.text }]}>Company Information</Text>
               
               {ticketData.companyName && (
@@ -640,22 +677,28 @@ export default function QRTicketScreen() {
             </View>
           )}
 
-          {/* Enrollee-Specific Section */}
-          {ticketData.type === 'enrollee' && ticketData.enrolleeStatus && (
-            <View style={styles.enrolleeSection}>
-              <Text style={[styles.sectionTitle, { color: colors.text }]}>Enrollee Status</Text>
-              <View style={[styles.statusBadge, { backgroundColor: '#E8F5E9', borderColor: '#4CAF50' }]}>
-                <MaterialIcons name="info" size={18} color="#4CAF50" />
-                <Text style={{ color: '#2E7D32', fontWeight: '600', marginLeft: 8 }}>
+          {ticketData.type === 'enrollee' && ticketData.enrolleeStatus ? (
+            <View style={[styles.enrolleeSection, { borderTopColor: colors.border }]}>
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>Enrollee status</Text>
+              <View
+                style={[
+                  styles.statusBadge,
+                  {
+                    backgroundColor: colorScheme === 'dark' ? 'rgba(77, 148, 255, 0.12)' : 'rgba(0, 61, 153, 0.06)',
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <MaterialIcons name="info-outline" size={18} color={colors.primary} />
+                <Text style={{ color: colors.text, fontWeight: '600', marginLeft: 8, flex: 1 }}>
                   {ticketData.enrolleeStatus}
                 </Text>
               </View>
             </View>
-          )}
+          ) : null}
 
-          {/* Destination Offices */}
           <View style={styles.officesSection}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>Destination Offices to Visit</Text>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>Visit route (in order)</Text>
             <View style={[styles.officeList, { borderColor: colors.border }]}>
               {ticketData.offices.map((office, index) => (
                 <View
@@ -677,20 +720,26 @@ export default function QRTicketScreen() {
             </View>
           </View>
 
-          {/* Instructions */}
-          <View style={[styles.instructionsBox, { backgroundColor: '#FFF3E0', borderColor: '#FF9800' }]}>
-            <MaterialIcons name="info" size={20} color="#E65100" />
-            <Text style={[styles.instructionsText, { color: '#E65100' }]}>
-              Please keep this QR code visible. Guards at each office will scan it to validate your visit.
+          <View
+            style={[
+              styles.instructionsBox,
+              {
+                backgroundColor: colorScheme === 'dark' ? 'rgba(77, 148, 255, 0.1)' : 'rgba(0, 61, 153, 0.06)',
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <MaterialIcons name="info-outline" size={20} color={colors.primary} />
+            <Text style={[styles.instructionsText, { color: colors.text }]}>
+              Keep this pass ready. Staff will scan the code at each office to record your visit
+              {ticketData.type === 'enrollee' ? ' along your enrollment route' : ''}.
             </Text>
           </View>
         </View>
 
-        {/* Download & Print Buttons */}
         <View style={styles.actionButtonsContainer}>
-          {/* Download Button */}
           <TouchableOpacity
-            style={[styles.actionButton, { backgroundColor: '#2196F3', flex: 1, marginRight: 10 }]}
+            style={[styles.actionButton, { backgroundColor: colors.primary, flex: 1, marginRight: 10 }]}
             onPress={handleDownloadTicket}
             disabled={isDownloading}
             activeOpacity={0.8}
@@ -701,35 +750,32 @@ export default function QRTicketScreen() {
 
           {/* Print Button */}
           <TouchableOpacity
-            style={[styles.actionButton, { backgroundColor: '#FF9800', flex: 1, marginLeft: 10 }]}
+            style={[
+              styles.actionButton,
+              {
+                backgroundColor: colorScheme === 'dark' ? colors.border : '#E8EEF5',
+                flex: 1,
+                marginLeft: 10,
+              },
+            ]}
             onPress={handlePrintTicket}
             disabled={isPrinting}
             activeOpacity={0.8}
           >
-            <MaterialIcons name="print" size={22} color="#FFFFFF" />
-            <Text style={styles.actionButtonText}>{isPrinting ? 'Printing...' : 'Print'}</Text>
+            <MaterialIcons name="print" size={22} color={colors.primary} />
+            <Text style={[styles.actionButtonText, { color: colors.primary }]}>
+              {isPrinting ? 'Printing...' : 'Print'}
+            </Text>
           </TouchableOpacity>
         </View>
 
-        {/* Complete & Return Button */}
         <TouchableOpacity
-          style={[styles.generateButton, { backgroundColor: '#4CAF50', marginHorizontal: 20 }]}
-          onPress={() => {
-            Alert.alert(
-              'Ticket Saved',
-              `${typeLabel} ticket has been generated and saved.\n\nVisitor: ${visitorName}`,
-              [
-                {
-                  text: 'OK',
-                  onPress: () => router.replace('/guard/dashboard'),
-                },
-              ]
-            );
-          }}
+          style={[styles.generateButton, { backgroundColor: colors.primary, marginHorizontal: 20 }]}
+          onPress={() => router.replace('/guard/dashboard')}
           activeOpacity={0.8}
         >
           <MaterialIcons name="check-circle" size={24} color="#FFFFFF" />
-          <Text style={styles.generateButtonText}>Complete & Return</Text>
+          <Text style={styles.generateButtonText}>Complete & return</Text>
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
@@ -821,13 +867,15 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   qrContainer: {
-    padding: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 24,
+    paddingHorizontal: 24,
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
   },
   qrImage: {
-    width: 300,
-    height: 300,
+    resizeMode: 'contain',
   },
   infoSection: {
     paddingHorizontal: 16,
@@ -874,16 +922,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     gap: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#E0E0E0',
+    borderTopWidth: StyleSheet.hairlineWidth,
     marginTop: 12,
   },
   enrolleeSection: {
     paddingHorizontal: 16,
     paddingVertical: 12,
     gap: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#E0E0E0',
+    borderTopWidth: StyleSheet.hairlineWidth,
     marginTop: 12,
   },
   statusBadge: {
@@ -951,6 +997,12 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     letterSpacing: 0.5,
     fontFamily: 'monospace',
+  },
+  tokenHint: {
+    fontSize: 11,
+    fontWeight: '500',
+    marginTop: 8,
+    lineHeight: 16,
   },
   instructionsBox: {
     flexDirection: 'row',

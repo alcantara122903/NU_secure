@@ -1,15 +1,16 @@
 import { Colors } from '@/constants/colors';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { authSessionService } from '@/services/auth-session';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -67,7 +68,14 @@ export default function DashboardScreen() {
   ];
 
   const handleLogout = () => {
-    router.replace('/(tabs)');
+    try {
+      authSessionService.clearSession();
+      console.log('✅ Session cleared successfully');
+      router.replace('/(tabs)');
+    } catch (error) {
+      console.error('❌ Error clearing session:', error);
+      router.replace('/(tabs)');
+    }
   };
 
   return (
@@ -79,14 +87,12 @@ export default function DashboardScreen() {
           <Text style={styles.headerSubtitle}>{guardName}</Text>
         </View>
         <TouchableOpacity 
-          style={[styles.logoutButtonContainer, { backgroundColor: '#FFFFFF' }]}
+          style={[styles.logoutButtonContainer, { backgroundColor: 'rgba(255, 255, 255, 0.15)' }]}
           onPress={handleLogout}
           activeOpacity={0.8}
         >
-          <View style={styles.exitIconBox}>
-            <Text style={styles.exitArrow}>←</Text>
-          </View>
-          <Text style={[styles.logoutButtonText, { color: '#003D99' }]}>Logout</Text>
+          <MaterialIcons name="logout" size={18} color="#FFFFFF" />
+          <Text style={styles.logoutButtonText}>Logout</Text>
         </TouchableOpacity>
       </View>
 
@@ -229,21 +235,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 10,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 12,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#003D99',
-        shadowOffset: { width: 0, height: 3 },
-        shadowOpacity: 0.25,
-        shadowRadius: 6,
-      },
-      android: {
-        elevation: 4,
-      },
-    }),
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
   },
   exitIconBox: {
     width: 24,
@@ -260,8 +255,9 @@ const styles = StyleSheet.create({
     color: '#003D99',
   },
   logoutButtonText: {
-    fontSize: 15,
-    fontWeight: '700',
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
   scrollContent: {
     paddingHorizontal: 16,

@@ -7,6 +7,7 @@ import type { VisitorRegistrationData } from '@/types/visitor';
 import { addressService, type AddressData } from '../address';
 import { supabase } from '../database/supabase';
 import { uploadFacePhoto } from '../storage/upload';
+import { processOfficeCheckInScan } from '@/services/office-checkin-scan';
 import { visitorLookupService } from './visitor-lookup';
 
 /**
@@ -353,159 +354,23 @@ export const normalVisitorService = {
     expectedOfficeId?: number;
     expectedOfficeName?: string;
   } | null> {
-    try {
-      console.log('\n🔍 === OFFICE SCAN VALIDATION ===\n');
-      console.log(`QR Token: ${qrToken}`);
-      console.log(`Current Office ID: ${currentOfficeId}`);
+    const result = await processOfficeCheckInScan({
+      rawQrValue: qrToken,
+      scanningOfficeId: currentOfficeId,
+      scannedByUserId,
+    });
 
-      // STEP 1: Lookup visit by QR token
-      console.log('\n📝 STEP 1: Looking up visit record...');
-      const { data: visitData, error: visitError } = await supabase
-        .from('visit')
-        .select('visit_id, visitor_id, primary_office_id')
-        .eq('qr_token', qrToken)
-        .single();
-
-      if (visitError || !visitData) {
-        console.error('❌ Visit not found:', visitError?.message);
-        return null;
-      }
-
-      const { visit_id: visitId, visitor_id: visitorId } = visitData;
-      console.log(`✅ Visit found: visit_id=${visitId}, visitor_id=${visitorId}`);
-
-      // STEP 2: Get visitor info
-      console.log('\n📝 STEP 2: Fetching visitor information...');
-      const { data: visitor, error: visitorError } = await supabase
-        .from('visitor')
-        .select('first_name, last_name, pass_number, control_number')
-        .eq('visitor_id', visitorId)
-        .single();
-
-      if (visitorError || !visitor) {
-        console.error('❌ Visitor not found');
-        return null;
-      }
-
-      const visitorName = `${visitor.first_name} ${visitor.last_name}`;
-      console.log(`✅ Visitor: ${visitorName} (Pass: ${visitor.pass_number}, Ctrl: ${visitor.control_number})`);
-
-      // STEP 3: Get next expected office from route
-      console.log('\n📝 STEP 3: Checking expected office...');
-      const { data: expectations, error: expError } = await supabase
-        .from('office_expectation')
-        .select('expectation_id, office_id, expected_order, expectation_status_id')
-        .eq('visit_id', visitId)
-        .order('expected_order', { ascending: true });
-
-      if (expError || !expectations || expectations.length === 0) {
-        console.error('❌ No office expectations found');
-        return null;
-      }
-
-      // Find next unvisited office
-      let nextExpectation = expectations.find((exp: any) => exp.expectation_status_id === 1); // "Expected"
-      if (!nextExpectation) {
-        console.log('⚠️ All offices already visited');
-        nextExpectation = expectations[expectations.length - 1]; // Show last expected
-      }
-
-      const expectedOfficeId = nextExpectation.office_id;
-      console.log(`Expected office_id: ${expectedOfficeId}, Current office_id: ${currentOfficeId}`);
-
-      // Get office names
-      const { data: currentOffice } = await supabase
-        .from('office')
-        .select('office_name')
-        .eq('office_id', currentOfficeId)
-        .single();
-
-      const { data: expectedOffice } = await supabase
-        .from('office')
-        .select('office_name')
-        .eq('office_id', expectedOfficeId)
-        .single();
-
-      const isCorrect = currentOfficeId === expectedOfficeId;
-      const validationStatusId = isCorrect ? 1 : 2; // 1=Correct, 2=Wrong (verify with your DB)
-
-      console.log(`\n📊 Validation Result: ${isCorrect ? '✅ CORRECT' : '❌ WRONG'}`);
-
-      // STEP 4: Create office_scan record
-      console.log('\n📝 STEP 4: Recording scan...');
-      const { error: scanError } = await supabase
-        .from('office_scan')
-        .insert([{
-          visit_id: visitId,
-          office_id: currentOfficeId,
-          scanned_by_user_id: scannedByUserId,
-          scan_time: new Date().toISOString(),
-          validation_status_id: validationStatusId,
-        }]);
-
-      if (scanError) {
-        console.error('❌ Scan recording failed:', scanError.message);
-        return null;
-      }
-
-      console.log('✅ Scan recorded');
-
-      // STEP 5: If wrong office, create alert
-      if (!isCorrect) {
-        console.log('\n📝 STEP 5: Creating alert for wrong office...');
-        const { error: alertError } = await supabase
-          .from('alerts')
-          .insert([{
-            visit_id: visitId,
-            visitor_id: visitorId,
-            alert_type: 'Wrong Office',
-            severity: 'High',
-            message: `${visitorName} scanned at wrong office. Expected: ${expectedOffice?.office_name}, Got: ${currentOffice?.office_name}`,
-            status: 'Unresolved',
-            created_at: new Date().toISOString(),
-          }]);
-
-        if (alertError) {
-          console.warn('⚠️ Alert creation failed:', alertError.message);
-        } else {
-          console.log('✅ Alert created');
-        }
-      } else {
-        // Update office_expectation to mark as arrived
-        console.log('\n📝 Updating expectation status...');
-        const { error: updateError } = await supabase
-          .from('office_expectation')
-          .update({
-            expectation_status_id: 2, // "Arrived" status
-            arrived_at: new Date().toISOString(),
-          })
-          .eq('expectation_id', nextExpectation.expectation_id);
-
-        if (updateError) {
-          console.warn('⚠️ Update failed:', updateError.message);
-        } else {
-          console.log('✅ Expectation updated to "Arrived"');
-        }
-      }
-
-      const message = isCorrect
-        ? `✅ CORRECT: ${visitorName} is in the right place`
-        : `❌ WRONG OFFICE: ${visitorName} should be at "${expectedOffice?.office_name}" (not here)`;
-
-      console.log(`\n✅ === SCAN VALIDATION COMPLETE ===\n`);
-
-      return {
-        isCorrect,
-        message,
-        visitorName,
-        passNumber: visitor.pass_number,
-        controlNumber: visitor.control_number,
-        expectedOfficeId,
-        expectedOfficeName: expectedOffice?.office_name,
-      };
-    } catch (error) {
-      console.error('❌ SCAN VALIDATION ERROR:', error);
+    if (!result.success) {
       return null;
     }
+
+    return {
+      isCorrect: result.authorized,
+      message: result.message,
+      visitorName: result.visitorName || 'Visitor',
+      passNumber: result.passNumber || '',
+      controlNumber: result.controlNumber || '',
+      expectedOfficeName: result.expectedOfficeName,
+    };
   },
 };

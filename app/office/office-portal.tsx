@@ -163,7 +163,35 @@ export default function OfficePortalScreen() {
       return;
     }
 
-    router.push('/office/exit-scan');
+    router.push('/office/office-scan');
+  };
+
+  const handleLogout = () => {
+    Alert.alert(
+      'Logout',
+      'Are you sure you want to logout?',
+      [
+        {
+          text: 'Cancel',
+          onPress: () => {},
+          style: 'cancel',
+        },
+        {
+          text: 'Logout',
+          onPress: () => {
+            try {
+              authSessionService.clearSession();
+              console.log('✅ Session cleared successfully');
+              router.replace('/(tabs)');
+            } catch (error) {
+              console.error('❌ Error clearing session:', error);
+              router.replace('/(tabs)');
+            }
+          },
+          style: 'destructive',
+        },
+      ]
+    );
   };
 
   return (
@@ -178,8 +206,13 @@ export default function OfficePortalScreen() {
               <Text style={styles.headerSubtitle}>{officeData.department}</Text>
             </View>
           </View>
-          <TouchableOpacity onPress={() => router.back()} style={styles.closeButton}>
-            <MaterialIcons name="close" size={24} color="#FFFFFF" />
+          <TouchableOpacity 
+            onPress={handleLogout} 
+            style={[styles.logoutButton, { backgroundColor: 'rgba(255, 255, 255, 0.2)' }]}
+            activeOpacity={0.8}
+          >
+            <MaterialIcons name="logout" size={20} color="#FFFFFF" />
+            <Text style={styles.logoutButtonText}>Logout</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -248,7 +281,7 @@ export default function OfficePortalScreen() {
         >
           <MaterialIcons name="qr-code-2" size={24} color="#FFFFFF" />
           <Text style={styles.scanButtonText}>
-            Open Exit QR Scanner
+            Tap to Scan QR Code
           </Text>
         </TouchableOpacity>
 
@@ -278,7 +311,7 @@ export default function OfficePortalScreen() {
               <MaterialIcons name="groups" size={24} color="#28A745" />
             </View>
             <Text style={[styles.statLabel, { color: colors.textSecondary }]}>
-              Today's Visitors
+              Today&apos;s Visitors
             </Text>
             <Text style={[styles.statValue, { color: colors.text }]}>
               {officeData.todayVisitors}
@@ -353,8 +386,18 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#E0E0E0',
   },
-  closeButton: {
-    padding: 8,
+  logoutButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  logoutButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
   scrollContent: {
     paddingHorizontal: 16,
