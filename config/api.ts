@@ -1,7 +1,16 @@
 // Backend API Configuration
-// Update API_URL with your computer's IP address
+// Set EXPO_PUBLIC_API_URL to the backend you actually want to call.
+// The exit scan flow no longer uses a local PC IP or Laravel endpoint.
 
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://192.168.1.100:3000';
+const rawApiBaseUrl = process.env.EXPO_PUBLIC_API_URL?.trim() || '';
+
+const normalizeBaseUrl = (baseUrl: string): string => baseUrl.replace(/\/+$/, '');
+
+const API_BASE_URL = normalizeBaseUrl(rawApiBaseUrl);
+
+if (!API_BASE_URL) {
+  console.error('❌ EXPO_PUBLIC_API_URL is not configured.');
+}
 
 export const API_CONFIG = {
   BASE_URL: API_BASE_URL,

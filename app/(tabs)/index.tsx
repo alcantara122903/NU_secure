@@ -1,10 +1,11 @@
 import { Colors } from '@/constants/colors';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { authService } from '@/services/auth';
+import { authSessionService } from '@/services/auth-session';
 import type { AuthStatus } from '@/types/auth';
 import { validateLoginForm } from '@/utils/validation';
 import { useRouter } from 'expo-router';
-import React, { useCallback, useState } from 'react';
+import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -50,6 +51,14 @@ export default function LoginScreen() {
       });
 
       if (response.success) {
+        if (response.user) {
+          authSessionService.setSession({
+            token: response.token,
+            user: response.user,
+            userProfile: response.userProfile,
+          });
+        }
+
         setStatus('success');
         // Navigate to dashboard based on role from database
         setTimeout(() => {
