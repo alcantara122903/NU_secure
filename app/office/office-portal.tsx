@@ -1,17 +1,18 @@
 import { Colors } from '@/constants/colors';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { enrolleeService } from '@/services/enrollee';
+import { authSessionService } from '@/services/auth-session';
+import { supabase } from '@/services/database';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useRouter } from 'expo-router';
-import React, { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
-    Alert,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  Alert,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -20,18 +21,18 @@ export default function OfficePortalScreen() {
   const colors = Colors[colorScheme || 'light'];
   const router = useRouter();
 
-  const [isScanning, setIsScanning] = useState(false);
-  const [scannedVisitData, setScannedVisitData] = useState<any | null>(null);
-
-  const officeData = {
-    officeName: 'Office Portal',
-    department: 'Human Resources',
-    employeeName: 'Sarah Johnson',
-    position: 'HR Manager',
-    todayVisitors: 3,
+  const [loadingOfficeData, setLoadingOfficeData] = useState(true);
+  const [officeDataError, setOfficeDataError] = useState<string | null>(null);
+  const [officeData, setOfficeData] = useState({
+    officeName: '',
+    department: '',
+    employeeName: '',
+    position: '',
+    todayVisitors: 0,
     pendingScans: 0,
-    expectedVisitors: 5,
-  };
+    expectedVisitors: 0,
+    officeId: null as number | null,
+  });
 
   const quickTips = [
     'Ask visitor to show their QR ticket',
@@ -40,66 +41,129 @@ export default function OfficePortalScreen() {
     'Audio feedback sounds once verified',
   ];
 
-  const handleScanQR = async () => {
+  const loadOfficeDashboardData = useCallback(async () => {
     try {
-      // In a real implementation, this would use expo-barcode-scanner
-      // For now, we accept a QR token parameter for testing
-      const qrToken = undefined; // In production, this would come from barcode scanner
-      
-      if (!qrToken) {
-        // TODO: Integrate real barcode scanner
-        Alert.alert(
-          'QR Scanner',
-          'In production, this would use the device camera to scan QR codes.'
-        );
+      setLoadingOfficeData(true);
+      setOfficeDataError(null);
+
+      const userId = authSessionService.getCurrentUserId();
+      if (!userId) {
+        setOfficeDataError('Session not found. Please log in again.');
         return;
       }
 
-      setIsScanning(true);
-      console.log('📱 Scanning QR code:', qrToken);
+      const session = authSessionService.getSession();
 
-      // Fetch visit data by QR token
-      const visitData = await enrolleeService.getVisitByQRToken(qrToken);
+      const { data: userRow, error: userError } = await supabase
+        .from('users')
+        .select('user_id, first_name, last_name, email, role_id, status')
+        .eq('user_id', userId)
+        .maybeSingle();
 
-      if (!visitData) {
-        setIsScanning(false);
-        Alert.alert(
-          'QR Code Not Found',
-          'This QR code is not registered in the system. Please ask the visitor to verify their QR code.',
-          [{ text: 'Try Again' }]
-        );
+      if (userError) {
+        console.error('❌ Failed to fetch users row:', userError);
+        setOfficeDataError('Could not load account profile. Please try again.');
         return;
       }
 
-      console.log('✅ Visit found:', visitData);
-      setScannedVisitData(visitData);
-      setIsScanning(false);
+      const { data: staffRow, error: staffError } = await supabase
+        .from('office_staff')
+        .select('staff_id, user_id, office_id, position')
+        .eq('user_id', userId)
+        .maybeSingle();
 
-      // Navigate to visitor info with the scanned data
-      router.push({
-        pathname: '/office/visitor-info',
-        params: {
-          visitId: String(visitData.visitId),
-          qrToken: visitData.qrToken,
-          visitorName: `${visitData.visitor?.first_name || ''} ${visitData.visitor?.last_name || ''}`,
-          visitorId: String(visitData.visitor?.visitor_id),
-          address: visitData.visitor?.address,
-          contactNo: visitData.visitor?.contact_no,
-          passNumber: visitData.visitor?.pass_number,
-          enrolleeId: String(visitData.enrolleeId || ''),
-          visitStatus: visitData.visitStatus,
-          enrolleeStatus: visitData.enrollee?.enrollee_status,
-        },
+      if (staffError) {
+        console.error('❌ Failed to fetch office staff mapping:', staffError);
+        if (staffError.code === 'PGRST205') {
+          setOfficeDataError('Office staff table is not available in Supabase schema cache.');
+        } else {
+          setOfficeDataError('Could not load office staff mapping. Please try again.');
+        }
+        return;
+      }
+
+      if (!staffRow) {
+        setOfficeDataError('No office staff account is linked to this user.');
+        return;
+      }
+
+      const { data: officeRow, error: officeError } = await supabase
+        .from('office')
+        .select('office_id, office_name, floor, is_active')
+        .eq('office_id', staffRow.office_id)
+        .maybeSingle();
+
+      if (officeError) {
+        console.error('❌ Failed to fetch office details:', officeError);
+        setOfficeDataError('Could not load office details. Please try again.');
+        return;
+      }
+
+      const now = new Date();
+      const startOfDay = new Date(now);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(now);
+      endOfDay.setHours(23, 59, 59, 999);
+
+      const [todayVisitorsRes, pendingScansRes, expectedVisitorsRes] = await Promise.all([
+        supabase
+          .from('visit')
+          .select('visit_id', { count: 'exact', head: true })
+          .eq('primary_office_id', staffRow.office_id)
+          .gte('entry_time', startOfDay.toISOString())
+          .lte('entry_time', endOfDay.toISOString()),
+        supabase
+          .from('office_expectation')
+          .select('expectation_id', { count: 'exact', head: true })
+          .eq('office_id', staffRow.office_id)
+          .eq('expectation_status_id', 1),
+        supabase
+          .from('office_expectation')
+          .select('expectation_id', { count: 'exact', head: true })
+          .eq('office_id', staffRow.office_id),
+      ]);
+
+      if (todayVisitorsRes.error || pendingScansRes.error || expectedVisitorsRes.error) {
+        console.error('❌ Failed to fetch office stats:', {
+          todayVisitorsError: todayVisitorsRes.error,
+          pendingScansError: pendingScansRes.error,
+          expectedVisitorsError: expectedVisitorsRes.error,
+        });
+        setOfficeDataError('Could not load office statistics. Please try again.');
+        return;
+      }
+
+      const employeeName = `${userRow?.first_name || session?.userProfile?.first_name || ''} ${userRow?.last_name || session?.userProfile?.last_name || ''}`.trim();
+
+      setOfficeData({
+        officeName: officeRow?.office_name || 'Office',
+        department: officeRow?.office_name || 'Office',
+        employeeName: employeeName || userRow?.email || session?.userProfile?.email || 'Office Staff',
+        position: staffRow.position || 'Office Staff',
+        todayVisitors: todayVisitorsRes.count || 0,
+        pendingScans: pendingScansRes.count || 0,
+        expectedVisitors: expectedVisitorsRes.count || 0,
+        officeId: staffRow.office_id,
       });
     } catch (error) {
-      console.error('❌ Error scanning QR code:', error);
-      setIsScanning(false);
-      Alert.alert(
-        'Scan Error',
-        'Failed to scan QR code. Please try again.',
-        [{ text: 'OK' }]
-      );
+      console.error('❌ Error loading office dashboard data:', error);
+      setOfficeDataError('An unexpected error occurred while loading office data.');
+    } finally {
+      setLoadingOfficeData(false);
     }
+  }, []);
+
+  useEffect(() => {
+    loadOfficeDashboardData();
+  }, [loadOfficeDashboardData]);
+
+  const handleScanQR = () => {
+    if (loadingOfficeData || officeDataError) {
+      Alert.alert('Office data not ready', 'Please wait for office profile data before scanning.');
+      return;
+    }
+
+    router.push('/office/exit-scan');
   };
 
   return (
@@ -124,6 +188,29 @@ export default function OfficePortalScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
+        {loadingOfficeData ? (
+          <View style={[styles.stateCard, { backgroundColor: colors.surface }]}>
+            <Text style={[styles.stateTitle, { color: colors.text }]}>Loading office data...</Text>
+            <Text style={[styles.stateSubtitle, { color: colors.textSecondary }]}>Fetching your account profile and dashboard stats.</Text>
+          </View>
+        ) : null}
+
+        {!loadingOfficeData && officeDataError ? (
+          <View style={[styles.stateCard, { backgroundColor: colors.surface }]}>
+            <Text style={[styles.stateTitle, { color: colors.text }]}>Unable to load office data</Text>
+            <Text style={[styles.stateSubtitle, { color: colors.textSecondary }]}>{officeDataError}</Text>
+            <TouchableOpacity
+              style={[styles.retryButton, { backgroundColor: colors.primary }]}
+              onPress={loadOfficeDashboardData}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.retryButtonText}>Retry</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
+        {!loadingOfficeData && !officeDataError ? (
+          <>
         {/* Employee Info Card */}
         <View style={[styles.employeeCard, { backgroundColor: colors.surface }]}>
           <View style={styles.employeeAvatar}>
@@ -157,11 +244,11 @@ export default function OfficePortalScreen() {
           style={[styles.scanButton, { backgroundColor: colors.primary }]}
           onPress={handleScanQR}
           activeOpacity={0.8}
-          disabled={isScanning}
+          disabled={loadingOfficeData || !!officeDataError}
         >
           <MaterialIcons name="qr-code-2" size={24} color="#FFFFFF" />
           <Text style={styles.scanButtonText}>
-            {isScanning ? 'Scanning...' : ' to Scan QR TapCode'}
+            Open Exit QR Scanner
           </Text>
         </TouchableOpacity>
 
@@ -226,6 +313,8 @@ export default function OfficePortalScreen() {
             </Text>
           </View>
         </View>
+          </>
+        ) : null}
       </ScrollView>
     </SafeAreaView>
   );
@@ -270,6 +359,44 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: 16,
     paddingVertical: 16,
+  },
+  stateCard: {
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.08,
+        shadowRadius: 3,
+      },
+      android: {
+        elevation: 2,
+      },
+    }),
+  },
+  stateTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    marginBottom: 6,
+  },
+  stateSubtitle: {
+    fontSize: 13,
+    fontWeight: '500',
+    lineHeight: 18,
+  },
+  retryButton: {
+    marginTop: 12,
+    alignSelf: 'flex-start',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 13,
   },
   employeeCard: {
     flexDirection: 'row',

@@ -7,7 +7,8 @@
 
 **2. Update API Config:**
 - Edit `config/api.ts`
-- Replace `192.168.1.100` with your actual IP
+- Set `EXPO_PUBLIC_API_URL` in `.env.local` to your PC's LAN IPv4 address
+- Use the same port Laravel is actually listening on
 
 ```typescript
 const API_BASE_URL = 'http://YOUR_IP:3000';
@@ -15,19 +16,37 @@ const API_BASE_URL = 'http://YOUR_IP:3000';
 
 **3. Ensure Backend is Running:**
 ```bash
-cd backend
-npm run dev
+php artisan serve --host=0.0.0.0 --port=3000
 ```
-Should show: `🚀 Backend running on http://0.0.0.0:3000`
+If you keep Laravel on the default port instead, use `--port=8000` and update `EXPO_PUBLIC_API_URL` to match.
 
-**4. Run Expo on Phone:**
+**4. Test Connectivity First:**
+Add a temporary route that returns JSON:
+
+```php
+Route::get('/test', function () {
+  return response()->json([
+    'success' => true,
+    'message' => 'Laravel API reachable',
+    'timestamp' => now()->toDateTimeString(),
+  ]);
+});
+```
+
+From the phone, open `http://YOUR_PC_IP:3000/api/test` in the browser or call it from the app.
+
+**5. Run Expo on Phone:**
 ```bash
 cd Nu_secure
 npx expo start
 ```
 Scan QR code on your phone
 
-**5. Phone Must Be on Same WiFi Network**
+**6. Phone Must Be on Same WiFi Network**
+
+**7. Android HTTP Note:**
+- If your API is plain `http://`, make sure the Android app allows cleartext traffic.
+- This repo now sets `android.usesCleartextTraffic = true` in `app.json`.
 
 ---
 

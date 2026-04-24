@@ -1,244 +1,139 @@
 import { Colors } from '@/constants/colors';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { enrolleeService } from '@/services/enrollee';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useState } from 'react';
-import {
-  Alert,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+
+const formatDateTime = (value: string): string => {
+  if (!value) {
+    return '(not available)';
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return date.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+};
 
 export default function VisitorInfoScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme || 'light'];
   const router = useRouter();
   const params = useLocalSearchParams();
-  const [isUpdating, setIsUpdating] = useState(false);
 
-  // Get data from route params (passed from office portal after QR scan)
-  const visitorName = (params.visitorName as string) || 'John Anderson';
-  const visitorId = (params.visitorId as string) || 'ID12345';
-  const address = (params.address as string) || '';
-  const contactNo = (params.contactNo as string) || '';
+  const visitorName = (params.visitorName as string) || '(visitor not found)';
+  const visitorId = (params.visitorId as string) || '';
   const passNumber = (params.passNumber as string) || '';
-  const visitId = (params.visitId as string) || '';
-  const visitStatus = (params.visitStatus as string) || 'pending';
-  const enrolleeStatus = (params.enrolleeStatus as string) || 'pending';
+  const destinationOffice = (params.destinationOffice as string) || '(not available)';
+  const expectedOffice = (params.expectedOffice as string) || '';
+  const purposeReason = (params.purposeReason as string) || '(not provided)';
+  const entryTime = formatDateTime((params.entryTime as string) || '');
+  const controlNumber = (params.controlNumber as string) || '(not available)';
+  const registeredBy = (params.registeredBy as string) || '(not available)';
+  const destinationStatusLabel =
+    (params.destinationStatusLabel as string) || 'Destination needs review';
+  const isCorrectDestination = (params.isCorrectDestination as string) === 'true';
 
-  const handleMarkAsCompleted = async () => {
-    if (!visitId) {
-      Alert.alert('Error', 'Visit ID not found. Cannot mark as completed.');
-      return;
-    }
-
-    try {
-      setIsUpdating(true);
-      console.log('✁ Marking visit as completed...');
-      
-      const success = await enrolleeService.updateVisitStatus(
-        parseInt(visitId),
-        'completed'
-      );
-
-      setIsUpdating(false);
-
-      if (success) {
-        Alert.alert(
-          'Visit Completed',
-          `${visitorName} visit has been marked as completed.`,
-          [
-            {
-              text: 'OK',
-              onPress: () => router.back(),
-            },
-          ]
-        );
-      } else {
-        Alert.alert(
-          'Update Failed',
-          'Could not update visit status. Please try again.',
-          [{ text: 'OK' }]
-        );
-      }
-    } catch (error) {
-      console.error('❌ Error updating visit status:', error);
-      setIsUpdating(false);
-      Alert.alert('Error', 'An error occurred while updating the visit status.');
-    }
-  };
-
-  const handleDone = () => {
-    router.back();
-  };
+  const idLabel = passNumber || visitorId || '(no id)';
+  const sectionSurface = colorScheme === 'dark' ? '#111A36' : '#F2F5F9';
+  const panelSurface = colorScheme === 'dark' ? '#0F1732' : '#F7F9FC';
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity 
-          onPress={() => router.back()} 
-          style={styles.backButton}
-        >
-          <MaterialIcons name="arrow-back" size={24} color={colors.primary} />
-          <Text style={[styles.backText, { color: colors.primary }]}>Back to Scanner</Text>
+      <View style={[styles.header, { backgroundColor: colors.primary }]}>
+        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+          <MaterialIcons name="arrow-back" size={20} color="#FFFFFF" />
+          <Text style={styles.backText}>Back to Scanner</Text>
         </TouchableOpacity>
+        <Text style={styles.headerTitle}>Visitor Information</Text>
       </View>
 
       <ScrollView
-        contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.content}
       >
-        {/* Visitor Information Title */}
-        <Text style={[styles.sectionTitle, { color: colors.text }]}>
-          Visitor Information
-        </Text>
-
-        {/* Visitor Profile Card */}
-        <View style={[styles.profileCard, { backgroundColor: colors.primary }]}>
-          {/* Avatar */}
-          <View style={styles.avatarContainer}>
+        <View style={[styles.card, { backgroundColor: colors.primary }]}> 
+          <View style={styles.avatarWrap}>
             <View style={styles.avatarCircle}>
               <MaterialIcons name="person" size={48} color="#FFFFFF" />
             </View>
           </View>
-
-          {/* Visitor Details */}   
           <Text style={styles.visitorName}>{visitorName}</Text>
-          <Text style={styles.visitorId}>{visitorId}</Text>
-        </View>
+          <Text style={styles.visitorId}>{idLabel}</Text>
 
-        {/* Details Section */}
-        <View style={[styles.detailsCard, { backgroundColor: colors.surface }]}>
-          {/* Contact Number */}
-          <View style={styles.detailRow}>
-            <View style={styles.detailIconContainer}>
-              <MaterialIcons name="phone" size={20} color={colors.primary} />
+          <View style={[styles.detailPanel, { backgroundColor: panelSurface }]}> 
+            <View style={[styles.detailBox, { backgroundColor: sectionSurface }]}> 
+              <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Destination</Text>
+              <Text style={[styles.detailValue, { color: colors.text }]}>{destinationOffice}</Text>
+              <View
+                style={[
+                  styles.statusBadge,
+                  {
+                    backgroundColor: isCorrectDestination ? '#D7F3E3' : '#FDE2E2',
+                    borderColor: isCorrectDestination ? '#9EDDBD' : '#F7B4B4',
+                  },
+                ]}
+              >
+                <MaterialIcons
+                  name={isCorrectDestination ? 'check-circle-outline' : 'error-outline'}
+                  size={14}
+                  color={isCorrectDestination ? '#1F8B4C' : '#B63838'}
+                />
+                <Text
+                  style={{
+                    color: isCorrectDestination ? '#1F8B4C' : '#B63838',
+                    fontSize: 12,
+                    fontWeight: '600',
+                  }}
+                >
+                  {destinationStatusLabel}
+                </Text>
+              </View>
+              {!isCorrectDestination && expectedOffice ? (
+                <Text style={[styles.hintText, { color: colors.textSecondary }]}>
+                  Expected: {expectedOffice}
+                </Text>
+              ) : null}
             </View>
-            <View style={styles.detailContent}>
-              <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>
-                Contact Number
-              </Text>
-              <Text style={[styles.detailValue, { color: colors.text }]}>
-                {contactNo || '(not provided)'}
-              </Text>
-            </View>
-          </View>
 
-          <View style={[styles.divider, { backgroundColor: colors.border }]} />
-
-          {/* Address */}
-          <View style={styles.detailRow}>
-            <View style={styles.detailIconContainer}>
-              <MaterialIcons name="location-on" size={20} color={colors.primary} />
+            <View style={[styles.detailBox, { backgroundColor: sectionSurface }]}> 
+              <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Purpose of Visit</Text>
+              <Text style={[styles.detailValue, { color: colors.text }]}>{purposeReason}</Text>
             </View>
-            <View style={styles.detailContent}>
-              <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>
-                Address
-              </Text>
-              <Text style={[styles.detailValue, { color: colors.text }]}>
-                {address || '(not provided)'}
-              </Text>
-            </View>
-          </View>
 
-          <View style={[styles.divider, { backgroundColor: colors.border }]} />
-
-          {/* Pass Number */}
-          <View style={styles.detailRow}>
-            <View style={styles.detailIconContainer}>
-              <MaterialIcons name="badge" size={20} color={colors.primary} />
+            <View style={[styles.detailBox, { backgroundColor: sectionSurface }]}> 
+              <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Time In</Text>
+              <Text style={[styles.detailValue, { color: colors.text }]}>{entryTime}</Text>
             </View>
-            <View style={styles.detailContent}>
-              <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>
-                Pass Number
-              </Text>
-              <Text style={[styles.detailValue, { color: colors.text }]}>
-                {passNumber || '(none)'}
-              </Text>
-            </View>
-          </View>
 
-          <View style={[styles.divider, { backgroundColor: colors.border }]} />
-
-          {/* Visit Status */}
-          <View style={styles.detailRow}>
-            <View style={styles.detailIconContainer}>
-              <MaterialIcons 
-                name={visitStatus === 'completed' ? 'check-circle' : 'schedule'} 
-                size={20} 
-                color={visitStatus === 'completed' ? '#28A745' : '#FF9800'} 
-              />
-            </View>
-            <View style={styles.detailContent}>
-              <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>
-                Visit Status
-              </Text>
-              <Text style={[
-                styles.detailValue, 
-                { color: visitStatus === 'completed' ? '#28A745' : '#FF9800' }
-              ]}>
-                {visitStatus === 'completed' ? '✓ Completed' : 'Pending'}
-              </Text>
-            </View>
-          </View>
-
-          <View style={[styles.divider, { backgroundColor: colors.border }]} />
-
-          {/* Enrollee Status */}
-          <View style={styles.detailRow}>
-            <View style={styles.detailIconContainer}>
-              <MaterialIcons 
-                name={enrolleeStatus === 'completed' ? 'check-circle' : 'schedule'} 
-                size={20} 
-                color={enrolleeStatus === 'completed' ? '#28A745' : '#FF9800'} 
-              />
-            </View>
-            <View style={styles.detailContent}>
-              <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>
-                Enrollment Status
-              </Text>
-              <Text style={[
-                styles.detailValue, 
-                { color: enrolleeStatus === 'completed' ? '#28A745' : '#FF9800' }
-              ]}>
-                {enrolleeStatus === 'completed' ? '✓ Completed' : 'Pending'}
-              </Text>
+            <View style={[styles.rowBox, { backgroundColor: sectionSurface }]}> 
+              <View style={styles.rowItem}>
+                <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Control Number</Text>
+                <Text style={[styles.rowValue, { color: colors.text }]}>{controlNumber}</Text>
+              </View>
+              <View style={styles.rowItem}>
+                <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Registered By</Text>
+                <Text style={[styles.rowValue, { color: colors.text }]}>{registeredBy}</Text>
+              </View>
             </View>
           </View>
         </View>
 
-        {/* Action Buttons */}
-        <View style={styles.buttonGroup}>
-          {visitStatus !== 'completed' && (
-            <TouchableOpacity
-              style={[styles.actionButton, { backgroundColor: '#28A745' }]}
-              onPress={handleMarkAsCompleted}
-              disabled={isUpdating}
-              activeOpacity={0.8}
-            >
-              <MaterialIcons name="check-circle" size={20} color="#FFFFFF" />
-              <Text style={styles.buttonText}>
-                {isUpdating ? 'Updating...' : 'Mark as Completed'}
-              </Text>
-            </TouchableOpacity>
-          )}
-
-          <TouchableOpacity
-            style={[styles.doneButton, { backgroundColor: colors.primary }]}
-            onPress={handleDone}
-            activeOpacity={0.8}
-          >
-            <MaterialIcons name="close" size={20} color="#FFFFFF" />
-            <Text style={styles.doneButtonText}>Done</Text>
-          </TouchableOpacity>
-        </View>
+        <TouchableOpacity
+          style={[styles.doneButton, { backgroundColor: colors.primary }]}
+          onPress={() => router.replace('/office/exit-scan')}
+        >
+          <Text style={styles.doneText}>Done</Text>
+        </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );
@@ -250,189 +145,145 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingTop: 10,
+    paddingBottom: 14,
   },
   backButton: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    marginBottom: 8,
   },
   backText: {
-    fontSize: 14,
+    color: '#FFFFFF',
+    fontSize: 13,
     fontWeight: '600',
   },
-  scrollContent: {
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-  },
-  sectionTitle: {
-    fontSize: 16,
+  headerTitle: {
+    color: '#FFFFFF',
+    fontSize: 22,
     fontWeight: '700',
-    marginBottom: 16,
   },
-  profileCard: {
-    borderRadius: 16,
-    padding: 24,
-    alignItems: 'center',
-    marginBottom: 16,
+  content: {
+    padding: 16,
+    paddingBottom: 22,
+    gap: 16,
+  },
+  card: {
+    borderRadius: 18,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 14,
     ...Platform.select({
       ios: {
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.12,
+        shadowRadius: 8,
       },
       android: {
-        elevation: 3,
+        elevation: 4,
       },
     }),
   },
-  avatarContainer: {
-    marginBottom: 16,
+  avatarWrap: {
+    alignItems: 'center',
+    marginBottom: 10,
   },
   avatarCircle: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: '#FFD700',
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    backgroundColor: '#F6C625',
     justifyContent: 'center',
     alignItems: 'center',
   },
   visitorName: {
-    fontSize: 18,
-    fontWeight: '700',
     color: '#FFFFFF',
-    marginBottom: 4,
+    textAlign: 'center',
+    fontSize: 29,
+    fontWeight: '700',
+    lineHeight: 34,
   },
   visitorId: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#E0E0E0',
+    color: '#EDF2FF',
+    textAlign: 'center',
+    fontSize: 13,
+    fontWeight: '600',
+    marginTop: 2,
+    marginBottom: 14,
   },
-  detailsCard: {
+  detailPanel: {
     borderRadius: 12,
-    padding: 16,
-    marginBottom: 20,
+    padding: 10,
+    gap: 10,
+  },
+  detailBox: {
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  detailLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 5,
+  },
+  detailValue: {
+    fontSize: 17,
+    fontWeight: '600',
+    lineHeight: 22,
+  },
+  statusBadge: {
+    marginTop: 9,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  hintText: {
+    marginTop: 7,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  rowBox: {
+    flexDirection: 'row',
+    gap: 10,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  rowItem: {
+    flex: 1,
+  },
+  rowValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    lineHeight: 19,
+  },
+  doneButton: {
+    marginTop: 6,
+    borderRadius: 14,
+    paddingVertical: 15,
+    alignItems: 'center',
     ...Platform.select({
       ios: {
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.08,
-        shadowRadius: 3,
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.12,
+        shadowRadius: 4,
       },
       android: {
         elevation: 2,
       },
     }),
   },
-  detailRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    paddingVertical: 12,
-    gap: 12,
-  },
-  detailIconContainer: {
-    justifyContent: 'center',
-    alignItems: 'center',
-    width: 24,
-    height: 24,
-    marginTop: 2,
-  },
-  detailContent: {
-    flex: 1,
-  },
-  detailLabel: {
-    fontSize: 12,
-    fontWeight: '500',
-    marginBottom: 4,
-  },
-  detailValue: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  correctBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginTop: 6,
-  },
-  correctText: {
-    fontSize: 12,
-    fontWeight: '500',
-    color: '#28A745',
-  },
-  divider: {
-    height: 1,
-    marginVertical: 0,
-  },
-  infoRow: {
-    flexDirection: 'row',
-    paddingVertical: 12,
-    gap: 16,
-  },
-  infoColumn: {
-    flex: 1,
-  },
-  infoLabel: {
-    fontSize: 12,
-    fontWeight: '500',
-    marginBottom: 6,
-  },
-  infoValue: {
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  doneButton: {
-    paddingVertical: 14,
-    borderRadius: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 20,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-      },
-      android: {
-        elevation: 3,
-      },
-    }),
-  },
-  doneButtonText: {
-    fontSize: 16,
-    fontWeight: '700',
+  doneText: {
     color: '#FFFFFF',
-  },
-  buttonGroup: {
-    flexDirection: 'column',
-    gap: 10,
-    paddingHorizontal: 16,
-    marginBottom: 20,
-  },
-  actionButton: {
-    flexDirection: 'row',
-    paddingVertical: 14,
-    borderRadius: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 8,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-      },
-      android: {
-        elevation: 3,
-      },
-    }),
-  },
-  buttonText: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '700',
-    color: '#FFFFFF',
   },
 });
