@@ -884,7 +884,7 @@ function parseGenericID(lines: string[]): Partial<ParsedIDData> {
 
   // Build generic address from parts if structured extraction worked
   if (addressBarangay || addressCityMunicipality || addressProvince) {
-    const parts = [];
+    const parts: string[] = [];
     if (addressBarangay) parts.push(addressBarangay);
     if (addressCityMunicipality) parts.push(addressCityMunicipality);
     if (addressProvince) parts.push(addressProvince);
@@ -972,7 +972,7 @@ export function parseIDText(rawOcrText: string): ParsedIDData {
   }
   
   // STEP 5: Determine confidence
-  const extractedFields = [];
+  const extractedFields: string[] = [];
   if (parserResult.firstName) extractedFields.push('firstName');
   if (parserResult.lastName) extractedFields.push('lastName');
   if (parserResult.address) extractedFields.push('address');

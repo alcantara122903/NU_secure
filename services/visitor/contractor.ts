@@ -4,8 +4,10 @@
  */
 
 import type { VisitorRegistrationData } from '@/types/visitor';
+import { addressService, type AddressData } from '../address';
 import { supabase } from '../database/supabase';
 import { uploadFacePhoto } from '../storage/upload';
+import { visitorLookupService } from './visitor-lookup';
 
 /**
  * Generate a random token for QR code
@@ -63,26 +65,19 @@ export const contractorService = {
       if (contractorData.addressHouseNo || contractorData.addressStreet || 
           contractorData.addressBarangay || contractorData.addressMunicipality) {
         
-        console.log('\n📝 STEP 1: Creating address record...');
-        const { data: addressData, error: addressError } = await supabase
-          .from('address')
-          .insert([{
-            house_no: contractorData.addressHouseNo || null,
-            street: contractorData.addressStreet || null,
-            barangay: contractorData.addressBarangay || null,
-            city_municipality: contractorData.addressMunicipality || null,
-            province: contractorData.addressProvince || null,
-            region: contractorData.addressRegion || null,
-          }])
-          .select('address_id');
-
-        if (addressError) {
-          console.error('❌ Address creation failed:', addressError.message);
-          return null;
+        console.log('\n📝 STEP 1: Creating/checking address record...');
+        const addressData: AddressData = {
+          houseNo: contractorData.addressHouseNo || undefined,
+          street: contractorData.addressStreet || undefined,
+          barangay: contractorData.addressBarangay || undefined,
+          cityMunicipality: contractorData.addressMunicipality || undefined,
+          province: contractorData.addressProvince || undefined,
+          region: contractorData.addressRegion || undefined,
+        };
+        addressId = await addressService.createAddress(addressData);
+        if (!addressId) {
+          console.warn('⚠️ Address creation failed');
         }
-
-        addressId = addressData?.[0]?.address_id || null;
-        console.log(`✅ Address created: address_id=${addressId}`);
       }
 
       // STEP 2: Create visitor record with photo upload
@@ -131,63 +126,86 @@ export const contractorService = {
         console.warn('⚠️ No auth user session found');
       }
 
-      // Attempt insert with retry logic
-      let visitorData_db: any = null;
-      let visitorError: any = null;
-      
-      for (let attempt = 1; attempt <= 3; attempt++) {
-        console.log(`   Attempt ${attempt}/3...`);
+      // ======= VISITOR DEDUPLICATION LOGIC =======
+      // Check if visitor already exists to prevent duplicate records
+      console.log('\n👥 CHECKING FOR EXISTING VISITOR RECORD');
+      let existingVisitor = await visitorLookupService.findExistingVisitor({
+        firstName: contractorData.firstName,
+        lastName: contractorData.lastName,
+        contactNo: contractorData.contactNo,
+      });
+
+      let visitorData_db: any;
+
+      if (existingVisitor) {
+        // Visitor already exists - reuse their record
+        console.log('\n♻️ REUSING EXISTING VISITOR RECORD');
+        console.log(`   Visitor ID: ${existingVisitor.visitor_id}`);
+        console.log(`   Pass Number: ${existingVisitor.pass_number}`);
+        console.log(`   Control Number: ${existingVisitor.control_number}`);
         
-        const result = await supabase
-          .from('visitor')
-          .insert([{
-            first_name: contractorData.firstName,
-            last_name: contractorData.lastName,
-            contact_no: contractorData.contactNo,
-            pass_number: passNumber,
-            control_number: controlNumber,
-            address_id: addressId || null,
-            visitor_photo_with_id_url: photoUrl || null,
-            created_at: new Date().toISOString(),
-          }])
-          .select('visitor_id');
+        visitorData_db = [{ visitor_id: existingVisitor.visitor_id }];
+        console.log('\n✅ Using existing visitor record - no new record created');
+      } else {
+        // Visitor doesn't exist - create new record
+        console.log('\n📝 CREATING NEW VISITOR RECORD');
 
-        visitorData_db = result.data;
-        visitorError = result.error;
-
-        if (!visitorError) {
-          console.log(`   ✅ Insert succeeded on attempt ${attempt}`);
-          break;
-        }
-
-        console.log(`   ⚠️ Attempt ${attempt} failed: ${visitorError.message}`);
-
-        // On last attempt, try to fetch existing visitor by pass_number
-        if (attempt === 3) {
-          console.log('   📝 Trying to fetch existing visitor by pass_number...');
-          const { data: existing } = await supabase
+        let visitorError: any = null;
+        
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          console.log(`   Attempt ${attempt}/3...`);
+          
+          const result = await supabase
             .from('visitor')
-            .select('visitor_id')
-            .eq('pass_number', passNumber)
-            .single();
+            .insert([{
+              first_name: contractorData.firstName,
+              last_name: contractorData.lastName,
+              contact_no: contractorData.contactNo,
+              pass_number: passNumber,
+              control_number: controlNumber,
+              address_id: addressId || null,
+              visitor_photo_with_id_url: photoUrl || null,
+              created_at: new Date().toISOString(),
+            }])
+            .select('visitor_id');
 
-          if (existing?.visitor_id) {
-            console.log(`   ✅ Found existing visitor: visitor_id=${existing.visitor_id}`);
-            visitorData_db = [existing];
-            visitorError = null;
+          visitorData_db = result.data;
+          visitorError = result.error;
+
+          if (!visitorError) {
+            console.log(`   ✅ Insert succeeded on attempt ${attempt}`);
             break;
+          }
+
+          console.log(`   ⚠️ Attempt ${attempt} failed: ${visitorError.message}`);
+
+          // On last attempt, try to fetch existing visitor by pass_number
+          if (attempt === 3) {
+            console.log('   📝 Trying to fetch existing visitor by pass_number...');
+            const { data: existing } = await supabase
+              .from('visitor')
+              .select('visitor_id')
+              .eq('pass_number', passNumber)
+              .single();
+
+            if (existing?.visitor_id) {
+              console.log(`   ✅ Found existing visitor: visitor_id=${existing.visitor_id}`);
+              visitorData_db = [existing];
+              visitorError = null;
+              break;
+            }
+          }
+
+          // Wait before retry
+          if (attempt < 3) {
+            await new Promise(resolve => setTimeout(resolve, 500 * attempt));
           }
         }
 
-        // Wait before retry
-        if (attempt < 3) {
-          await new Promise(resolve => setTimeout(resolve, 500 * attempt));
+        if (visitorError) {
+          console.error('❌ Visitor creation failed after 3 attempts:', visitorError.message);
+          return null;
         }
-      }
-
-      if (visitorError) {
-        console.error('❌ Visitor creation failed after 3 attempts:', visitorError.message);
-        return null;
       }
 
       const visitorId = visitorData_db?.[0]?.visitor_id;

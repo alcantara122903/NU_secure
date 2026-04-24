@@ -4,8 +4,10 @@
  */
 
 import type { VisitorRegistrationData } from '@/types/visitor';
+import { addressService, type AddressData } from '../address';
 import { supabase } from '../database/supabase';
 import { uploadFacePhoto } from '../storage/upload';
+import { visitorLookupService } from './visitor-lookup';
 
 /**
  * Generate a random token for QR code
@@ -58,26 +60,19 @@ export const normalVisitorService = {
       if (visitorData.addressHouseNo || visitorData.addressStreet || 
           visitorData.addressBarangay || visitorData.addressMunicipality) {
         
-        console.log('\n📝 STEP 1: Creating address record...');
-        const { data: addressData, error: addressError } = await supabase
-          .from('address')
-          .insert([{
-            house_no: visitorData.addressHouseNo || null,
-            street: visitorData.addressStreet || null,
-            barangay: visitorData.addressBarangay || null,
-            city_municipality: visitorData.addressMunicipality || null,
-            province: visitorData.addressProvince || null,
-            region: visitorData.addressRegion || null,
-          }])
-          .select('address_id');
-
-        if (addressError) {
-          console.error('❌ Address creation failed:', addressError.message);
-          return null;
+        console.log('\n📝 STEP 1: Creating/checking address record...');
+        const addressData: AddressData = {
+          houseNo: visitorData.addressHouseNo || undefined,
+          street: visitorData.addressStreet || undefined,
+          barangay: visitorData.addressBarangay || undefined,
+          cityMunicipality: visitorData.addressMunicipality || undefined,
+          province: visitorData.addressProvince || undefined,
+          region: visitorData.addressRegion || undefined,
+        };
+        addressId = await addressService.createAddress(addressData);
+        if (!addressId) {
+          console.warn('⚠️ Address creation failed');
         }
-
-        addressId = addressData?.[0]?.address_id || null;
-        console.log(`✅ Address created: address_id=${addressId}`);
       }
 
       // STEP 2: Create visitor record with photo uploads
@@ -126,63 +121,84 @@ export const normalVisitorService = {
       }
 
       // Attempt insert with retry logic for sequence issues
+      console.log('\n👥 CHECKING FOR EXISTING VISITOR RECORD');
+      let existingVisitor = await visitorLookupService.findExistingVisitor({
+        firstName: visitorData.firstName,
+        lastName: visitorData.lastName,
+        contactNo: visitorData.contactNo,
+      });
+
       let visitorData_db: any = null;
       let visitorError: any = null;
-      
-      for (let attempt = 1; attempt <= 3; attempt++) {
-        console.log(`   Attempt ${attempt}/3...`);
+
+      if (existingVisitor) {
+        // REUSE: Reuse existing visitor
+        console.log('\n♻️ REUSING EXISTING VISITOR RECORD');
+        console.log(`   Visitor ID: ${existingVisitor.visitor_id}`);
+        visitorData_db = [{
+          visitor_id: existingVisitor.visitor_id,
+        }];
+        visitorError = null;
+        console.log('\n✅ Using existing visitor record - no new record created');
+      } else {
+        // CREATE: New visitor record with retry logic
+        console.log('\n📝 CREATING NEW VISITOR RECORD');
         
-        const result = await supabase
-          .from('visitor')
-          .insert([{
-            first_name: visitorData.firstName,
-            last_name: visitorData.lastName,
-            contact_no: visitorData.contactNo,
-            pass_number: passNumber,
-            control_number: controlNumber,
-            address_id: addressId || null,
-            visitor_photo_with_id_url: visitorPhotoUrl || null,
-            created_at: new Date().toISOString(),
-          }])
-          .select('visitor_id');
-
-        visitorData_db = result.data;
-        visitorError = result.error;
-
-        if (!visitorError) {
-          console.log(`   ✅ Insert succeeded on attempt ${attempt}`);
-          break;
-        }
-
-        console.log(`   ⚠️ Attempt ${attempt} failed: ${visitorError.message}`);
-
-        // On last attempt, try to fetch existing visitor by pass_number
-        if (attempt === 3) {
-          console.log('   📝 Trying to fetch existing visitor by pass_number...');
-          const { data: existing } = await supabase
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          console.log(`   Attempt ${attempt}/3...`);
+          
+          const result = await supabase
             .from('visitor')
-            .select('visitor_id')
-            .eq('pass_number', passNumber)
-            .single();
+            .insert([{
+              first_name: visitorData.firstName,
+              last_name: visitorData.lastName,
+              contact_no: visitorData.contactNo,
+              pass_number: passNumber,
+              control_number: controlNumber,
+              address_id: addressId || null,
+              visitor_photo_with_id_url: visitorPhotoUrl || null,
+              created_at: new Date().toISOString(),
+            }])
+            .select('visitor_id');
 
-          if (existing?.visitor_id) {
-            console.log(`   ✅ Found existing visitor: visitor_id=${existing.visitor_id}`);
-            visitorData_db = [existing];
-            visitorError = null;
+          visitorData_db = result.data;
+          visitorError = result.error;
+
+          if (!visitorError) {
+            console.log(`   ✅ Insert succeeded on attempt ${attempt}`);
             break;
+          }
+
+          console.log(`   ⚠️ Attempt ${attempt} failed: ${visitorError.message}`);
+
+          // On last attempt, try to fetch existing visitor by pass_number
+          if (attempt === 3) {
+            console.log('   📝 Trying to fetch existing visitor by pass_number...');
+            const { data: existing } = await supabase
+              .from('visitor')
+              .select('visitor_id')
+              .eq('pass_number', passNumber)
+              .single();
+
+            if (existing?.visitor_id) {
+              console.log(`   ✅ Found existing visitor: visitor_id=${existing.visitor_id}`);
+              visitorData_db = [existing];
+              visitorError = null;
+              break;
+            }
+          }
+
+          // Wait before retry
+          if (attempt < 3) {
+            await new Promise(resolve => setTimeout(resolve, 500 * attempt));
           }
         }
 
-        // Wait before retry
-        if (attempt < 3) {
-          await new Promise(resolve => setTimeout(resolve, 500 * attempt));
+        if (visitorError) {
+          console.error('❌ Visitor creation failed after 3 attempts:', visitorError.message);
+          console.error('🔍 Error code:', visitorError.code);
+          return null;
         }
-      }
-
-      if (visitorError) {
-        console.error('❌ Visitor creation failed after 3 attempts:', visitorError.message);
-        console.error('🔍 Error code:', visitorError.code);
-        return null;
       }
 
       const visitorId = visitorData_db?.[0]?.visitor_id;
@@ -191,7 +207,11 @@ export const normalVisitorService = {
         return null;
       }
 
-      console.log(`✅ Visitor created: visitor_id=${visitorId}, pass=${passNumber}, control=${controlNumber}${visitorPhotoUrl ? `, photo=${visitorPhotoUrl}` : ''}`);
+      if (existingVisitor) {
+        console.log(`✅ Visitor record reused: visitor_id=${visitorId}`);
+      } else {
+        console.log(`✅ New visitor created: visitor_id=${visitorId}, pass=${passNumber}, control=${controlNumber}${visitorPhotoUrl ? `, photo=${visitorPhotoUrl}` : ''}`);
+      }
 
       // STEP 3: Create visit record
       console.log('\n📝 STEP 3: Creating visit record...');
@@ -199,8 +219,8 @@ export const normalVisitorService = {
       const primaryOfficeId = visitorData.selectedOfficeIds[0];
 
       // Attempt insert with retry logic
-      let visitData = null;
-      let visitError = null;
+      let visitData: any = null;
+      let visitError: any = null;
 
       for (let attempt = 1; attempt <= 3; attempt++) {
         console.log(`   Attempt ${attempt}/3...`);
@@ -226,7 +246,7 @@ export const normalVisitorService = {
           break;
         }
 
-        console.log(`   ⚠️ Attempt ${attempt} failed: ${visitError.message}`);
+        console.log(`   ⚠️ Attempt ${attempt} failed: ${(visitError as any)?.message}`);
 
         // On last attempt, try to fetch existing visit by qr_token
         if (attempt === 3) {
@@ -239,7 +259,7 @@ export const normalVisitorService = {
 
           if (existing?.visit_id) {
             console.log(`   ✅ Found existing visit: visit_id=${existing.visit_id}`);
-            visitData = [existing];
+            visitData = [existing] as any;
             visitError = null;
             break;
           }
@@ -252,11 +272,11 @@ export const normalVisitorService = {
       }
 
       if (visitError) {
-        console.error('❌ Visit creation failed:', visitError.message);
+        console.error('❌ Visit creation failed:', (visitError as any)?.message);
         return null;
       }
 
-      const visitId = visitData?.[0]?.visit_id;
+      const visitId = (visitData as any)?.[0]?.visit_id;
       if (!visitId) {
         console.error('❌ No visit ID returned');
         return null;
@@ -275,7 +295,7 @@ export const normalVisitorService = {
       }));
 
       // Attempt insert with retry logic
-      let expectationError = null;
+      let expectationError: any = null;
 
       for (let attempt = 1; attempt <= 3; attempt++) {
         console.log(`   Attempt ${attempt}/3...`);
@@ -291,7 +311,7 @@ export const normalVisitorService = {
           break;
         }
 
-        console.log(`   ⚠️ Attempt ${attempt} failed: ${expectationError.message}`);
+        console.log(`   ⚠️ Attempt ${attempt} failed: ${(expectationError as any)?.message}`);
 
         // Wait before retry
         if (attempt < 3) {
@@ -300,7 +320,7 @@ export const normalVisitorService = {
       }
 
       if (expectationError) {
-        console.error('❌ Office expectation creation failed:', expectationError.message);
+        console.error('❌ Office expectation creation failed:', (expectationError as any)?.message);
         console.warn('⚠️ Visitor and visit records were created, but office route could not be set up');
       } else {
         console.log(`✅ Office expectations created: ${visitorData.selectedOfficeIds.length} office(s) added to route`);

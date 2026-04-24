@@ -11,5 +11,7 @@
     "node_modules": true,
     "dist": true,
     ".expo": true
-  }
+  },
+  "json.validate.enable": false
+}
 }

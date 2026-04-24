@@ -14,6 +14,7 @@ import {
     validateParsedData
 } from '../ocr/parsers/parser-registry';
 import { uploadFacePhoto } from '../storage/upload';
+import { visitorLookupService } from './visitor-lookup';
 
 
 export const enrolleeService = {
@@ -92,8 +93,8 @@ export const enrolleeService = {
       const formattedData = formatParsedData(parsedData);
       const message = getConfidenceMessage(parsedData.confidence);
       
-      const extractedFields = [];
-      const missingFields = [];
+      const extractedFields: string[] = [];
+      const missingFields: string[] = [];
       
       if (formattedData.firstName) extractedFields.push('firstName');
       else missingFields.push('firstName');
@@ -123,7 +124,7 @@ export const enrolleeService = {
         addressCityMunicipality: parsedData.addressCityMunicipality,
         addressProvince: parsedData.addressProvince,
         addressRegion: parsedData.addressRegion,
-        contactNo: parsedData.contactNo || '',
+        contactNo: (parsedData as any).contactNo || '',
         confidence: parsedData.confidence,
         detectedIdType: parsedData.detectedIdType,
         rawOcrText: ocrRawText,
@@ -224,78 +225,181 @@ export const enrolleeService = {
         console.warn('⚠️ No auth user session found');
       }
       
-      const visitorPayload = {
-        first_name: enrolleeData.firstName,
-        last_name: enrolleeData.lastName,
-        contact_no: enrolleeData.contactNo || null,
-        // Save uploaded photo URL or null if no photo
-        visitor_photo_with_id_url: photoUrl || null,
-        pass_number: enrolleeData.passNumber,
-        control_number: enrolleeData.controlNumber,
-        address_id: addressId || null,
-        created_at: new Date().toISOString(),
-      };
-      
-      console.log('   Payload:', JSON.stringify(visitorPayload, null, 2));
+      // ======= VISITOR DEDUPLICATION LOGIC =======
+      // Check if visitor already exists to prevent duplicate records
+      // Especially important when same person registers with different visit types
+      // Example: Normal Visitor (visit_type=3) then Enrollee (visit_type=1)
+      console.log('\n👥 CHECKING FOR EXISTING VISITOR RECORD');
+      let existingVisitor = await visitorLookupService.findExistingVisitor({
+        firstName: enrolleeData.firstName,
+        lastName: enrolleeData.lastName,
+        contactNo: enrolleeData.contactNo,
+      });
 
-      const { data: visitorData, error: visitorError }: any = await supabase
-        .from('visitor')
-        .insert([visitorPayload])
-        .select()
-        .single();
+      let visitorData: any;
 
-      if (visitorError) {
-        console.error('\n❌ VISITOR CREATION FAILED');
-        console.error('   Error code:', visitorError.code);
-        console.error('   Error message:', visitorError.message);
-        console.error('   Error details:', visitorError.details);
-        console.error('\n   🔍 DIAGNOSTIC INFO:');
-        console.error('   - Check if test data with this ID already exists in database');
-        console.error('   - Run: SELECT * FROM visitor WHERE first_name = \'', enrolleeData.firstName, '\';');
-        console.error('   - If duplicates exist, run the cleanup SQL from DATABASE_CLEANUP_INSTRUCTIONS.sql');
-        throw new Error(`Visitor creation failed: ${visitorError.message}`);
+      if (existingVisitor) {
+        // Visitor already exists - reuse their record
+        console.log('\n♻️ REUSING EXISTING VISITOR RECORD');
+        console.log(`   Visitor ID: ${existingVisitor.visitor_id}`);
+        console.log(`   Name: ${existingVisitor.first_name} ${existingVisitor.last_name}`);
+        console.log(`   Contact: ${existingVisitor.contact_no}`);
+        console.log(`   Address ID: ${existingVisitor.address_id}`);
+
+        visitorData = {
+          visitor_id: existingVisitor.visitor_id,
+          first_name: existingVisitor.first_name,
+          last_name: existingVisitor.last_name,
+          contact_no: existingVisitor.contact_no,
+          pass_number: existingVisitor.pass_number,
+          control_number: existingVisitor.control_number,
+          address_id: existingVisitor.address_id,
+          visitor_photo_with_id_url: existingVisitor.visitor_id ? photoUrl : null, // Update photo if new one provided
+        };
+
+        console.log('\n✅ Using existing visitor record - no new record created');
+      } else {
+        // Visitor doesn't exist - create new record
+        console.log('\n📝 CREATING NEW VISITOR RECORD');
+
+        const visitorPayload = {
+          first_name: enrolleeData.firstName,
+          last_name: enrolleeData.lastName,
+          contact_no: enrolleeData.contactNo || null,
+          // Save uploaded photo URL or null if no photo
+          visitor_photo_with_id_url: photoUrl || null,
+          pass_number: enrolleeData.passNumber,
+          control_number: enrolleeData.controlNumber,
+          address_id: addressId || null,
+          created_at: new Date().toISOString(),
+        };
+        
+        console.log('   Payload:', JSON.stringify(visitorPayload, null, 2));
+
+        const { data: newVisitorData, error: visitorError }: any = await supabase
+          .from('visitor')
+          .insert([visitorPayload])
+          .select()
+          .single();
+
+        if (visitorError) {
+          console.error('\n❌ VISITOR CREATION FAILED');
+          console.error('   Error code:', visitorError.code);
+          console.error('   Error message:', visitorError.message);
+          console.error('   Error details:', visitorError.details);
+          console.error('\n   🔍 DIAGNOSTIC INFO:');
+          console.error('   - Check if test data with this ID already exists in database');
+          console.error('   - Run: SELECT * FROM visitor WHERE first_name = \'', enrolleeData.firstName, '\';');
+          console.error('   - If duplicates exist, run the cleanup SQL from DATABASE_CLEANUP_INSTRUCTIONS.sql');
+          throw new Error(`Visitor creation failed: ${visitorError.message}`);
+        }
+
+        if (!newVisitorData || !newVisitorData.visitor_id) {
+          console.error('\n❌ VISITOR CREATED BUT NO DATA RETURNED');
+          throw new Error('Visitor was created but database returned null');
+        }
+
+        visitorData = newVisitorData;
+        console.log(`✅ New visitor created with ID: ${visitorData.visitor_id}`);
+        console.log(`   Record: ${JSON.stringify(visitorData)}`);
       }
 
-      if (!visitorData || !visitorData.visitor_id) {
-        console.error('\n❌ VISITOR CREATED BUT NO DATA RETURNED');
-        throw new Error('Visitor was created but database returned null');
-      }
-
-      console.log(`✅ Visitor created with ID: ${visitorData.visitor_id}`);
-      console.log(`   Record: ${JSON.stringify(visitorData)}`);
-
-      // Create enrollee record
-      console.log('\n📝 Creating enrollee record...');
-      
-      const enrolleePayload = {
-        visitor_id: visitorData.visitor_id,
-        updated_at: new Date().toISOString(),
-      };
-      
-      console.log('   Payload:', JSON.stringify(enrolleePayload));
-
-      const { data: enrolleeRecData, error: enrolleeError } = await supabase
+      // Check if enrollee already exists for this visitor
+      console.log('\n🔍 CHECKING FOR EXISTING ENROLLEE RECORD');
+      const { data: existingEnrollee, error: lookupError } = await supabase
         .from('enrollee')
-        .insert([enrolleePayload])
-        .select()
+        .select('enrollee_id, visitor_id, updated_at')
+        .eq('visitor_id', visitorData.visitor_id)
         .single();
 
-      if (enrolleeError) {
-        console.error('\n❌ ENROLLEE CREATION FAILED');
-        console.error('   Error code:', enrolleeError.code);
-        console.error('   Error message:', enrolleeError.message);
-        console.error('   Error details:', enrolleeError.details);
-        console.error('\n   🔍 DIAGNOSTIC INFO:');
-        console.error(`   - Tried to create enrollee for visitor_id: ${visitorData.visitor_id}`);
-        throw new Error(`Enrollee creation failed: ${enrolleeError.message}`);
-      }
+      let enrolleeRecData: any;
+      
+      if (existingEnrollee) {
+        // Enrollee already exists - return existing record instead of creating duplicate
+        console.log('\n♻️ REUSING EXISTING ENROLLEE RECORD');
+        console.log(`   Enrollee ID: ${existingEnrollee.enrollee_id}`);
+        console.log(`   Visitor ID: ${existingEnrollee.visitor_id}`);
+        console.log(`   Last updated: ${existingEnrollee.updated_at}`);
+        enrolleeRecData = existingEnrollee;
+        console.log('\n✅ Existing enrollee returned - no duplicate created');
+      } else if (lookupError && lookupError.code !== 'PGRST116') {
+        // Some other error occurred (not "no rows found")
+        console.warn('⚠️ Error checking for existing enrollee:', lookupError.message);
+        // Continue with creating new enrollee
+        
+        // Create enrollee record
+        console.log('\n📝 Creating enrollee record...');
+        
+        const enrolleePayload = {
+          visitor_id: visitorData.visitor_id,
+          updated_at: new Date().toISOString(),
+        };
+        
+        console.log('   Payload:', JSON.stringify(enrolleePayload));
 
-      if (!enrolleeRecData || !enrolleeRecData.enrollee_id) {
-        console.error('\n❌ ENROLLEE CREATED BUT NO DATA RETURNED');
-        throw new Error('Enrollee was created but database returned null');
-      }
+        const { data: newEnrolleeRec, error: enrolleeError } = await supabase
+          .from('enrollee')
+          .insert([enrolleePayload])
+          .select()
+          .single();
 
-      console.log(`✅ Enrollee created with ID: ${enrolleeRecData.enrollee_id}`);
+        if (enrolleeError) {
+          console.error('\n❌ ENROLLEE CREATION FAILED');
+          console.error('   Error code:', enrolleeError.code);
+          console.error('   Error message:', enrolleeError.message);
+          console.error('   Error details:', enrolleeError.details);
+          console.error('\n   🔍 DIAGNOSTIC INFO:');
+          console.error(`   - Tried to create enrollee for visitor_id: ${visitorData.visitor_id}`);
+          console.error('   - Possible causes:');
+          console.error('     1. Enrollee already exists for this visitor (unique constraint)');
+          console.error('     2. Database connection issue');
+          console.error('     3. RLS policy blocking INSERT');
+          throw new Error(`Enrollee creation failed: ${enrolleeError.message}`);
+        }
+
+        if (!newEnrolleeRec || !newEnrolleeRec.enrollee_id) {
+          console.error('\n❌ ENROLLEE CREATED BUT NO DATA RETURNED');
+          throw new Error('Enrollee was created but database returned null');
+        }
+
+        enrolleeRecData = newEnrolleeRec;
+        console.log(`✅ New enrollee created with ID: ${enrolleeRecData.enrollee_id}`);
+      } else {
+        // No existing enrollee found (PGRST116 = no rows), create new one
+        // Create enrollee record
+        console.log('\n📝 Creating enrollee record...');
+        
+        const enrolleePayload = {
+          visitor_id: visitorData.visitor_id,
+          updated_at: new Date().toISOString(),
+        };
+        
+        console.log('   Payload:', JSON.stringify(enrolleePayload));
+
+        const { data: newEnrolleeRec, error: enrolleeError } = await supabase
+          .from('enrollee')
+          .insert([enrolleePayload])
+          .select()
+          .single();
+
+        if (enrolleeError) {
+          console.error('\n❌ ENROLLEE CREATION FAILED');
+          console.error('   Error code:', enrolleeError.code);
+          console.error('   Error message:', enrolleeError.message);
+          console.error('   Error details:', enrolleeError.details);
+          console.error('\n   🔍 DIAGNOSTIC INFO:');
+          console.error(`   - Tried to create enrollee for visitor_id: ${visitorData.visitor_id}`);
+          throw new Error(`Enrollee creation failed: ${enrolleeError.message}`);
+        }
+
+        if (!newEnrolleeRec || !newEnrolleeRec.enrollee_id) {
+          console.error('\n❌ ENROLLEE CREATED BUT NO DATA RETURNED');
+          throw new Error('Enrollee was created but database returned null');
+        }
+
+        enrolleeRecData = newEnrolleeRec;
+        console.log(`✅ New enrollee created with ID: ${enrolleeRecData.enrollee_id}`);
+      }
 
       // Create visit record
       console.log('\n🎫 Creating visit record...');
