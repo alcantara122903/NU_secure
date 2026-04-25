@@ -98,6 +98,8 @@ export const ADDRESS_KEYWORDS = new Set([
 ]);
 
 export const KNOWN_CITIES = [
+  'LIPA',
+  'LIPA CITY',
   'BATANGAS',
   'MANILA',
   'QUEZON',

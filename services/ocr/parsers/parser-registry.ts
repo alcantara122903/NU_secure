@@ -126,6 +126,10 @@ function normalizeAddressToken(token: string): string {
   if (!token || token.length === 0) return '';
   
   let normalized = token.trim();
+
+  // Common OCR symbol confusions seen in location text
+  normalized = normalized.replace(/[£€]/g, 'P');
+  normalized = normalized.replace(/\|/g, 'I');
   
   // === FIX 5→S (very common OCR corruption) ===
   // Handle multiple patterns to catch all cases
@@ -151,7 +155,37 @@ function normalizeAddressToken(token: string): string {
   // === FIX ELK→BLK (address context: "Block" in addresses) ===
   // Only replace when it's clearly the word "ELK" (not part of another word)
   normalized = normalized.replace(/\bELK\b/gi, 'BLK');
+
+  // Normalize "OFLIPA" => "OF LIPA"
+  normalized = normalized.replace(/\bOF(?=[A-Z])/g, 'OF ');
+
+  // Normalize common OCR corruption of "CITY OF LIPA"
+  normalized = normalized.replace(/\bCITY\s+OF\s+L[1I][PFE][A4]\b/gi, 'CITY OF LIPA');
+  normalized = normalized.replace(/\bCITY\s+OFL[1I][PFE][A4]\b/gi, 'CITY OF LIPA');
+  normalized = normalized.replace(/\bCITY\s+OF\s+L[I1][I1FPE][PFA4]\b/gi, 'CITY OF LIPA');
+  normalized = normalized.replace(/\bCITY\s+OF\s+L[I1][PFE][A4]\b/gi, 'CITY OF LIPA');
+  normalized = normalized.replace(/\bCITY\s+OF\s+L[I1][FPE]A\b/gi, 'CITY OF LIPA');
+  normalized = normalized.replace(/\bCITY\s+OF\s+LI[PFE][A4]\b/gi, 'CITY OF LIPA');
+  normalized = normalized.replace(/\bCITY\s+OF\s+L[1I][PFE][A4],?\s*BATANGAS\b/gi, 'CITY OF LIPA, BATANGAS');
+  normalized = normalized.replace(/\bCITY\s+OF\s+L[I1][FPE]A,?\s*BATANGAS\b/gi, 'CITY OF LIPA, BATANGAS');
   
+  return normalized;
+}
+
+function normalizeCityMunicipalityText(text: string): string {
+  if (!text) return '';
+  let normalized = normalizeAddressToken(cleanField(text));
+
+  // Final pass for City of Lipa OCR variants that slip through token normalization
+  normalized = normalized.replace(/\bCITY\s+OF\s+L[^\s,]{2,5}\b/gi, (match) => {
+    const upper = match.toUpperCase();
+    // If it looks like "CITY OF LIPA/LIFA/LI£A/L1PA", force to canonical city.
+    if (/CITY\s+OF\s+L/.test(upper)) {
+      return 'CITY OF LIPA';
+    }
+    return match;
+  });
+
   return normalized;
 }
 
@@ -166,7 +200,7 @@ function isValidHouseNumber(text: string): boolean {
   const upper = cleaned.toUpperCase();
   
   // Reject if contains place keywords -  NEVER put city/province in house number
-  const placeKeywords = ['CITY', 'MUNICIPALITY', 'PROVINCE', 'BARANGAY', 'BATANGAS', 'MANILA', 'CEBU', 'QUEZON', 'LAGUNA', 'CAVITE'];
+  const placeKeywords = ['CITY', 'MUNICIPALITY', 'PROVINCE', 'BARANGAY', 'BATANGAS', 'MANILA', 'CEBU', 'QUEZON', 'LAGUNA', 'CAVITE', 'PUROK', 'SITIO', 'ZONE', 'BLOCK', 'BLK', 'LOT'];
   if (placeKeywords.some(kw => upper.includes(kw))) {
     console.log(`[Validate] ❌ Rejecting house_no: contains place keyword "${text}"`);
     return false;
@@ -192,6 +226,187 @@ function isValidHouseNumber(text: string): boolean {
   // Accept valid house number patterns
   const validHousePattern = /^\d+(?:[\s\-\/]?[A-Z]?[\s\-\/]?\d*)*$/i;
   return validHousePattern.test(cleaned);
+}
+
+function isLikelyNameValue(text: string): boolean {
+  const cleaned = cleanField(text);
+  if (!cleaned || cleaned.length < 2) return false;
+
+  const upper = cleaned.toUpperCase();
+  const headerNoise = [
+    'REPUBLIKA',
+    'PILIPINAS',
+    'REPUBLIC',
+    'PHILIPPINES',
+    'PHILIPPINE',
+    'IDENTIFICATION',
+    'PAMBANSANG',
+    'PAGKAKAKILANLAN',
+    'NATIONAL',
+    'CARD',
+  ];
+
+  if (headerNoise.some((k) => upper.includes(k))) return false;
+
+  // Catch OCR variants of "PHILIPPINE/PHILIPPINES" such as "RHILIPPINE"
+  if (/(?:PH|RH|FH)?ILIPPIN(?:E|ES|AS)?/.test(upper) || upper.includes('HILIPPIN')) {
+    return false;
+  }
+
+  // Catch OCR variants of "IDENTIFICATION"
+  if (upper.includes('IDENTIFICAT') || upper.includes('DENTIFICATION')) {
+    return false;
+  }
+
+  // Reject field labels that are not actual person values
+  const labelNoise = [
+    'MGA PANGALAN',
+    'GIVEN NAMES',
+    'GIVEN NAME',
+    'APELYIDO',
+    'LAST NAME',
+    'MIDDLE NAME',
+    'GITNANG APELYIDO',
+    'TIRAHAN',
+    'ADDRESS',
+    'DATE OF BIRTH',
+    'PETSA NG KAPANGANAKAN',
+  ];
+  if (labelNoise.some((k) => upper.includes(k))) {
+    return false;
+  }
+
+  if (/\d/.test(cleaned)) return false;
+  if (cleaned.includes('/')) return false;
+
+  const letters = (cleaned.match(/[A-Za-z]/g) || []).length;
+  const letterRatio = letters / cleaned.length;
+  return letterRatio >= 0.7;
+}
+
+function sanitizePersonName(name: string): string {
+  const cleaned = cleanField(name);
+  if (!cleaned) return '';
+
+  // Keep only alphabetic name tokens and remove obvious OCR/document noise.
+  const tokens = cleaned
+    .split(/\s+/)
+    .map((t) => t.replace(/[^A-Za-z'-]/g, '').trim())
+    .filter((t) => t.length > 0);
+
+  if (tokens.length === 0) return '';
+
+  // First/given name fields should never be document titles.
+  const forbidden = new Set([
+    'REPUBLIC',
+    'REPUBLIKA',
+    'PHILIPPINE',
+    'PHILIPPINES',
+    'PILIPINAS',
+    'IDENTIFICATION',
+    'CARD',
+    'NATIONAL',
+    'PAMBANSANG',
+    'PAGKAKAKILANLAN',
+    'MGA',
+    'PANGALAN',
+    'GIVEN',
+    'NAME',
+    'NAMES',
+    'LAST',
+    'MIDDLE',
+    'APELYIDO',
+    'GITNANG',
+    'TIRAHAN',
+    'ADDRESS',
+  ]);
+
+  const safeTokens = tokens.filter((t) => {
+    const upper = t.toUpperCase();
+    if (forbidden.has(upper)) return false;
+    if (/(?:PH|RH|FH)?ILIPPIN(?:E|ES|AS)?/.test(upper) || upper.includes('HILIPPIN')) return false;
+    return true;
+  });
+
+  return safeTokens.join(' ').trim();
+}
+
+function findValueAfterAnyLabel(
+  lines: string[],
+  labelPatterns: string[],
+  lookahead: number = 5
+): string {
+  const upperLabels = labelPatterns.map((p) => p.toUpperCase());
+
+  for (let i = 0; i < lines.length; i++) {
+    const currentUpper = lines[i].toUpperCase();
+    if (!upperLabels.some((label) => currentUpper.includes(label))) continue;
+
+    for (let j = i + 1; j < Math.min(lines.length, i + 1 + lookahead); j++) {
+      const candidate = lines[j].trim();
+      if (!candidate) continue;
+
+      const candidateUpper = candidate.toUpperCase();
+      if (
+        candidateUpper.includes('APELYIDO') ||
+        candidateUpper.includes('LAST NAME') ||
+        candidateUpper.includes('MGA PANGALAN') ||
+        candidateUpper.includes('GIVEN NAME') ||
+        candidateUpper.includes('MIDDLE NAME') ||
+        candidateUpper.includes('DATE OF BIRTH') ||
+        candidateUpper.includes('ADDRESS') ||
+        candidateUpper.includes('TIRAHAN')
+      ) {
+        continue;
+      }
+
+      if (isLikelyNameValue(candidate)) {
+        return cleanField(candidate);
+      }
+    }
+  }
+
+  return '';
+}
+
+function findLabelIndex(lines: string[], labelPatterns: string[]): number {
+  const upperLabels = labelPatterns.map((p) => p.toUpperCase());
+  return lines.findIndex((line) => {
+    const upper = line.toUpperCase();
+    return upperLabels.some((label) => upper.includes(label));
+  });
+}
+
+function findNextValidNameAfterIndex(
+  lines: string[],
+  startIndex: number,
+  lookahead: number = 8
+): string {
+  if (startIndex < 0) return '';
+
+  for (let i = startIndex + 1; i < Math.min(lines.length, startIndex + 1 + lookahead); i++) {
+    const raw = lines[i].trim();
+    const upperRaw = raw.toUpperCase();
+    if (
+      upperRaw.includes('MGA PANGALAN') ||
+      upperRaw.includes('GIVEN NAME') ||
+      upperRaw.includes('APELYIDO') ||
+      upperRaw.includes('LAST NAME') ||
+      upperRaw.includes('MIDDLE NAME') ||
+      upperRaw.includes('TIRAHAN') ||
+      upperRaw.includes('ADDRESS') ||
+      upperRaw.includes('/')
+    ) {
+      continue;
+    }
+
+    const candidate = sanitizePersonName(lines[i]);
+    if (isLikelyNameValue(candidate)) {
+      return candidate;
+    }
+  }
+
+  return '';
 }
 
 /**
@@ -315,9 +530,12 @@ function parseAddressComponents(addressString: string): Partial<ParsedIDData> {
   
   for (const part of parts) {
     let type = 'unknown';
+    const purokMatch = part.match(/^(\d+)\s+(PUROK\s*\d+[A-Z0-9\-\/\s]*)$/i);
     
     if (part.length <= 1) {
       type = 'skip';
+    } else if (purokMatch) {
+      type = 'houseNoWithStreet';
     } else if (/^\d+$/.test(part)) {
       type = 'postalCode';
     } else if (isValidHouseNumber(part)) {
@@ -339,6 +557,16 @@ function parseAddressComponents(addressString: string): Partial<ParsedIDData> {
   for (const { part, type } of classified) {
     if (type === 'skip' || type === 'postalCode') {
       continue;
+    } else if (type === 'houseNoWithStreet') {
+      const purokMatch = part.match(/^(\d+)\s+(PUROK\s*\d+[A-Z0-9\-\/\s]*)$/i);
+      if (purokMatch) {
+        if (!components.addressHouseNo) {
+          components.addressHouseNo = purokMatch[1];
+        }
+        if (!components.addressStreet) {
+          components.addressStreet = normalizeAddressToken(purokMatch[2]);
+        }
+      }
     } else if (type === 'houseNo' && !components.addressHouseNo) {
       components.addressHouseNo = part;
     } else if (type === 'province' && !components.addressProvince) {
@@ -347,7 +575,7 @@ function parseAddressComponents(addressString: string): Partial<ParsedIDData> {
       const provinceUpper = part.toUpperCase();
       components.addressRegion = PROVINCE_TO_REGION[provinceUpper] || '';
     } else if (type === 'municipality' && !components.addressCityMunicipality) {
-      components.addressCityMunicipality = part;
+      components.addressCityMunicipality = normalizeCityMunicipalityText(part);
     } else if (type === 'barangay' && !components.addressBarangay) {
       components.addressBarangay = part;
     } else if (type === 'unknown') {
@@ -424,13 +652,48 @@ function extractAfterLabel(
   labelPatterns: string[]
 ): string {
   for (let i = 0; i < lines.length - 1; i++) {
-    const lineTrimmed = lines[i].toUpperCase().trim();
+    const rawLine = lines[i].trim();
+    const lineTrimmed = rawLine.toUpperCase();
 
     for (const pattern of labelPatterns) {
       if (lineTrimmed.includes(pattern)) {
+        const patternIndex = lineTrimmed.indexOf(pattern);
+        const inlineValue = rawLine
+          .slice(patternIndex + pattern.length)
+          .replace(/^[:/\-\s]+/, '')
+          .trim();
+
+        // Some OCR outputs place label + value on the same line.
+        if (inlineValue.length >= 2) {
+          const trimmedInlineValue = inlineValue
+            .split(/(?:APELYIDO|LAST NAME|MGA PANGALAN|GIVEN NAMES?|GITNANG APELYIDO|MIDDLE NAME|PETSA NG KAPANGANAKAN|DATE OF BIRTH|TIRAHAN|ADDRESS)/i)[0]
+            .trim();
+
+          if (trimmedInlineValue.length >= 2) {
+            return cleanField(trimmedInlineValue);
+          }
+        }
+
         let j = i + 1;
         while (j < lines.length) {
           const nextLine = lines[j].trim();
+          const nextUpper = nextLine.toUpperCase();
+
+          // Skip likely metadata/other labels while searching value line.
+          if (
+            nextUpper.includes('/') &&
+            (
+              nextUpper.includes('LAST NAME') ||
+              nextUpper.includes('GIVEN NAME') ||
+              nextUpper.includes('MIDDLE NAME') ||
+              nextUpper.includes('DATE OF BIRTH') ||
+              nextUpper.includes('ADDRESS')
+            )
+          ) {
+            j++;
+            continue;
+          }
+
           if (nextLine.length >= 2) {
             return cleanField(nextLine);
           }
@@ -441,6 +704,65 @@ function extractAfterLabel(
   }
 
   return '';
+}
+
+/**
+ * Parser optimized for Philippine National ID (PhilSys)
+ */
+function parsePhilSysID(lines: string[]): Partial<ParsedIDData> {
+  const cleanedLines = lines
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+  const rawLastName = extractAfterLabel(cleanedLines, ['APELYIDO', 'LAST NAME', 'LASTNAME']);
+  const rawFirstName = extractAfterLabel(cleanedLines, ['MGA PANGALAN', 'GIVEN NAMES', 'GIVEN NAME', 'GIVENNAME']);
+  const address = extractAfterLabel(cleanedLines, ['TIRAHAN', 'ADDRESS']);
+
+  const fallbackLastName = findValueAfterAnyLabel(cleanedLines, ['APELYIDO', 'LAST NAME', 'LASTNAME']);
+  const fallbackFirstName = findValueAfterAnyLabel(cleanedLines, ['MGA PANGALAN', 'GIVEN NAMES', 'GIVEN NAME', 'GIVENNAME']);
+
+  const resolvedLastName = isLikelyNameValue(rawLastName) ? rawLastName : fallbackLastName;
+  let resolvedFirstName = isLikelyNameValue(rawFirstName) ? rawFirstName : fallbackFirstName;
+
+  // National ID often appears as: Last Name value, then Given Name value on next lines.
+  // If first name still looks wrong/empty, recover from the lines after the surname.
+  const lastNameLabelIndex = findLabelIndex(cleanedLines, ['APELYIDO', 'LAST NAME', 'LASTNAME']);
+  const surnameIndex =
+    resolvedLastName
+      ? cleanedLines.findIndex(
+          (line, idx) =>
+            idx > lastNameLabelIndex && sanitizePersonName(line).toUpperCase() === sanitizePersonName(resolvedLastName).toUpperCase()
+        )
+      : -1;
+
+  if (!isLikelyNameValue(resolvedFirstName) || sanitizePersonName(resolvedFirstName).length === 0) {
+    const afterSurnameFirstName = findNextValidNameAfterIndex(cleanedLines, surnameIndex, 10);
+    if (afterSurnameFirstName) {
+      resolvedFirstName = afterSurnameFirstName;
+    }
+  }
+
+  const lastName = sanitizePersonName(resolvedLastName);
+  const firstName = sanitizePersonName(resolvedFirstName);
+
+  const parsedAddress = parseAddressComponents(address);
+
+  console.log(`\n[PhilSys] Parsed labeled fields:`);
+  console.log(`   firstName: "${firstName}"`);
+  console.log(`   lastName: "${lastName}"`);
+  console.log(`   address: "${address}"`);
+
+  return {
+    firstName,
+    lastName,
+    address,
+    addressHouseNo: parsedAddress.addressHouseNo || '',
+    addressStreet: parsedAddress.addressStreet || '',
+    addressBarangay: parsedAddress.addressBarangay || '',
+    addressCityMunicipality: parsedAddress.addressCityMunicipality || '',
+    addressProvince: parsedAddress.addressProvince || '',
+    addressRegion: parsedAddress.addressRegion || '',
+  };
 }
 
 /**
@@ -589,6 +911,9 @@ function isHeaderOrMetadataLine(line: string): boolean {
   const commonHeaderPhrases = [
     'REPUBLIC OF THE PHILIPPINES',
     'REPUBLIC OF',
+    'REPUBLIKA NG PILIPINAS',
+    'PAMBANSANG PAGKAKAKILANLAN',
+    'PHILIPPINE IDENTIFICATION CARD',
     'DEPARTMENT OF',
     'VALID IDENTIFICATION',
     'OFFICIAL USE ONLY',
@@ -604,6 +929,10 @@ function isHeaderOrMetadataLine(line: string): boolean {
   const documentHeaders = [
     'REPUBLIC',
     'PHILIPPINES',
+    'REPUBLIKA',
+    'PILIPINAS',
+    'PAMBANSANG',
+    'PAGKAKAKILANLAN',
     "DRIVER'S",
     'DRIVERS',
     'LICENSE',
@@ -955,9 +1284,34 @@ export function parseIDText(rawOcrText: string): ParsedIDData {
   const lines = rawOcrText.trim().split('\n').map(l => l.trim());
   console.log(`\n📋 Text split into ${lines.length} lines`);
   
-  // STEP 3: Route to parser based on ID type (for now, use generic)
-  // In the future, each type can have its own optimized parser
-  const parserResult = parseGenericID(lines);
+  // STEP 3: Route to parser based on detected ID type
+  let parserResult: Partial<ParsedIDData>;
+  if (detectionResult.type === 'philsys') {
+    const philsysResult = parsePhilSysID(lines);
+    const needsFallback = !philsysResult.firstName || !philsysResult.lastName || !philsysResult.address;
+
+    if (needsFallback) {
+      console.log('[PhilSys] Incomplete labeled extraction. Running generic fallback parser...');
+      const genericResult = parseGenericID(lines);
+      parserResult = {
+        ...genericResult,
+        ...philsysResult,
+        firstName: philsysResult.firstName || genericResult.firstName || '',
+        lastName: philsysResult.lastName || genericResult.lastName || '',
+        address: philsysResult.address || genericResult.address || '',
+        addressHouseNo: philsysResult.addressHouseNo || genericResult.addressHouseNo || '',
+        addressStreet: philsysResult.addressStreet || genericResult.addressStreet || '',
+        addressBarangay: philsysResult.addressBarangay || genericResult.addressBarangay || '',
+        addressCityMunicipality: philsysResult.addressCityMunicipality || genericResult.addressCityMunicipality || '',
+        addressProvince: philsysResult.addressProvince || genericResult.addressProvince || '',
+        addressRegion: philsysResult.addressRegion || genericResult.addressRegion || '',
+      };
+    } else {
+      parserResult = philsysResult;
+    }
+  } else {
+    parserResult = parseGenericID(lines);
+  }
   
   // STEP 4: Use individual address components from parseGenericID
   // parseGenericID already extracts and auto-populates region, so use those components directly

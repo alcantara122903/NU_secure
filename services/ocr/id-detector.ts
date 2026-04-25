@@ -44,9 +44,15 @@ export function detectIdType(rawOcrText: string): IDTypeDetectionResult {
   // PhilSys ID detection
   if (
     upperText.includes('PHILIPPINE IDENTIFICATION') ||
+    upperText.includes('PHILIPPINE IDENTIFICATION CARD') ||
     upperText.includes('PHILSYS') ||
     upperText.includes('PSN') ||
-    (upperText.includes('NATIONAL ID') && upperText.includes('PHILIPPINES'))
+    upperText.includes('PAMBANSANG PAGKAKAKILANLAN') ||
+    upperText.includes('PAGKAKAKILANLAN') ||
+    (upperText.includes('NATIONAL ID') && upperText.includes('PHILIPPINES')) ||
+    (upperText.includes('REPUBLIKA NG PILIPINAS') && upperText.includes('PILIPINAS')) ||
+    (upperText.includes('APELYIDO') && upperText.includes('MGA PANGALAN')) ||
+    (upperText.includes('LAST NAME') && upperText.includes('GIVEN NAMES'))
   ) {
     typeScores.philsys += 3;
     detectedKeywords.push('PhilSys keywords found');
