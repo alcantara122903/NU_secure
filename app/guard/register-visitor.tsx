@@ -1,3 +1,4 @@
+import { BirthdayDateField } from '@/components/birthday-date-field';
 import { Colors } from '@/constants/colors';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { cameraService } from '@/services/camera';
@@ -724,7 +725,7 @@ export default function RegisterVisitorScreen() {
     }
 
     if (!isBirthdayValid(enrolleeBirthday)) {
-      Alert.alert('Invalid Birthday', 'Birthday must be in YYYY-MM-DD format and cannot be in the future.');
+      Alert.alert('Invalid Birthday', 'Please select a valid date of birth. It cannot be in the future.');
       return;
     }
 
@@ -1344,7 +1345,18 @@ export default function RegisterVisitorScreen() {
                         />
                       </View>
 
-                      {/* 3. House No */}
+                      {/* 3. Birthday */}
+                      <View style={styles.detailField}>
+                        <BirthdayDateField
+                          label="Birthday"
+                          value={enrolleeBirthday}
+                          onChange={setEnrolleeBirthday}
+                          colors={colors}
+                          inputContainerStyle={[styles.fieldInput, { borderColor: colors.border }]}
+                        />
+                      </View>
+
+                      {/* 4. House No */}
                       <View style={styles.detailField}>
                         <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
                           House No.
@@ -1369,7 +1381,7 @@ export default function RegisterVisitorScreen() {
                         />
                       </View>
 
-                      {/* 4. Street */}
+                      {/* 5. Street */}
                       <View style={styles.detailField}>
                         <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
                           Street
@@ -1394,7 +1406,7 @@ export default function RegisterVisitorScreen() {
                         />
                       </View>
 
-                      {/* 5. Barangay */}
+                      {/* 6. Barangay */}
                       <View style={styles.detailField}>
                         <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
                           Barangay
@@ -1419,7 +1431,7 @@ export default function RegisterVisitorScreen() {
                         />
                       </View>
 
-                      {/* 6. City / Municipality */}
+                      {/* 7. City / Municipality */}
                       <View style={styles.detailField}>
                         <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
                           City / Municipality
@@ -1444,7 +1456,7 @@ export default function RegisterVisitorScreen() {
                         />
                       </View>
 
-                      {/* 7. Province */}
+                      {/* 8. Province */}
                       <View style={styles.detailField}>
                         <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
                           Province
@@ -1469,7 +1481,7 @@ export default function RegisterVisitorScreen() {
                         />
                       </View>
 
-                      {/* 8. Region */}
+                      {/* 9. Region */}
                       <View style={styles.detailField}>
                         <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
                           Region
@@ -1494,7 +1506,7 @@ export default function RegisterVisitorScreen() {
                         />
                       </View>
 
-                      {/* 9. Contact No. */}
+                      {/* 10. Contact No. */}
                       <View style={styles.detailField}>
                         <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
                           Contact No.
@@ -1517,31 +1529,6 @@ export default function RegisterVisitorScreen() {
                           value={contactNumber}
                           onChangeText={setContactNumber}
                           keyboardType="phone-pad"
-                        />
-                      </View>
-
-                      {/* 10. Birthday */}
-                      <View style={styles.detailField}>
-                        <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
-                          Birthday (YYYY-MM-DD)
-                        </Text>
-                        <TextInput
-                          style={[
-                            styles.fieldInput,
-                            {
-                              borderColor: colors.border,
-                              borderWidth: 1,
-                              color: colors.text,
-                              marginTop: 8,
-                              paddingHorizontal: 12,
-                              paddingVertical: 12,
-                              borderRadius: 8,
-                            },
-                          ]}
-                          placeholder="e.g., 2002-04-25"
-                          placeholderTextColor={colors.textSecondary}
-                          value={enrolleeBirthday}
-                          onChangeText={setEnrolleeBirthday}
                         />
                       </View>
 
@@ -1619,7 +1606,7 @@ export default function RegisterVisitorScreen() {
                           return;
                         }
                         if (!isBirthdayValid(enrolleeBirthday)) {
-                          Alert.alert('Invalid Birthday', 'Birthday must be in YYYY-MM-DD format and cannot be in the future.');
+                          Alert.alert('Invalid Birthday', 'Please select a valid date of birth. It cannot be in the future.');
                           return;
                         }
                         console.log('✅ Proceeding to Step 3 (Face Photo)');
@@ -1670,7 +1657,18 @@ export default function RegisterVisitorScreen() {
                     />
                   </View>
 
-                  {/* 3. House No */}
+                  {/* 3. Birthday */}
+                  <View style={styles.detailField}>
+                    <BirthdayDateField
+                      label="Birthday"
+                      value={contractorBirthday}
+                      onChange={setContractorBirthday}
+                      colors={colors}
+                      inputContainerStyle={[styles.fieldInput, { borderColor: colors.border }]}
+                    />
+                  </View>
+
+                  {/* 4. House No */}
                   <View style={styles.detailField}>
                     <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
                       House No.
@@ -1684,7 +1682,7 @@ export default function RegisterVisitorScreen() {
                     />
                   </View>
 
-                  {/* 4. Street */}
+                  {/* 5. Street */}
                   <View style={styles.detailField}>
                     <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
                       Street
@@ -1698,7 +1696,7 @@ export default function RegisterVisitorScreen() {
                     />
                   </View>
 
-                  {/* 5. Barangay */}
+                  {/* 6. Barangay */}
                   <View style={styles.detailField}>
                     <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
                       Barangay
@@ -1712,7 +1710,7 @@ export default function RegisterVisitorScreen() {
                     />
                   </View>
 
-                  {/* 6. City / Municipality */}
+                  {/* 7. City / Municipality */}
                   <View style={styles.detailField}>
                     <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
                       City / Municipality
@@ -1726,7 +1724,7 @@ export default function RegisterVisitorScreen() {
                     />
                   </View>
 
-                  {/* 7. Province */}
+                  {/* 8. Province */}
                   <View style={styles.detailField}>
                     <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
                       Province
@@ -1740,7 +1738,7 @@ export default function RegisterVisitorScreen() {
                     />
                   </View>
 
-                  {/* 8. Region - Auto-filled based on Province */}
+                  {/* 9. Region - Auto-filled based on Province */}
                   <View style={styles.detailField}>
                     <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
                       Region
@@ -1754,7 +1752,7 @@ export default function RegisterVisitorScreen() {
                     </View>
                   </View>
 
-                  {/* 9. Phone Number */}
+                  {/* 10. Phone Number */}
                   <View style={styles.detailField}>
                     <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
                       Phone Number
@@ -1766,20 +1764,6 @@ export default function RegisterVisitorScreen() {
                       value={contractorContactNo}
                       onChangeText={setContractorContactNo}
                       keyboardType="phone-pad"
-                    />
-                  </View>
-
-                  {/* 10. Birthday */}
-                  <View style={styles.detailField}>
-                    <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
-                      Birthday (YYYY-MM-DD)
-                    </Text>
-                    <TextInput
-                      style={[styles.fieldInput, { borderColor: colors.border, borderWidth: 1, color: colors.text, marginTop: 8, paddingHorizontal: 12, paddingVertical: 12, borderRadius: 8 }]}
-                      placeholder="e.g., 2002-04-25"
-                      placeholderTextColor={colors.textSecondary}
-                      value={contractorBirthday}
-                      onChangeText={setContractorBirthday}
                     />
                   </View>
                 </View>
@@ -1907,7 +1891,7 @@ export default function RegisterVisitorScreen() {
                       return;
                     }
                     if (!isBirthdayValid(contractorBirthday)) {
-                      Alert.alert('Invalid Birthday', 'Birthday must be in YYYY-MM-DD format and cannot be in the future.');
+                      Alert.alert('Invalid Birthday', 'Please select a valid date of birth. It cannot be in the future.');
                       return;
                     }
                     console.log('✅ Proceeding to Step 3 (Face Photo) for Contractor');
@@ -1979,7 +1963,18 @@ export default function RegisterVisitorScreen() {
                     />
                   </View>
 
-                  {/* 3. House No */}
+                  {/* 3. Birthday */}
+                  <View style={styles.detailField}>
+                    <BirthdayDateField
+                      label="Birthday"
+                      value={normalVisitorBirthday}
+                      onChange={setNormalVisitorBirthday}
+                      colors={colors}
+                      inputContainerStyle={[styles.fieldInput, { borderColor: colors.border }]}
+                    />
+                  </View>
+
+                  {/* 4. House No */}
                   <View style={styles.detailField}>
                     <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
                       House No.
@@ -2004,7 +1999,7 @@ export default function RegisterVisitorScreen() {
                     />
                   </View>
 
-                  {/* 4. Street */}
+                  {/* 5. Street */}
                   <View style={styles.detailField}>
                     <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
                       Street
@@ -2029,7 +2024,7 @@ export default function RegisterVisitorScreen() {
                     />
                   </View>
 
-                  {/* 5. Barangay */}
+                  {/* 6. Barangay */}
                   <View style={styles.detailField}>
                     <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
                       Barangay
@@ -2054,7 +2049,7 @@ export default function RegisterVisitorScreen() {
                     />
                   </View>
 
-                  {/* 6. City / Municipality */}
+                  {/* 7. City / Municipality */}
                   <View style={styles.detailField}>
                     <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
                       City / Municipality
@@ -2079,7 +2074,7 @@ export default function RegisterVisitorScreen() {
                     />
                   </View>
 
-                  {/* 7. Province */}
+                  {/* 8. Province */}
                   <View style={styles.detailField}>
                     <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
                       Province
@@ -2104,7 +2099,7 @@ export default function RegisterVisitorScreen() {
                     />
                   </View>
 
-                  {/* 8. Region */}
+                  {/* 9. Region */}
                   <View style={styles.detailField}>
                     <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
                       Region
@@ -2129,7 +2124,7 @@ export default function RegisterVisitorScreen() {
                     />
                   </View>
 
-                  {/* 9. Contact No. */}
+                  {/* 10. Contact No. */}
                   <View style={styles.detailField}>
                     <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
                       Contact No.
@@ -2152,31 +2147,6 @@ export default function RegisterVisitorScreen() {
                       value={normalVisitorContactNo}
                       onChangeText={setNormalVisitorContactNo}
                       keyboardType="phone-pad"
-                    />
-                  </View>
-
-                  {/* 10. Birthday */}
-                  <View style={styles.detailField}>
-                    <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
-                      Birthday (YYYY-MM-DD)
-                    </Text>
-                    <TextInput
-                      style={[
-                        styles.fieldInput,
-                        {
-                          borderColor: colors.border,
-                          borderWidth: 1,
-                          color: colors.text,
-                          marginTop: 8,
-                          paddingHorizontal: 12,
-                          paddingVertical: 12,
-                          borderRadius: 8,
-                        },
-                      ]}
-                      placeholder="e.g., 2002-04-25"
-                      placeholderTextColor={colors.textSecondary}
-                      value={normalVisitorBirthday}
-                      onChangeText={setNormalVisitorBirthday}
                     />
                   </View>
 
@@ -2328,7 +2298,7 @@ export default function RegisterVisitorScreen() {
                       return;
                     }
                     if (!isBirthdayValid(normalVisitorBirthday)) {
-                      Alert.alert('Invalid Birthday', 'Birthday must be in YYYY-MM-DD format and cannot be in the future.');
+                      Alert.alert('Invalid Birthday', 'Please select a valid date of birth. It cannot be in the future.');
                       return;
                     }
                     console.log('✅ Proceeding to Step 3 (Face Photo) for Normal Visitor');
