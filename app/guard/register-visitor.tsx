@@ -8,6 +8,20 @@ import { contractorService, enrolleeService, normalVisitorService } from '@/serv
 import { runOCRDiagnostics } from '@/utils/diagnostics';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import {
+  ArrowLeft,
+  Ban,
+  Camera,
+  ChevronRight,
+  FileText,
+  IdCard,
+  Lightbulb,
+  RefreshCw,
+  Search,
+  ShieldCheck,
+  UploadCloud,
+  Wrench,
+} from 'lucide-react-native';
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -15,13 +29,113 @@ import {
   Image,
   Platform,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View
 } from 'react-native';
+import Svg, { Circle, Path } from 'react-native-svg';
 import { SafeAreaView } from 'react-native-safe-area-context';
+
+function CaptureIdHeaderPattern() {
+  return (
+    <Svg
+      style={StyleSheet.absoluteFill}
+      width="100%"
+      height="100%"
+      viewBox="0 0 420 260"
+      preserveAspectRatio="none"
+    >
+      {Array.from({ length: 45 }).map((_, index) => {
+        const row = Math.floor(index / 9);
+        const col = index % 9;
+        return (
+          <Circle
+            key={index}
+            cx={22 + col * 24}
+            cy={16 + row * 24}
+            r={3}
+            fill="rgba(255,255,255,0.12)"
+          />
+        );
+      })}
+      <Path
+        d="M-40 190 C50 125, 145 250, 270 170 C345 120, 395 130, 470 80"
+        stroke="rgba(142,209,230,0.18)"
+        strokeWidth="1.5"
+        fill="none"
+      />
+      <Path
+        d="M310 80
+           C340 76, 360 64, 374 50
+           C388 64, 408 76, 438 80
+           L438 128
+           C438 168, 406 196, 374 210
+           C342 196, 310 168, 310 128
+           Z"
+        stroke="rgba(255,255,255,0.13)"
+        strokeWidth="5"
+        fill="none"
+      />
+      <Circle cx="374" cy="122" r="23" fill="rgba(255,255,255,0.05)" />
+    </Svg>
+  );
+}
+
+function CaptureIdActionButton({
+  title,
+  subtitle,
+  icon,
+  color,
+  onPress,
+  disabled,
+  loading,
+}: {
+  title: string;
+  subtitle: string;
+  icon: React.ReactNode;
+  color: string;
+  onPress: () => void;
+  disabled?: boolean;
+  loading?: boolean;
+}) {
+  return (
+    <TouchableOpacity
+      activeOpacity={0.88}
+      style={[captureStepStyles.actionButton, { backgroundColor: color }, disabled && { opacity: 0.65 }]}
+      onPress={onPress}
+      disabled={disabled}
+    >
+      <View style={captureStepStyles.actionIconBox}>
+        {loading ? <ActivityIndicator color="#FFFFFF" /> : icon}
+      </View>
+      <View style={captureStepStyles.actionTextWrapper}>
+        <Text style={captureStepStyles.actionTitle}>{title}</Text>
+        <Text style={captureStepStyles.actionSubtitle}>{subtitle}</Text>
+      </View>
+      <ChevronRight size={24} color="#FFFFFF" strokeWidth={2.8} />
+    </TouchableOpacity>
+  );
+}
+
+function CaptureIdRequirementItem({
+  icon,
+  text,
+  isLast = false,
+}: {
+  icon: React.ReactNode;
+  text: string;
+  isLast?: boolean;
+}) {
+  return (
+    <View style={[captureStepStyles.requirementItem, isLast && captureStepStyles.requirementItemLast]}>
+      <View style={captureStepStyles.requirementIconCircle}>{icon}</View>
+      <Text style={captureStepStyles.requirementText}>{text}</Text>
+    </View>
+  );
+}
 
 export default function RegisterVisitorScreen() {
   const colorScheme = useColorScheme();
@@ -731,6 +845,172 @@ export default function RegisterVisitorScreen() {
     }
   };
 
+  if (step === 1) {
+    return (
+      <SafeAreaView style={captureStepStyles.safeArea}>
+        <StatusBar barStyle="light-content" backgroundColor="#0648A8" />
+
+        <ScrollView
+          style={captureStepStyles.captureScroll}
+          contentContainerStyle={captureStepStyles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={captureStepStyles.header}>
+            <CaptureIdHeaderPattern />
+
+            <View style={captureStepStyles.headerTop}>
+              <TouchableOpacity style={captureStepStyles.captureBackButton} onPress={handleBack}>
+                <ArrowLeft size={20} color="#FFFFFF" strokeWidth={2.8} />
+                <Text style={captureStepStyles.backText}>Back</Text>
+              </TouchableOpacity>
+              <View style={captureStepStyles.headerTopSpacer} />
+            </View>
+
+            <View style={captureStepStyles.visitorBadgeWrapper}>
+              <View style={captureStepStyles.visitorBadge}>
+                <View style={captureStepStyles.badgeIconCircle}>
+                  <Text style={captureStepStyles.badgeIconText}>{visitorTypeInfo.icon}</Text>
+                </View>
+                <Text style={captureStepStyles.visitorBadgeText}>{visitorTypeInfo.label}</Text>
+              </View>
+            </View>
+
+            <Text style={captureStepStyles.stepTitle}>Step 1 of 3</Text>
+
+            <View style={captureStepStyles.progressRow}>
+              <View style={[captureStepStyles.progressBar, captureStepStyles.progressActive]} />
+              <View style={captureStepStyles.progressBar} />
+              <View style={captureStepStyles.progressBar} />
+            </View>
+          </View>
+
+          <View style={captureStepStyles.contentPanel}>
+            {!idPhotoPreview ? (
+              <>
+                <View style={captureStepStyles.scanCard}>
+                  <View style={captureStepStyles.scanGraphic}>
+                    <View style={captureStepStyles.scanCircle}>
+                      <FileText size={68} color="#0648A8" fill="#0648A8" />
+                    </View>
+
+                    <View style={[captureStepStyles.corner, captureStepStyles.cornerTopLeft]} />
+                    <View style={[captureStepStyles.corner, captureStepStyles.cornerTopRight]} />
+                    <View style={[captureStepStyles.corner, captureStepStyles.cornerBottomLeft]} />
+                    <View style={[captureStepStyles.corner, captureStepStyles.cornerBottomRight]} />
+
+                    <View style={captureStepStyles.scanLine} />
+                  </View>
+
+                  <Text style={captureStepStyles.scanTitle}>Position ID in frame</Text>
+                  <Text style={captureStepStyles.scanSubtitle}>
+                    Capture or upload a clear photo of the visitor&apos;s ID document
+                  </Text>
+                </View>
+
+                <CaptureIdActionButton
+                  title="Capture ID"
+                  subtitle="Use camera to take a photo"
+                  icon={<Camera size={24} color="#FFFFFF" fill="#FFFFFF" />}
+                  color="#0648A8"
+                  onPress={handleCaptureIdPhoto}
+                  disabled={isCapturingIdPhoto}
+                  loading={isCapturingIdPhoto}
+                />
+
+                <CaptureIdActionButton
+                  title="Upload Photo"
+                  subtitle="Choose from gallery"
+                  icon={<UploadCloud size={24} color="#FFFFFF" />}
+                  color="#279EED"
+                  onPress={handleUploadIdPhoto}
+                  disabled={isCapturingIdPhoto}
+                  loading={isCapturingIdPhoto}
+                />
+
+                <CaptureIdActionButton
+                  title="Test OCR Connection"
+                  subtitle="Check OCR service status"
+                  icon={<Wrench size={24} color="#FFFFFF" fill="#FFFFFF" />}
+                  color="#FF9500"
+                  onPress={handleRunOCRDiagnostics}
+                  disabled={isCapturingIdPhoto}
+                />
+
+                <View style={captureStepStyles.requirementsCard}>
+                  <View style={captureStepStyles.requirementsHeader}>
+                    <ShieldCheck size={26} color="#0648A8" fill="#0648A8" />
+                    <Text style={captureStepStyles.requirementsTitle}>ID Requirements</Text>
+                  </View>
+
+                  <CaptureIdRequirementItem
+                    icon={<IdCard size={24} color="#0648A8" />}
+                    text="Valid government-issued ID required"
+                  />
+                  <CaptureIdRequirementItem
+                    icon={<Search size={24} color="#0648A8" />}
+                    text="Ensure all details are clearly visible"
+                  />
+                  <CaptureIdRequirementItem
+                    icon={<Lightbulb size={24} color="#0648A8" />}
+                    text="Good lighting and no glare"
+                  />
+                  <CaptureIdRequirementItem
+                    icon={<Ban size={24} color="#0648A8" />}
+                    text="No expired IDs"
+                    isLast
+                  />
+                </View>
+              </>
+            ) : (
+              <>
+                <View style={captureStepStyles.scanCard}>
+                  <Image
+                    source={{ uri: idPhotoPreview }}
+                    style={captureStepStyles.idPreviewImage}
+                    resizeMode="cover"
+                  />
+                  <Text style={captureStepStyles.scanTitle}>ID document preview</Text>
+                  <Text style={captureStepStyles.scanSubtitle}>
+                    Review the image, then confirm to extract details or retake
+                  </Text>
+                </View>
+
+                <CaptureIdActionButton
+                  title="Confirm ID"
+                  subtitle="Extract details and continue"
+                  icon={<ShieldCheck size={24} color="#FFFFFF" fill="#FFFFFF" />}
+                  color="#22C55E"
+                  onPress={handleConfirmIdPhoto}
+                />
+
+                <CaptureIdActionButton
+                  title="Retake ID"
+                  subtitle="Capture a new photo"
+                  icon={<RefreshCw size={30} color="#FFFFFF" />}
+                  color="#FF9500"
+                  onPress={handleRetakeIdPhoto}
+                />
+
+                <View style={captureStepStyles.requirementsCard}>
+                  <View style={captureStepStyles.requirementsHeader}>
+                    <ShieldCheck size={26} color="#22C55E" fill="#22C55E" />
+                    <Text style={[captureStepStyles.requirementsTitle, { color: '#15803D' }]}>
+                      ID captured
+                    </Text>
+                  </View>
+                  <Text style={captureStepStyles.previewHintText}>
+                    ID document captured. Confirm to run OCR and continue to visitor details, or retake if
+                    the image is unclear.
+                  </Text>
+                </View>
+              </>
+            )}
+          </View>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header */}
@@ -870,147 +1150,6 @@ export default function RegisterVisitorScreen() {
                     </View>
                   </>
                 )}
-          </>
-        )}
-
-        {step === 1 && (
-          <>
-            {!idPhotoPreview ? (
-              <>
-                {/* ID Document Capture Card */}
-                <View style={[styles.cameraCard, { backgroundColor: colors.surface }]}>
-                  <View style={[styles.cameraFrame, { borderColor: colors.primary }]}>
-                    <MaterialIcons name="description" size={56} color={colors.primary} />
-                  </View>
-                  <Text style={[styles.cameraTitle, { color: colors.text }]}>
-                    Position ID in frame
-                  </Text>
-                  <Text style={[styles.cameraSubtitle, { color: colors.textSecondary }]}>
-                    Capture or upload a clear photo of the visitor&apos;s ID document
-                  </Text>
-                </View>
-
-                {/* Capture ID and Upload Photo Buttons */}
-                <View style={styles.buttonGroup}>
-                  <TouchableOpacity
-                    style={[styles.captureButton, { backgroundColor: colors.primary, flex: 1, marginRight: 10 }]}
-                    onPress={handleCaptureIdPhoto}
-                    disabled={isCapturingIdPhoto}
-                    activeOpacity={0.8}
-                  >
-                    {isCapturingIdPhoto ? (
-                      <ActivityIndicator size="small" color="#FFFFFF" />
-                    ) : (
-                      <>
-                        <MaterialIcons name="photo-camera" size={28} color="#FFFFFF" />
-                        <Text style={styles.captureButtonText}>Capture ID</Text>
-                      </>
-                    )}
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={[styles.captureButton, { backgroundColor: '#2196F3', flex: 1, marginLeft: 10 }]}
-                    onPress={handleUploadIdPhoto}
-                    disabled={isCapturingIdPhoto}
-                    activeOpacity={0.8}
-                  >
-                    {isCapturingIdPhoto ? (
-                      <ActivityIndicator size="small" color="#FFFFFF" />
-                    ) : (
-                      <>
-                        <MaterialIcons name="cloud-upload" size={28} color="#FFFFFF" />
-                        <Text style={styles.captureButtonText}>Upload Photo</Text>
-                      </>
-                    )}
-                  </TouchableOpacity>
-                </View>
-
-                {/* Diagnostic Button */}
-                <TouchableOpacity
-                  style={[styles.diagnosticButton, { backgroundColor: '#FF9800', marginHorizontal: 20 }]}
-                  onPress={handleRunOCRDiagnostics}
-                  activeOpacity={0.8}
-                >
-                  <MaterialIcons name="build" size={24} color="#FFFFFF" />
-                  <Text style={styles.diagnosticButtonText}>Test OCR Connection</Text>
-                </TouchableOpacity>
-
-                {/* Instructions */}
-                <View style={[styles.instructionsCard, { backgroundColor: colors.surface }]}>
-                  <Text style={[styles.instructionsTitle, { color: colors.primary }]}>
-                    ID Requirements:
-                  </Text>
-                  <View style={styles.instructionsList}>
-                    <View style={styles.instructionItem}>
-                      <Text style={[styles.bullet, { color: colors.primary }]}>•</Text>
-                      <Text style={[styles.instructionText, { color: colors.text }]}>
-                        Valid government-issued ID required
-                      </Text>
-                    </View>
-                    <View style={styles.instructionItem}>
-                      <Text style={[styles.bullet, { color: colors.primary }]}>•</Text>
-                      <Text style={[styles.instructionText, { color: colors.text }]}>
-                        Ensure all details are clearly visible
-                      </Text>
-                    </View>
-                    <View style={styles.instructionItem}>
-                      <Text style={[styles.bullet, { color: colors.primary }]}>•</Text>
-                      <Text style={[styles.instructionText, { color: colors.text }]}>
-                        Good lighting for accurate data capture
-                      </Text>
-                    </View>
-                  </View>
-                </View>
-              </>
-            ) : (
-              <>
-                {/* ID Photo Preview */}
-                <View style={[styles.cameraCard, { backgroundColor: colors.surface }]}>
-                  <Image
-                    source={{ uri: idPhotoPreview }}
-                    style={styles.photoPreview}
-                    resizeMode="cover"
-                  />
-                  <Text style={[styles.cameraTitle, { color: colors.text }]}>
-                    ID Document Preview
-                  </Text>
-                  <Text style={[styles.cameraSubtitle, { color: colors.textSecondary }]}>
-                    Review the captured ID document
-                  </Text>
-                </View>
-
-                {/* Confirm / Retake Buttons */}
-                <View style={styles.buttonGroup}>
-                  <TouchableOpacity
-                    style={[styles.captureButton, { backgroundColor: '#4CAF50' }]}
-                    onPress={handleConfirmIdPhoto}
-                    activeOpacity={0.8}
-                  >
-                    <MaterialIcons name="check-circle" size={28} color="#FFFFFF" />
-                    <Text style={styles.captureButtonText}>Confirm ID</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={[styles.captureButton, { backgroundColor: '#FF9800' }]}
-                    onPress={handleRetakeIdPhoto}
-                    activeOpacity={0.8}
-                  >
-                    <MaterialIcons name="refresh" size={28} color="#FFFFFF" />
-                    <Text style={styles.captureButtonText}>Retake ID</Text>
-                  </TouchableOpacity>
-                </View>
-
-                {/* Info */}
-                <View style={[styles.instructionsCard, { backgroundColor: '#E8F5E9' }]}>
-                  <Text style={[styles.instructionsTitle, { color: '#2E7D32' }]}>
-                    ✓ ID Captured
-                  </Text>
-                  <Text style={[styles.instructionText, { color: '#388E3C', marginTop: 8 }]}>
-                    ID document captured successfully. Proceed to extract personal information.
-                  </Text>
-                </View>
-              </>
-            )}
           </>
         )}
 
@@ -2850,5 +2989,304 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#FFFFFF',
+  },
+});
+
+const captureStepStyles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#0648A8',
+  },
+  captureScroll: {
+    flex: 1,
+    backgroundColor: '#F4F7FB',
+  },
+  scrollContent: {
+    paddingBottom: 18,
+  },
+  header: {
+    backgroundColor: '#0648A8',
+    paddingHorizontal: 16,
+    paddingTop: 22,
+    paddingBottom: 24,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  headerTop: {
+    zIndex: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  headerTopSpacer: {
+    width: 88,
+    height: 1,
+  },
+  visitorBadgeWrapper: {
+    zIndex: 2,
+    alignItems: 'center',
+    marginTop: 12,
+  },
+  captureBackButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 9,
+    paddingHorizontal: 12,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.25)',
+  },
+  backText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  visitorBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFD914',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 5,
+  },
+  badgeIconCircle: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#111827',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
+  },
+  badgeIconText: {
+    color: '#FFD914',
+    fontWeight: '900',
+    fontSize: 13,
+  },
+  visitorBadgeText: {
+    color: '#0648A8',
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  stepTitle: {
+    zIndex: 2,
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '900',
+    textAlign: 'center',
+    marginTop: 14,
+  },
+  progressRow: {
+    zIndex: 2,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 12,
+  },
+  progressBar: {
+    width: 44,
+    height: 5,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.45)',
+  },
+  progressActive: {
+    backgroundColor: '#FFD914',
+  },
+  contentPanel: {
+    backgroundColor: '#F8FAFC',
+    marginTop: -14,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 14,
+    paddingTop: 16,
+  },
+  scanCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    paddingVertical: 20,
+    paddingHorizontal: 14,
+    alignItems: 'center',
+    marginBottom: 14,
+    shadowColor: '#0F172A',
+    shadowOpacity: 0.1,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 5,
+  },
+  scanGraphic: {
+    width: 180,
+    height: 148,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
+  },
+  scanCircle: {
+    width: 104,
+    height: 104,
+    borderRadius: 52,
+    backgroundColor: '#EAF2FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  corner: {
+    position: 'absolute',
+    width: 36,
+    height: 36,
+    borderColor: '#0648A8',
+  },
+  cornerTopLeft: {
+    top: 12,
+    left: 16,
+    borderTopWidth: 4,
+    borderLeftWidth: 4,
+    borderTopLeftRadius: 12,
+  },
+  cornerTopRight: {
+    top: 12,
+    right: 16,
+    borderTopWidth: 4,
+    borderRightWidth: 4,
+    borderTopRightRadius: 12,
+  },
+  cornerBottomLeft: {
+    bottom: 12,
+    left: 16,
+    borderBottomWidth: 4,
+    borderLeftWidth: 4,
+    borderBottomLeftRadius: 12,
+  },
+  cornerBottomRight: {
+    bottom: 12,
+    right: 16,
+    borderBottomWidth: 4,
+    borderRightWidth: 4,
+    borderBottomRightRadius: 12,
+  },
+  scanLine: {
+    position: 'absolute',
+    height: 3,
+    width: 140,
+    borderRadius: 999,
+    backgroundColor: '#2CA6F3',
+  },
+  scanTitle: {
+    color: '#111827',
+    fontSize: 18,
+    fontWeight: '900',
+    marginTop: 2,
+    textAlign: 'center',
+  },
+  scanSubtitle: {
+    color: '#5B6472',
+    fontSize: 13,
+    lineHeight: 19,
+    fontWeight: '500',
+    textAlign: 'center',
+    marginTop: 8,
+  },
+  idPreviewImage: {
+    width: '100%',
+    maxWidth: 230,
+    height: 160,
+    borderRadius: 14,
+    marginBottom: 8,
+    backgroundColor: '#E5EAF2',
+  },
+  previewHintText: {
+    color: '#166534',
+    fontSize: 13,
+    fontWeight: '600',
+    lineHeight: 19,
+  },
+  actionButton: {
+    minHeight: 64,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+    shadowColor: '#0F172A',
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 7 },
+    elevation: 5,
+  },
+  actionIconBox: {
+    width: 42,
+    height: 42,
+    borderRadius: 11,
+    backgroundColor: 'rgba(255,255,255,0.16)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  actionTextWrapper: {
+    flex: 1,
+  },
+  actionTitle: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  actionSubtitle: {
+    color: 'rgba(255,255,255,0.88)',
+    fontSize: 12,
+    fontWeight: '500',
+    marginTop: 2,
+  },
+  requirementsCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 14,
+    marginTop: 10,
+    shadowColor: '#0F172A',
+    shadowOpacity: 0.1,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 7 },
+    elevation: 5,
+  },
+  requirementsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  requirementsTitle: {
+    color: '#0648A8',
+    fontSize: 17,
+    fontWeight: '900',
+    marginLeft: 8,
+  },
+  requirementItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5EAF2',
+  },
+  requirementItemLast: {
+    borderBottomWidth: 0,
+  },
+  requirementIconCircle: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#EAF2FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  requirementText: {
+    flex: 1,
+    color: '#1F2937',
+    fontSize: 13,
+    fontWeight: '600',
+    lineHeight: 18,
   },
 });
