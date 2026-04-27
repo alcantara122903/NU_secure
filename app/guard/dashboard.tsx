@@ -3,6 +3,7 @@ import { supabase } from '@/services/database';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useFocusEffect } from '@react-navigation/native';
 import { useRouter } from 'expo-router';
+import { LogOut } from 'lucide-react-native';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -15,6 +16,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Svg, { Circle, Path } from 'react-native-svg';
 
 type InsideType = 'all' | 'enrollee' | 'contractor' | 'normal';
 
@@ -29,6 +31,59 @@ type InsideVisitor = {
 };
 
 const INSIDE_PAGE_SIZE = 5;
+
+function HeaderBackgroundPattern() {
+  return (
+    <Svg
+      style={StyleSheet.absoluteFill}
+      width="100%"
+      height="100%"
+      viewBox="0 0 420 190"
+      preserveAspectRatio="none"
+    >
+      <Path
+        d="M-40 150 C60 85, 150 210, 270 120 C345 65, 395 85, 470 35"
+        stroke="rgba(255,255,255,0.10)"
+        strokeWidth="1.4"
+        fill="none"
+      />
+      <Path
+        d="M-35 160 C75 95, 160 215, 285 130 C350 85, 405 95, 465 50"
+        stroke="rgba(255,255,255,0.08)"
+        strokeWidth="1.2"
+        fill="none"
+      />
+      <Path
+        d="M-30 170 C90 105, 175 220, 300 140 C365 100, 415 110, 465 70"
+        stroke="rgba(142,209,230,0.18)"
+        strokeWidth="1.3"
+        fill="none"
+      />
+
+      <Path
+        d="M230 -20 L460 -20 L335 210 L110 210 Z"
+        fill="rgba(255,255,255,0.035)"
+      />
+
+      <Path
+        d="M355 85 
+           C382 82, 400 70, 410 58
+           C420 70, 438 82, 465 85
+           L465 130
+           C465 165, 438 184, 410 195
+           C382 184, 355 165, 355 130
+           Z"
+        stroke="rgba(255,255,255,0.18)"
+        strokeWidth="4"
+        fill="none"
+      />
+
+      <Circle cx="310" cy="42" r="2" fill="rgba(255,255,255,0.14)" />
+      <Circle cx="335" cy="62" r="1.6" fill="rgba(255,255,255,0.10)" />
+      <Circle cx="275" cy="88" r="1.4" fill="rgba(142,209,230,0.18)" />
+    </Svg>
+  );
+}
 
 export default function DashboardScreen() {
   const router = useRouter();
@@ -206,15 +261,25 @@ export default function DashboardScreen() {
       <StatusBar barStyle="light-content" backgroundColor="#003F96" />
 
       <View style={styles.header}>
-        <View>
-          <Text style={styles.headerTitle}>Guard Portal</Text>
-          <Text style={styles.headerSubtitle}>{guardName}</Text>
-        </View>
+        <HeaderBackgroundPattern />
 
-        <TouchableOpacity activeOpacity={0.85} style={styles.logoutButton} onPress={handleLogout}>
-          <MaterialIcons name="logout" size={18} color="#FFFFFF" />
-          <Text style={styles.logoutText}>Logout</Text>
-        </TouchableOpacity>
+        <View style={styles.headerContent}>
+          <View>
+            <Text style={styles.headerTitle}>Guard Portal</Text>
+
+            <View style={styles.guardRow}>
+              <View style={styles.shieldIcon}>
+                <Text style={styles.shieldText}>✓</Text>
+              </View>
+              <Text style={styles.headerSubtitle}>Guard Demo</Text>
+            </View>
+          </View>
+
+          <TouchableOpacity activeOpacity={0.85} style={styles.logoutButton} onPress={handleLogout}>
+            <LogOut size={22} color="#FFFFFF" strokeWidth={2.6} />
+            <Text style={styles.logoutText}>Logout</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
@@ -428,39 +493,64 @@ const styles = StyleSheet.create({
   },
   header: {
     backgroundColor: '#0648A8',
-    paddingHorizontal: 18,
-    paddingTop: 8,
-    paddingBottom: 20,
+    paddingTop: 34,
+    paddingBottom: 34,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  headerContent: {
+    paddingHorizontal: 22,
     flexDirection: 'row',
     alignItems: 'flex-start',
     justifyContent: 'space-between',
+    zIndex: 2,
   },
   headerTitle: {
-    fontSize: 29,
-    fontWeight: '800',
     color: '#FFFFFF',
+    fontSize: 34,
+    fontWeight: '800',
     letterSpacing: -0.8,
+  },
+  guardRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  shieldIcon: {
+    width: 25,
+    height: 25,
+    borderRadius: 8,
+    backgroundColor: 'rgba(142, 209, 230, 0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#8ED1E6',
+  },
+  shieldText: {
+    color: '#8ED1E6',
+    fontSize: 14,
+    fontWeight: '800',
   },
   headerSubtitle: {
     color: '#D7E8FF',
-    fontSize: 14,
-    marginTop: 4,
+    fontSize: 18,
+    marginLeft: 10,
     fontWeight: '500',
   },
   logoutButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 9,
     borderWidth: 1.5,
     borderColor: 'rgba(255,255,255,0.55)',
-    paddingVertical: 9,
-    paddingHorizontal: 12,
-    borderRadius: 14,
+    paddingVertical: 13,
+    paddingHorizontal: 16,
+    borderRadius: 18,
     backgroundColor: 'rgba(255,255,255,0.08)',
   },
   logoutText: {
     color: '#FFFFFF',
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: '700',
   },
   content: {
