@@ -19,20 +19,13 @@ function generateQRToken(): string {
   return `${timestamp}-${random}`.toUpperCase();
 }
 
-/**
- * Generate pass number (format: PASS-XXXXXXXX)
- */
-function generatePassNumber(): string {
-  const random = Math.random().toString(36).substring(2, 10).toUpperCase();
-  return `PASS-${random}`;
-}
-
-/**
- * Generate control number (format: CTRL-XXXXXXXX)
- */
-function generateControlNumber(): string {
-  const random = Math.random().toString(36).substring(2, 10).toUpperCase();
-  return `CTRL-${random}`;
+/** Generate ID format: YYYY-XXXXXX */
+function generateYearSixCode(): string {
+  const year = new Date().getFullYear();
+  const sixDigits = Math.floor(Math.random() * 1_000_000)
+    .toString()
+    .padStart(6, '0');
+  return `${year}-${sixDigits}`;
 }
 
 export const normalVisitorService = {
@@ -78,8 +71,12 @@ export const normalVisitorService = {
 
       // STEP 2: Create visitor record with photo uploads
       console.log('\n📝 STEP 2: Creating visitor record...');
-      const passNumber = generatePassNumber();
-      const controlNumber = generateControlNumber();
+      const passNumber = visitorData.passNumber?.trim();
+      const controlNumber = visitorData.controlNumber?.trim() || generateYearSixCode();
+      if (!passNumber) {
+        console.error('❌ ID Pass Number is required for normal visitor registration');
+        return null;
+      }
       console.log(`   pass_number: ${passNumber}, control_number: ${controlNumber}`);
 
       // Upload face photo only
@@ -140,6 +137,12 @@ export const normalVisitorService = {
           visitor_id: existingVisitor.visitor_id,
         }];
         visitorError = null;
+        if (visitorData.birthday?.trim()) {
+          await supabase
+            .from('visitor')
+            .update({ birthday: visitorData.birthday.trim() })
+            .eq('visitor_id', existingVisitor.visitor_id);
+        }
         console.log('\n✅ Using existing visitor record - no new record created');
       } else {
         // CREATE: New visitor record with retry logic
@@ -156,6 +159,7 @@ export const normalVisitorService = {
               contact_no: visitorData.contactNo,
               pass_number: passNumber,
               control_number: controlNumber,
+              birthday: visitorData.birthday?.trim() || null,
               address_id: addressId || null,
               visitor_photo_with_id_url: visitorPhotoUrl || null,
               created_at: new Date().toISOString(),

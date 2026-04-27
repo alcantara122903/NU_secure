@@ -61,6 +61,8 @@ export interface EnrolleeQRData {
 export interface VisitorRegistrationData {
   firstName: string;
   lastName: string;
+  /** ISO date string formatted as YYYY-MM-DD */
+  birthday?: string;
   addressHouseNo?: string;
   addressStreet?: string;
   addressBarangay?: string;
@@ -71,4 +73,6 @@ export interface VisitorRegistrationData {
   facePhotoUri?: string;
   idPhotoUri?: string;
   reasonForVisit?: string;
+  passNumber?: string;
+  controlNumber?: string;
 }

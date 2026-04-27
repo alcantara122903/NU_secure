@@ -51,6 +51,9 @@ export default function RegisterVisitorScreen() {
   const [normalVisitorProvince, setNormalVisitorProvince] = useState('');
   const [normalVisitorRegion, setNormalVisitorRegion] = useState('');
   const [normalVisitorContactNo, setNormalVisitorContactNo] = useState('');
+  const [normalVisitorBirthday, setNormalVisitorBirthday] = useState('');
+  const [normalVisitorPassNumber, setNormalVisitorPassNumber] = useState('');
+  const [normalVisitorControlNumber, setNormalVisitorControlNumber] = useState('');
   const [normalVisitorReasonForVisit, setNormalVisitorReasonForVisit] = useState('');
   
   // Contractor Step 1 Fields
@@ -63,6 +66,7 @@ export default function RegisterVisitorScreen() {
   const [contractorProvince, setContractorProvince] = useState('');
   const [contractorRegion, setContractorRegion] = useState('');
   const [contractorContactNo, setContractorContactNo] = useState('');
+  const [contractorBirthday, setContractorBirthday] = useState('');
   const [selectedContractorDestinationOffices, setSelectedContractorDestinationOffices] = useState<string[]>([]);
   const [contractorPassNumber, setContractorPassNumber] = useState('');
   const [contractorControlNumber, setContractorControlNumber] = useState('');
@@ -93,8 +97,29 @@ export default function RegisterVisitorScreen() {
   const [passNumber, setPassNumber] = useState('');
   const [controlNumber, setControlNumber] = useState('');
   const [contactNumber, setContactNumber] = useState('');
+  const [enrolleeBirthday, setEnrolleeBirthday] = useState('');
   const [isCreatingEnrollee, setIsCreatingEnrollee] = useState(false);
   const [ocrExtractionFailed, setOcrExtractionFailed] = useState(false);
+
+  const generateYearSixCode = () => {
+    const year = new Date().getFullYear();
+    const sixDigits = Math.floor(Math.random() * 1_000_000)
+      .toString()
+      .padStart(6, '0');
+    return `${year}-${sixDigits}`;
+  };
+
+  const isBirthdayFormatValid = (value: string): boolean => /^\d{4}-\d{2}-\d{2}$/.test(value);
+  const isBirthdayValid = (value: string): boolean => {
+    const trimmed = value.trim();
+    if (!trimmed) return false;
+    if (!isBirthdayFormatValid(trimmed)) return false;
+    const parsed = new Date(`${trimmed}T00:00:00`);
+    if (Number.isNaN(parsed.getTime())) return false;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return parsed <= today;
+  };
 
   const offices = [
     'Admissions Office',
@@ -118,17 +143,26 @@ export default function RegisterVisitorScreen() {
     );
   };
 
-  // Generate pass number and control number when entering Step 2
+  // Auto-generate control number only (ID pass number is manual input).
   useEffect(() => {
-    if (step === 2 && !controlNumber) {
-      const pass = `PASS${Date.now()}`;
-      const control = `CTRL${Date.now()}`;
-      setPassNumber(pass);
+    if (step === 2 && visitorType === 'enrollee' && !controlNumber) {
+      const control = generateYearSixCode();
       setControlNumber(control);
-      console.log(`📋 Generated pass number: ${pass}`);
       console.log(`📋 Generated control number: ${control}`);
     }
-  }, [step, controlNumber]);
+  }, [step, visitorType, controlNumber]);
+
+  useEffect(() => {
+    if (step === 2 && visitorType === 'contractor' && !contractorControlNumber) {
+      setContractorControlNumber(generateYearSixCode());
+    }
+  }, [step, visitorType, contractorControlNumber]);
+
+  useEffect(() => {
+    if (step === 2 && visitorType === 'normal' && !normalVisitorControlNumber) {
+      setNormalVisitorControlNumber(generateYearSixCode());
+    }
+  }, [step, visitorType, normalVisitorControlNumber]);
 
   const getVisitorTypeDisplay = () => {
     switch (visitorType) {
@@ -207,6 +241,7 @@ export default function RegisterVisitorScreen() {
         const result = await contractorService.registerAndGenerateQRPass({
           firstName: contractorFirstName,
           lastName: contractorLastName,
+          birthday: contractorBirthday,
           contactNo: contractorContactNo,
           addressHouseNo: contractorHouseNo,
           addressStreet: contractorStreet,
@@ -216,6 +251,7 @@ export default function RegisterVisitorScreen() {
           addressRegion: contractorRegion,
           destinationOfficeId: primaryOfficeId,
           idPassNumber: contractorPassNumber,
+          controlNumber: contractorControlNumber,
           reasonForVisit: contractorReasonForVisit,
           facePhotoUri: capturedFacePhoto || undefined,
           idPhotoUri: capturedIdPhoto || undefined,
@@ -273,6 +309,7 @@ export default function RegisterVisitorScreen() {
         const result = await normalVisitorService.registerAndGenerateQRTicket({
           firstName: normalVisitorFirstName,
           lastName: normalVisitorLastName,
+          birthday: normalVisitorBirthday,
           contactNo: normalVisitorContactNo,
           addressHouseNo: normalVisitorHouseNo,
           addressStreet: normalVisitorStreet,
@@ -281,6 +318,8 @@ export default function RegisterVisitorScreen() {
           addressProvince: normalVisitorProvince,
           addressRegion: normalVisitorRegion,
           reasonForVisit: normalVisitorReasonForVisit,
+          passNumber: normalVisitorPassNumber,
+          controlNumber: normalVisitorControlNumber,
           facePhotoUri: capturedFacePhoto || undefined,
           idPhotoUri: capturedIdPhoto || undefined,
           selectedOfficeIds: selectedOfficeIds,
@@ -553,6 +592,8 @@ export default function RegisterVisitorScreen() {
     const missingFields: string[] = [];
     if (!extractedFirstName?.trim()) missingFields.push('First Name');
     if (!extractedLastName?.trim()) missingFields.push('Last Name');
+    if (!enrolleeBirthday?.trim()) missingFields.push('Birthday');
+    if (!passNumber?.trim()) missingFields.push('ID Pass Number');
     // At least one address component should be filled
     const hasAddressData = addressHouseNo?.trim() || addressStreet?.trim() || 
                           addressBarangay?.trim() || addressMunicipality?.trim() || 
@@ -565,6 +606,11 @@ export default function RegisterVisitorScreen() {
         `Please fill in the following fields before proceeding:\n\n• ${missingFields.join('\n• ')}`,
         [{ text: 'OK' }]
       );
+      return;
+    }
+
+    if (!isBirthdayValid(enrolleeBirthday)) {
+      Alert.alert('Invalid Birthday', 'Birthday must be in YYYY-MM-DD format and cannot be in the future.');
       return;
     }
 
@@ -582,15 +628,16 @@ export default function RegisterVisitorScreen() {
         contactNo: contactNumber,
       });
 
-      // Generate unique pass number and QR token
-      const pass = `PASS${Date.now()}`;
-      const control = `CTRL${Date.now()}`;
+      // ID pass number is manual; control number is auto-generated.
+      const pass = passNumber.trim();
+      const control = controlNumber || generateYearSixCode();
       const qrToken = `QR-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
       // Save enrollee to database
       const enrolleeResult = await enrolleeService.createEnrollee({
         firstName: extractedFirstName,
         lastName: extractedLastName,
+        birthday: enrolleeBirthday,
         // Separate address components
         addressHouseNo,
         addressStreet,
@@ -1334,7 +1381,32 @@ export default function RegisterVisitorScreen() {
                         />
                       </View>
 
-                      {/* Pass Number */}
+                      {/* 10. Birthday */}
+                      <View style={styles.detailField}>
+                        <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
+                          Birthday (YYYY-MM-DD)
+                        </Text>
+                        <TextInput
+                          style={[
+                            styles.fieldInput,
+                            {
+                              borderColor: colors.border,
+                              borderWidth: 1,
+                              color: colors.text,
+                              marginTop: 8,
+                              paddingHorizontal: 12,
+                              paddingVertical: 12,
+                              borderRadius: 8,
+                            },
+                          ]}
+                          placeholder="e.g., 2002-04-25"
+                          placeholderTextColor={colors.textSecondary}
+                          value={enrolleeBirthday}
+                          onChangeText={setEnrolleeBirthday}
+                        />
+                      </View>
+
+                      {/* 11. Pass Number */}
                       <View style={styles.detailField}>
                         <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
                           Pass Number
@@ -1359,7 +1431,7 @@ export default function RegisterVisitorScreen() {
                         />
                       </View>
 
-                      {/* Control Number - READ-ONLY */}
+                      {/* 12. Control Number - READ-ONLY */}
                       <View style={styles.detailField}>
                         <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
                           Control Number
@@ -1396,6 +1468,8 @@ export default function RegisterVisitorScreen() {
                         const missingFields: string[] = [];
                         if (!extractedFirstName?.trim()) missingFields.push('First Name');
                         if (!extractedLastName?.trim()) missingFields.push('Last Name');
+                        if (!enrolleeBirthday?.trim()) missingFields.push('Birthday');
+                        if (!passNumber?.trim()) missingFields.push('ID Pass Number');
 
                         if (missingFields.length > 0) {
                           Alert.alert(
@@ -1403,6 +1477,10 @@ export default function RegisterVisitorScreen() {
                             `Please fill in the following fields before proceeding:\n\n• ${missingFields.join('\n• ')}`,
                             [{ text: 'OK' }]
                           );
+                          return;
+                        }
+                        if (!isBirthdayValid(enrolleeBirthday)) {
+                          Alert.alert('Invalid Birthday', 'Birthday must be in YYYY-MM-DD format and cannot be in the future.');
                           return;
                         }
                         console.log('✅ Proceeding to Step 3 (Face Photo)');
@@ -1551,6 +1629,20 @@ export default function RegisterVisitorScreen() {
                       keyboardType="phone-pad"
                     />
                   </View>
+
+                  {/* 10. Birthday */}
+                  <View style={styles.detailField}>
+                    <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
+                      Birthday (YYYY-MM-DD)
+                    </Text>
+                    <TextInput
+                      style={[styles.fieldInput, { borderColor: colors.border, borderWidth: 1, color: colors.text, marginTop: 8, paddingHorizontal: 12, paddingVertical: 12, borderRadius: 8 }]}
+                      placeholder="e.g., 2002-04-25"
+                      placeholderTextColor={colors.textSecondary}
+                      value={contractorBirthday}
+                      onChangeText={setContractorBirthday}
+                    />
+                  </View>
                 </View>
 
                 {/* Destination Office - Dropdown with Checkboxes */}
@@ -1617,7 +1709,7 @@ export default function RegisterVisitorScreen() {
                     </Text>
                     <TextInput
                       style={[styles.fieldInput, { borderColor: colors.border, borderWidth: 1, color: colors.text, marginTop: 8, paddingHorizontal: 12, paddingVertical: 12, borderRadius: 8 }]}
-                      placeholder="Enter or generate pass number"
+                      placeholder="Enter ID pass number"
                       placeholderTextColor={colors.textSecondary}
                       value={contractorPassNumber}
                       onChangeText={setContractorPassNumber}
@@ -1633,7 +1725,7 @@ export default function RegisterVisitorScreen() {
                       style={[styles.fieldInput, { borderColor: colors.border, borderWidth: 1, marginTop: 8, paddingHorizontal: 12, paddingVertical: 12, borderRadius: 8, backgroundColor: colors.background, justifyContent: 'center' }]}
                     >
                       <Text style={[styles.fieldValue, { color: colors.text, fontSize: 16, fontWeight: '600' }]}>
-                        {contractorControlNumber || 'CTRL-' + Date.now().toString().slice(-8)}
+                        {contractorControlNumber || 'Generating...'}
                       </Text>
                     </View>
                   </View>
@@ -1662,6 +1754,8 @@ export default function RegisterVisitorScreen() {
                     const missingFields: string[] = [];
                     if (!contractorFirstName?.trim()) missingFields.push('First Name');
                     if (!contractorLastName?.trim()) missingFields.push('Last Name');
+                    if (!contractorBirthday?.trim()) missingFields.push('Birthday');
+                    if (!contractorPassNumber?.trim()) missingFields.push('ID Pass Number');
                     if (selectedContractorDestinationOffices.length === 0) missingFields.push('Destination Office');
                     if (!contractorReasonForVisit?.trim()) missingFields.push('Reason For Visit');
 
@@ -1671,6 +1765,10 @@ export default function RegisterVisitorScreen() {
                         `Please fill in the following fields before proceeding:\n\n• ${missingFields.join('\n• ')}`,
                         [{ text: 'OK' }]
                       );
+                      return;
+                    }
+                    if (!isBirthdayValid(contractorBirthday)) {
+                      Alert.alert('Invalid Birthday', 'Birthday must be in YYYY-MM-DD format and cannot be in the future.');
                       return;
                     }
                     console.log('✅ Proceeding to Step 3 (Face Photo) for Contractor');
@@ -1918,7 +2016,83 @@ export default function RegisterVisitorScreen() {
                     />
                   </View>
 
-                  {/* Reason For Visit */}
+                  {/* 10. Birthday */}
+                  <View style={styles.detailField}>
+                    <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
+                      Birthday (YYYY-MM-DD)
+                    </Text>
+                    <TextInput
+                      style={[
+                        styles.fieldInput,
+                        {
+                          borderColor: colors.border,
+                          borderWidth: 1,
+                          color: colors.text,
+                          marginTop: 8,
+                          paddingHorizontal: 12,
+                          paddingVertical: 12,
+                          borderRadius: 8,
+                        },
+                      ]}
+                      placeholder="e.g., 2002-04-25"
+                      placeholderTextColor={colors.textSecondary}
+                      value={normalVisitorBirthday}
+                      onChangeText={setNormalVisitorBirthday}
+                    />
+                  </View>
+
+                  {/* 11. ID Pass Number (Manual Input) */}
+                  <View style={styles.detailField}>
+                    <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
+                      ID Pass Number
+                    </Text>
+                    <TextInput
+                      style={[
+                        styles.fieldInput,
+                        {
+                          borderColor: colors.border,
+                          borderWidth: 1,
+                          color: colors.text,
+                          marginTop: 8,
+                          paddingHorizontal: 12,
+                          paddingVertical: 12,
+                          borderRadius: 8,
+                        },
+                      ]}
+                      placeholder="Enter ID pass number"
+                      placeholderTextColor={colors.textSecondary}
+                      value={normalVisitorPassNumber}
+                      onChangeText={setNormalVisitorPassNumber}
+                    />
+                  </View>
+
+                  {/* 12. Control Number (Auto Generated) */}
+                  <View style={styles.detailField}>
+                    <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
+                      Control Number
+                    </Text>
+                    <View
+                      style={[
+                        styles.fieldInput,
+                        {
+                          borderColor: colors.border,
+                          borderWidth: 1,
+                          marginTop: 8,
+                          paddingHorizontal: 12,
+                          paddingVertical: 12,
+                          borderRadius: 8,
+                          backgroundColor: colors.background,
+                          justifyContent: 'center',
+                        },
+                      ]}
+                    >
+                      <Text style={[styles.fieldValue, { color: colors.text, fontSize: 16, fontWeight: '600' }]}>
+                        {normalVisitorControlNumber || 'Generating...'}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* 13. Reason For Visit */}
                   <View style={styles.detailField}>
                     <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
                       Reason For Visit
@@ -2000,6 +2174,8 @@ export default function RegisterVisitorScreen() {
                     const missingFields: string[] = [];
                     if (!normalVisitorFirstName?.trim()) missingFields.push('First Name');
                     if (!normalVisitorLastName?.trim()) missingFields.push('Last Name');
+                    if (!normalVisitorBirthday?.trim()) missingFields.push('Birthday');
+                    if (!normalVisitorPassNumber?.trim()) missingFields.push('ID Pass Number');
                     if (!normalVisitorContactNo?.trim()) missingFields.push('Contact No');
                     if (selectedDestinationOffices.length === 0) missingFields.push('Destination Office');
                     if (!normalVisitorReasonForVisit?.trim()) missingFields.push('Reason For Visit');
@@ -2010,6 +2186,10 @@ export default function RegisterVisitorScreen() {
                         `Please fill in the following fields before proceeding:\n\n• ${missingFields.join('\n• ')}`,
                         [{ text: 'OK' }]
                       );
+                      return;
+                    }
+                    if (!isBirthdayValid(normalVisitorBirthday)) {
+                      Alert.alert('Invalid Birthday', 'Birthday must be in YYYY-MM-DD format and cannot be in the future.');
                       return;
                     }
                     console.log('✅ Proceeding to Step 3 (Face Photo) for Normal Visitor');

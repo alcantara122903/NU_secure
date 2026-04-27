@@ -257,6 +257,13 @@ export const enrolleeService = {
           visitor_photo_with_id_url: existingVisitor.visitor_id ? photoUrl : null, // Update photo if new one provided
         };
 
+        if (enrolleeData.birthday?.trim()) {
+          await supabase
+            .from('visitor')
+            .update({ birthday: enrolleeData.birthday.trim() })
+            .eq('visitor_id', existingVisitor.visitor_id);
+        }
+
         console.log('\n✅ Using existing visitor record - no new record created');
       } else {
         // Visitor doesn't exist - create new record
@@ -270,6 +277,7 @@ export const enrolleeService = {
           visitor_photo_with_id_url: photoUrl || null,
           pass_number: enrolleeData.passNumber,
           control_number: enrolleeData.controlNumber,
+          birthday: enrolleeData.birthday?.trim() || null,
           address_id: addressId || null,
           created_at: new Date().toISOString(),
         };

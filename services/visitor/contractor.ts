@@ -18,20 +18,13 @@ function generateQRToken(): string {
   return `${timestamp}-${random}`.toUpperCase();
 }
 
-/**
- * Generate contractor pass number (format: CONV-XXXXXXXX)
- */
-function generateContractorPassNumber(): string {
-  const random = Math.random().toString(36).substring(2, 10).toUpperCase();
-  return `CONV-${random}`;
-}
-
-/**
- * Generate control number (format: CTRL-XXXXXXXX)
- */
-function generateControlNumber(): string {
-  const random = Math.random().toString(36).substring(2, 10).toUpperCase();
-  return `CTRL-${random}`;
+/** Generate ID format: YYYY-XXXXXX */
+function generateYearSixCode(): string {
+  const year = new Date().getFullYear();
+  const sixDigits = Math.floor(Math.random() * 1_000_000)
+    .toString()
+    .padStart(6, '0');
+  return `${year}-${sixDigits}`;
 }
 
 export const contractorService = {
@@ -41,6 +34,7 @@ export const contractorService = {
   async registerAndGenerateQRPass(contractorData: VisitorRegistrationData & {
     destinationOfficeId: number;
     idPassNumber: string;
+    controlNumber?: string;
     reasonForVisit: string;
   }): Promise<{
     qrToken: string;
@@ -82,8 +76,12 @@ export const contractorService = {
 
       // STEP 2: Create visitor record with photo upload
       console.log('\n📝 STEP 2: Creating visitor record...');
-      const passNumber = generateContractorPassNumber();
-      const controlNumber = generateControlNumber();
+      const passNumber = contractorData.idPassNumber?.trim();
+      const controlNumber = contractorData.controlNumber?.trim() || generateYearSixCode();
+      if (!passNumber) {
+        console.error('❌ ID Pass Number is required for contractor registration');
+        return null;
+      }
       console.log(`   pass_number: ${passNumber}, control_number: ${controlNumber}`);
 
       // Upload face photo only
@@ -145,6 +143,12 @@ export const contractorService = {
         console.log(`   Control Number: ${existingVisitor.control_number}`);
         
         visitorData_db = [{ visitor_id: existingVisitor.visitor_id }];
+        if (contractorData.birthday?.trim()) {
+          await supabase
+            .from('visitor')
+            .update({ birthday: contractorData.birthday.trim() })
+            .eq('visitor_id', existingVisitor.visitor_id);
+        }
         console.log('\n✅ Using existing visitor record - no new record created');
       } else {
         // Visitor doesn't exist - create new record
@@ -163,6 +167,7 @@ export const contractorService = {
               contact_no: contractorData.contactNo,
               pass_number: passNumber,
               control_number: controlNumber,
+              birthday: contractorData.birthday?.trim() || null,
               address_id: addressId || null,
               visitor_photo_with_id_url: photoUrl || null,
               created_at: new Date().toISOString(),
