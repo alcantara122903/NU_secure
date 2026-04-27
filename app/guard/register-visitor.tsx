@@ -1,3 +1,4 @@
+import { FaceCaptureStepScreen } from '@/components/guard/face-capture-step';
 import { VisitorInformationStepScreen } from '@/components/guard/visitor-information-step';
 import { Colors } from '@/constants/colors';
 import { useColorScheme } from '@/hooks/use-color-scheme';
@@ -400,6 +401,8 @@ export default function RegisterVisitorScreen() {
             lastName: contractorLastName,
             contactNo: contractorContactNo,
             address: `${contractorHouseNo} ${contractorStreet}, ${contractorBarangay}, ${contractorCity}, ${contractorProvince}`,
+            purpose: contractorReasonForVisit,
+            facePhotoUri: photoPreview ?? undefined,
             offices: selectedContractorDestinationOffices.map((name, index) => ({ id: selectedOfficeIds[index] || index, name })),
           };
 
@@ -467,6 +470,8 @@ export default function RegisterVisitorScreen() {
             lastName: normalVisitorLastName,
             contactNo: normalVisitorContactNo,
             address: `${normalVisitorHouseNo} ${normalVisitorStreet}, ${normalVisitorBarangay}, ${normalVisitorCity}, ${normalVisitorProvince}`,
+            reasonForVisit: normalVisitorReasonForVisit,
+            facePhotoUri: photoPreview ?? undefined,
             offices: selectedDestinationOffices.map((name, index) => ({ id: selectedOfficeIds[index] || index, name })),
           };
 
@@ -826,6 +831,7 @@ export default function RegisterVisitorScreen() {
             firstName: extractedFirstName,
             lastName: extractedLastName,
             contactNo: contactNumber || '',
+            facePhotoUri: photoPreview ?? undefined,
             offices: ticketOffices,
             enrolleeId: enrolleeResult.enrollee_id,
           }),
@@ -1161,6 +1167,22 @@ export default function RegisterVisitorScreen() {
     );
   }
 
+  if (step === 3) {
+    return (
+      <FaceCaptureStepScreen
+        badgeIconLetter={visitorTypeInfo.icon}
+        badgeLabel={visitorTypeInfo.label}
+        onBack={handleBack}
+        photoPreview={photoPreview}
+        isCapturingPhoto={isCapturingPhoto}
+        isCreatingEnrollee={isCreatingEnrollee}
+        onCaptureFace={handleCaptureFace}
+        onConfirmPhoto={handleConfirmPhoto}
+        onRetakePhoto={handleRetakePhoto}
+      />
+    );
+  }
+
   if (step === 1) {
     return (
       <SafeAreaView style={captureStepStyles.safeArea}>
@@ -1327,150 +1349,7 @@ export default function RegisterVisitorScreen() {
     );
   }
 
-  return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-      {/* Header */}
-      <View style={[styles.header, { backgroundColor: colors.primary }]}>
-        <TouchableOpacity onPress={handleBack} style={styles.backButton}>
-          <Text style={styles.backText}>← Back</Text>
-        </TouchableOpacity>
-        <View style={styles.headerCenter}>
-          <View style={styles.visitorTypeBadge}>
-            <Text style={styles.visitorTypeIcon}>{visitorTypeInfo.icon}</Text>
-            <Text style={styles.visitorTypeLabel}>{visitorTypeInfo.label}</Text>
-          </View>
-          <Text style={styles.stepIndicator}>Step {step} of 3</Text>
-        </View>
-        <View style={{ width: 60 }} />
-      </View>
-
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {step === 3 && (
-          <>
-                {!photoPreview ? (
-                  <>
-                    {/* Camera Frame Card */}
-                    <View style={[styles.cameraCard, { backgroundColor: colors.surface }]}>
-                      <View style={[styles.cameraFrame, { borderColor: colors.primary }]}>
-                        <MaterialIcons name="photo-camera" size={56} color={colors.primary} />
-                      </View>
-                      <Text style={[styles.cameraTitle, { color: colors.text }]}>
-                        Position visitor in frame
-                      </Text>
-                      <Text style={[styles.cameraSubtitle, { color: colors.textSecondary }]}>
-                        Ensure good lighting and clear view
-                      </Text>
-                    </View>
-
-                    {/* Capture Button */}
-                    <TouchableOpacity
-                      style={[styles.captureButton, { backgroundColor: colors.primary }]}
-                      onPress={handleCaptureFace}
-                      disabled={isCapturingPhoto}
-                      activeOpacity={0.8}
-                    >
-                      {isCapturingPhoto ? (
-                        <ActivityIndicator size="small" color="#FFFFFF" />
-                      ) : (
-                        <>
-                          <MaterialIcons name="photo-camera" size={28} color="#FFFFFF" />
-                          <Text style={styles.captureButtonText}>Capture Face</Text>
-                        </>
-                      )}
-                    </TouchableOpacity>
-
-                    {/* Instructions */}
-                    <View style={[styles.instructionsCard, { backgroundColor: colors.surface }]}>
-                      <Text style={[styles.instructionsTitle, { color: colors.primary }]}>
-                        Instructions:
-                      </Text>
-                      <View style={styles.instructionsList}>
-                        <View style={styles.instructionItem}>
-                          <Text style={[styles.bullet, { color: colors.primary }]}>•</Text>
-                          <Text style={[styles.instructionText, { color: colors.text }]}>
-                            Ask visitor to remove glasses if needed
-                          </Text>
-                        </View>
-                        <View style={styles.instructionItem}>
-                          <Text style={[styles.bullet, { color: colors.primary }]}>•</Text>
-                          <Text style={[styles.instructionText, { color: colors.text }]}>
-                            Ensure face is fully visible and well-lit
-                          </Text>
-                        </View>
-                        <View style={styles.instructionItem}>
-                          <Text style={[styles.bullet, { color: colors.primary }]}>•</Text>
-                          <Text style={[styles.instructionText, { color: colors.text }]}>
-                            Position face within the frame guidelines
-                          </Text>
-                        </View>
-                      </View>
-                    </View>
-                  </>
-                ) : (
-                  <>
-                    {/* Photo Preview */}
-                    <View style={[styles.cameraCard, { backgroundColor: colors.surface }]}>
-                      <Image
-                        source={{ uri: photoPreview }}
-                        style={styles.photoPreview}
-                        resizeMode="cover"
-                      />
-                      <Text style={[styles.cameraTitle, { color: colors.text }]}>
-                        Photo Preview
-                      </Text>
-                      <Text style={[styles.cameraSubtitle, { color: colors.textSecondary }]}>
-                        Review the captured face photo
-                      </Text>
-                    </View>
-
-                    {/* Confirm / Retake Buttons */}
-                    <View style={styles.buttonGroup}>
-                      <TouchableOpacity
-                        style={[styles.captureButton, { backgroundColor: '#4CAF50' }]}
-                        onPress={handleConfirmPhoto}
-                        disabled={isCreatingEnrollee}
-                        activeOpacity={0.8}
-                      >
-                        {isCreatingEnrollee ? (
-                          <ActivityIndicator size="small" color="#FFFFFF" />
-                        ) : (
-                          <>
-                            <MaterialIcons name="check-circle" size={28} color="#FFFFFF" />
-                            <Text style={styles.captureButtonText}>Confirm Photo</Text>
-                          </>
-                        )}
-                      </TouchableOpacity>
-
-                      <TouchableOpacity
-                        style={[styles.captureButton, { backgroundColor: '#FF9800' }]}
-                        onPress={handleRetakePhoto}
-                        disabled={isCreatingEnrollee}
-                        activeOpacity={0.8}
-                      >
-                        <MaterialIcons name="refresh" size={28} color="#FFFFFF" />
-                        <Text style={styles.captureButtonText}>Retake Photo</Text>
-                      </TouchableOpacity>
-                    </View>
-
-                    {/* Info */}
-                    <View style={[styles.instructionsCard, { backgroundColor: '#E8F5E9' }]}>
-                      <Text style={[styles.instructionsTitle, { color: '#2E7D32' }]}>
-                        ✓ Face Captured
-                      </Text>
-                      <Text style={[styles.instructionText, { color: '#388E3C', marginTop: 8 }]}>
-                        {isCreatingEnrollee ? '⏳ Processing...' : 'This photo will be used for visitor verification. Ensure the face is clearly visible and well-lit.'}
-                      </Text>
-                    </View>
-                  </>
-                )}
-          </>
-        )}
-      </ScrollView>
-    </SafeAreaView>
-  );
+  return null;
 }
 
 const styles = StyleSheet.create({

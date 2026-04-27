@@ -4,14 +4,15 @@
  * Route: app/guard/qr-ticket.tsx
  */
 
+import { EnhancedQrTicketView } from '@/components/guard/enhanced-qr-ticket-view';
 import { Colors } from '@/constants/colors';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { MaterialIcons } from '@expo/vector-icons';
 import * as Print from 'expo-print';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
-import { useEffect, useMemo, useState } from 'react';
-import { Alert, Dimensions, Image, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Alert, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 type VisitorType = 'enrollee' | 'contractor' | 'normal_visitor' | 'normal';
@@ -29,6 +30,10 @@ interface VisitorQRTicketData {
   lastName: string;
   contactNo: string;
   offices: { id: number; name: string }[];
+  /** Face capture preview URI (`file://` / `content://`) shown on ticket */
+  facePhotoUri?: string;
+  /** Normal visitor — shown as Purpose on ticket */
+  reasonForVisit?: string;
   // Contractor-specific
   contractorId?: number;
   companyName?: string;
@@ -48,11 +53,6 @@ export default function QRTicketScreen() {
   const [isGenerating, setIsGenerating] = useState(true);
   const [isPrinting, setIsPrinting] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
-
-  const qrDisplaySize = useMemo(
-    () => Math.min(280, Math.round(Dimensions.get('window').width - 72)),
-    []
-  );
 
   const paramsDataKey = typeof params.data === 'string' ? params.data : params.data?.[0] ?? '';
 
@@ -548,266 +548,52 @@ export default function QRTicketScreen() {
     );
   }
 
-  const visitorName = `${ticketData.firstName} ${ticketData.lastName}`;
+  const visitorName = `${ticketData.firstName} ${ticketData.lastName}`.trim();
   const qrEncoded = ticketData.qrPayload ?? ticketData.qrToken;
-  const qrPx = Math.max(200, qrDisplaySize);
-  const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=${qrPx}x${qrPx}&margin=16&data=${encodeURIComponent(
-    qrEncoded
-  )}`;
-  const tokenRef =
-    ticketData.qrToken.length > 14
-      ? `…${ticketData.qrToken.slice(-12)}`
-      : ticketData.qrToken;
-  
-  // Determine type label and success message
-  const typeLabel = ticketData.type === 'contractor' ? 'Contractor' : 
-                    ticketData.type === 'enrollee' ? 'Enrollee' : 'Visitor';
-  const successMessage = `${typeLabel} Registered Successfully`;
+
+  const typeLabel =
+    ticketData.type === 'contractor'
+      ? 'Contractor'
+      : ticketData.type === 'enrollee'
+        ? 'Enrollee'
+        : 'Normal Visitor';
+
+  const purposeText =
+    ticketData.type === 'contractor'
+      ? (ticketData.purpose?.trim() || '—')
+      : ticketData.type === 'enrollee'
+        ? 'Campus enrollment'
+        : (ticketData.reasonForVisit?.trim() || '—');
+
+  const destinationText =
+    ticketData.offices?.length > 0 ? ticketData.offices.map((o) => o.name).join(', ') : '—';
+
+  const visitRoute = (ticketData.offices ?? []).map((o) => ({ id: o.id, name: o.name }));
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {/* Header */}
-        <View style={[styles.header, { backgroundColor: colors.primary }]}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-            <MaterialIcons name="arrow-back" size={24} color="#FFFFFF" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>QR Ticket</Text>
-          <View style={styles.spacer} />
-        </View>
-
-        {/* Main Ticket Card */}
-        <View style={[styles.ticketCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <View
-            style={[
-              styles.successBanner,
-              {
-                backgroundColor: colorScheme === 'dark' ? 'rgba(77, 148, 255, 0.12)' : 'rgba(0, 61, 153, 0.06)',
-                borderBottomWidth: StyleSheet.hairlineWidth,
-                borderBottomColor: colors.border,
-              },
-            ]}
-          >
-            <MaterialIcons name="check-circle" size={24} color={colors.primary} />
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.successText, { color: colors.text }]}>{successMessage}</Text>
-              <View style={[styles.typeBadge, { backgroundColor: colors.primary }]}>
-                <Text style={styles.typeBadgeText}>{typeLabel}</Text>
-              </View>
-            </View>
-          </View>
-
-          <View style={[styles.qrSection, { backgroundColor: colors.background, borderColor: colors.border }]}>
-            <Text style={[styles.qrLabel, { color: colors.textSecondary }]}>
-              Present this code at each stop on your route
-            </Text>
-            <View style={styles.qrContainer}>
-              <Image
-                source={{ uri: qrCodeUrl }}
-                style={[styles.qrImage, { width: qrPx, height: qrPx }]}
-              />
-            </View>
-
-            <View style={[styles.tokenBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <Text style={[styles.tokenLabel, { color: colors.textSecondary }]}>
-                {ticketData.qrPayload ? 'Token reference (support)' : 'QR token'}
-              </Text>
-              <Text style={[styles.tokenValue, { color: colors.primary }]} selectable numberOfLines={2}>
-                {ticketData.qrPayload ? tokenRef : ticketData.qrToken}
-              </Text>
-              {ticketData.qrPayload ? (
-                <Text style={[styles.tokenHint, { color: colors.textSecondary }]}>
-                  The square code carries your visit and route for office check-in.
-                </Text>
-              ) : null}
-            </View>
-          </View>
-
-          {/* Visitor Information */}
-          <View style={styles.infoSection}>
-            <View style={styles.infoItem}>
-              <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Full Name</Text>
-              <Text style={[styles.infoValue, { color: colors.text }]}>{visitorName}</Text>
-            </View>
-
-            <View style={styles.infoItem}>
-              <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Contact Number</Text>
-              <Text style={[styles.infoValue, { color: colors.text }]}>{ticketData.contactNo}</Text>
-            </View>
-          </View>
-
-          {/* Pass & Control Numbers */}
-          <View style={[styles.numbersSection, { borderTopColor: colors.border, backgroundColor: colors.background }]}>
-            <View style={styles.numberBox}>
-              <Text style={[styles.numberLabel, { color: colors.textSecondary }]}>Pass Number</Text>
-              <Text style={[styles.numberValue, { color: colors.primary }]}>{ticketData.passNumber}</Text>
-            </View>
-
-            <View style={styles.numberBox}>
-              <Text style={[styles.numberLabel, { color: colors.textSecondary }]}>Control Number</Text>
-              <Text style={[styles.numberValue, { color: colors.primary }]}>{ticketData.controlNumber}</Text>
-            </View>
-          </View>
-
-          {/* Contractor-Specific Section */}
-          {ticketData.type === 'contractor' && (
-            <View style={[styles.contractorSection, { borderTopColor: colors.border }]}>
-              <Text style={[styles.sectionTitle, { color: colors.text }]}>Company Information</Text>
-              
-              {ticketData.companyName && (
-                <View style={styles.infoItem}>
-                  <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Company Name</Text>
-                  <Text style={[styles.infoValue, { color: colors.text }]}>{ticketData.companyName}</Text>
-                </View>
-              )}
-
-              {ticketData.purpose && (
-                <View style={styles.infoItem}>
-                  <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Purpose</Text>
-                  <Text style={[styles.infoValue, { color: colors.text }]}>{ticketData.purpose}</Text>
-                </View>
-              )}
-
-              {ticketData.address && (
-                <View style={styles.infoItem}>
-                  <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Address</Text>
-                  <Text style={[styles.infoValue, { color: colors.text }]}>{ticketData.address}</Text>
-                </View>
-              )}
-            </View>
-          )}
-
-          {ticketData.type === 'enrollee' && ticketData.enrolleeStatus ? (
-            <View style={[styles.enrolleeSection, { borderTopColor: colors.border }]}>
-              <Text style={[styles.sectionTitle, { color: colors.text }]}>Enrollee status</Text>
-              <View
-                style={[
-                  styles.statusBadge,
-                  {
-                    backgroundColor: colorScheme === 'dark' ? 'rgba(77, 148, 255, 0.12)' : 'rgba(0, 61, 153, 0.06)',
-                    borderColor: colors.border,
-                  },
-                ]}
-              >
-                <MaterialIcons name="info-outline" size={18} color={colors.primary} />
-                <Text style={{ color: colors.text, fontWeight: '600', marginLeft: 8, flex: 1 }}>
-                  {ticketData.enrolleeStatus}
-                </Text>
-              </View>
-            </View>
-          ) : null}
-
-          <View style={styles.officesSection}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>Visit route (in order)</Text>
-            <View style={[styles.officeList, { borderColor: colors.border }]}>
-              {ticketData.offices.map((office, index) => (
-                <View
-                  key={index}
-                  style={[
-                    styles.officeItem,
-                    {
-                      borderBottomColor: index < ticketData.offices.length - 1 ? colors.border : 'transparent',
-                    },
-                  ]}
-                >
-                  <View style={[styles.officeNumber, { backgroundColor: colors.primary }]}>
-                    <Text style={styles.officeNumberText}>{index + 1}</Text>
-                  </View>
-                  <Text style={[styles.officeName, { color: colors.text }]}>{office.name}</Text>
-                  <MaterialIcons name="chevron-right" size={24} color={colors.textSecondary} />
-                </View>
-              ))}
-            </View>
-          </View>
-
-          <View
-            style={[
-              styles.instructionsBox,
-              {
-                backgroundColor: colorScheme === 'dark' ? 'rgba(77, 148, 255, 0.1)' : 'rgba(0, 61, 153, 0.06)',
-                borderColor: colors.border,
-              },
-            ]}
-          >
-            <MaterialIcons name="info-outline" size={20} color={colors.primary} />
-            <Text style={[styles.instructionsText, { color: colors.text }]}>
-              Keep this pass ready. Staff will scan the code at each office to record your visit
-              {ticketData.type === 'enrollee' ? ' along your enrollment route' : ''}.
-            </Text>
-          </View>
-        </View>
-
-        <View style={styles.actionButtonsContainer}>
-          <TouchableOpacity
-            style={[styles.actionButton, { backgroundColor: colors.primary, flex: 1, marginRight: 10 }]}
-            onPress={handleDownloadTicket}
-            disabled={isDownloading}
-            activeOpacity={0.8}
-          >
-            <MaterialIcons name="download" size={22} color="#FFFFFF" />
-            <Text style={styles.actionButtonText}>{isDownloading ? 'Downloading...' : 'Download'}</Text>
-          </TouchableOpacity>
-
-          {/* Print Button */}
-          <TouchableOpacity
-            style={[
-              styles.actionButton,
-              {
-                backgroundColor: colorScheme === 'dark' ? colors.border : '#E8EEF5',
-                flex: 1,
-                marginLeft: 10,
-              },
-            ]}
-            onPress={handlePrintTicket}
-            disabled={isPrinting}
-            activeOpacity={0.8}
-          >
-            <MaterialIcons name="print" size={22} color={colors.primary} />
-            <Text style={[styles.actionButtonText, { color: colors.primary }]}>
-              {isPrinting ? 'Printing...' : 'Print'}
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        <TouchableOpacity
-          style={[styles.generateButton, { backgroundColor: colors.primary, marginHorizontal: 20 }]}
-          onPress={() => router.replace('/guard/dashboard')}
-          activeOpacity={0.8}
-        >
-          <MaterialIcons name="check-circle" size={24} color="#FFFFFF" />
-          <Text style={styles.generateButtonText}>Complete & return</Text>
-        </TouchableOpacity>
-      </ScrollView>
-    </SafeAreaView>
+    <EnhancedQrTicketView
+      fullName={visitorName}
+      passNumber={String(ticketData.passNumber)}
+      controlNumber={String(ticketData.controlNumber)}
+      purpose={purposeText}
+      destination={destinationText}
+      visitorTypeLabel={typeLabel}
+      photoUri={ticketData.facePhotoUri}
+      visitRoute={visitRoute}
+      qrValue={qrEncoded}
+      onBack={() => router.back()}
+      onDownload={handleDownloadTicket}
+      onPrint={handlePrintTicket}
+      onCompleteReturn={() => router.replace('/guard/dashboard')}
+      isDownloading={isDownloading}
+      isPrinting={isPrinting}
+    />
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-  },
-  scrollContent: {
-    paddingHorizontal: 16,
-    paddingVertical: 20,
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 24,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-  },
-  backButton: {
-    padding: 8,
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-  spacer: {
-    width: 40,
   },
   centerContent: {
     flex: 1,
@@ -818,262 +604,5 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     marginTop: 16,
-  },
-  ticketCard: {
-    borderRadius: 16,
-    borderWidth: 1,
-    overflow: 'hidden',
-    marginBottom: 20,
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-  },
-  successBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    gap: 12,
-  },
-  successText: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  typeBadge: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-    marginTop: 6,
-  },
-  typeBadgeText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-  qrSection: {
-    alignItems: 'center',
-    paddingVertical: 24,
-    paddingHorizontal: 16,
-    marginVertical: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-  },
-  qrLabel: {
-    fontSize: 12,
-    marginBottom: 12,
-    textAlign: 'center',
-  },
-  qrContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 24,
-    paddingHorizontal: 24,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-  },
-  qrImage: {
-    resizeMode: 'contain',
-  },
-  infoSection: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    gap: 12,
-  },
-  infoItem: {
-    paddingVertical: 8,
-  },
-  infoLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  infoValue: {
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  numbersSection: {
-    borderTopWidth: 1,
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    flexDirection: 'row',
-    gap: 16,
-    justifyContent: 'space-between',
-  },
-  numberBox: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: 12,
-    borderRadius: 8,
-  },
-  numberLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-    marginBottom: 6,
-  },
-  numberValue: {
-    fontSize: 18,
-    fontWeight: '800',
-    letterSpacing: 1,
-  },
-  contractorSection: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    gap: 12,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    marginTop: 12,
-  },
-  enrolleeSection: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    gap: 12,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    marginTop: 12,
-  },
-  statusBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-  },
-  officesSection: {
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-  },
-  sectionTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    marginBottom: 12,
-  },
-  officeList: {
-    borderWidth: 1,
-    borderRadius: 8,
-    overflow: 'hidden',
-  },
-  officeItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    gap: 12,
-  },
-  officeNumber: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  officeNumberText: {
-    color: '#FFFFFF',
-    fontWeight: '700',
-    fontSize: 14,
-  },
-  officeName: {
-    flex: 1,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  tokenBox: {
-    marginTop: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 8,
-    borderWidth: 1,
-    alignItems: 'center',
-  },
-  tokenLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-    marginBottom: 6,
-  },
-  tokenValue: {
-    fontSize: 12,
-    fontWeight: '600',
-    letterSpacing: 0.5,
-    fontFamily: 'monospace',
-  },
-  tokenHint: {
-    fontSize: 11,
-    fontWeight: '500',
-    marginTop: 8,
-    lineHeight: 16,
-  },
-  instructionsBox: {
-    flexDirection: 'row',
-    gap: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    marginHorizontal: 16,
-    marginBottom: 16,
-    borderRadius: 8,
-    borderWidth: 1,
-    alignItems: 'flex-start',
-  },
-  instructionsText: {
-    fontSize: 12,
-    fontWeight: '500',
-    flex: 1,
-  },
-  generateButton: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 16,
-    paddingHorizontal: 20,
-    borderRadius: 12,
-    gap: 10,
-    marginBottom: 20,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.15,
-        shadowRadius: 3,
-      },
-      android: {
-        elevation: 3,
-      },
-    }),
-  },
-  generateButtonText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-  actionButtonsContainer: {
-    flexDirection: 'row',
-    paddingHorizontal: 20,
-    marginVertical: 12,
-    gap: 0,
-  },
-  actionButton: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 12,
-    borderRadius: 8,
-    gap: 8,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 3,
-      },
-      android: {
-        elevation: 2,
-      },
-    }),
-  },
-  actionButtonText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#FFFFFF',
   },
 });
