@@ -2,7 +2,7 @@ import { supabase } from '@/services/database/supabase';
 import { resolveActiveVisitFromScanInput } from './active-visit-resolve';
 import { VISIT_TYPE } from './constants';
 import type { OfficeCheckInScanRequest, OfficeCheckInScanResult } from './checkin.types';
-import { resolveCompletedStepStatusId, resolveValidationStatusId } from './db-status-lookups';
+import { resolveCompletedEnrolleeStatusId, resolveCompletedStepStatusId, resolveValidationStatusId } from './db-status-lookups';
 import { completeEnrolleeProgressAtOffice, nextOfficeIdFromEnrolleeProgress } from './enrollee-route';
 import {
   expectationsAreFullyCheckedIn,
@@ -60,6 +60,65 @@ async function resolveExpectedStop(
   return null;
 }
 
+async function loadRegisteredByName(userId: number | null): Promise<string | null> {
+  if (!userId) {
+    return null;
+  }
+  const { data } = await supabase
+    .from('users')
+    .select('first_name, last_name, email')
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (!data) {
+    return null;
+  }
+  const fullName = `${data.first_name || ''} ${data.last_name || ''}`.trim();
+  return fullName || data.email || null;
+}
+
+async function loadEnrolleeStepLabel(visitorId: number): Promise<string | null> {
+  const { data: enrollee } = await supabase
+    .from('enrollee')
+    .select('enrollee_id')
+    .eq('visitor_id', visitorId)
+    .maybeSingle();
+
+  if (!enrollee?.enrollee_id) {
+    return null;
+  }
+
+  const { data } = await supabase
+    .from('enrollee_progress')
+    .select('completed_at, step:enrollee_step(step_name, step_order)')
+    .eq('enrollee_id', enrollee.enrollee_id);
+
+  if (!Array.isArray(data)) {
+    return null;
+  }
+
+  const incomplete = data
+    .map((row) => {
+      const r = row as {
+        completed_at?: string | null;
+        step?: { step_name?: string | null; step_order?: number | null } | Array<{ step_name?: string | null; step_order?: number | null }> | null;
+      };
+      const embedded = Array.isArray(r.step) ? r.step[0] : r.step;
+      return {
+        completed_at: r.completed_at ?? null,
+        step_name: embedded?.step_name ?? null,
+        step_order: embedded?.step_order ?? null,
+      };
+    })
+    .filter((row) => !row.completed_at)
+    .sort((a, b) => Number(a.step_order ?? 0) - Number(b.step_order ?? 0));
+
+  const next = incomplete[0];
+  if (!next) {
+    return null;
+  }
+  return next.step_name ? `Step: ${next.step_name}` : next.step_order ? `Step ${next.step_order}` : 'Step';
+}
+
 export async function processOfficeCheckInScan(req: OfficeCheckInScanRequest): Promise<OfficeCheckInScanResult> {
   const { rawQrValue, scanningOfficeId, scannedByUserId } = req;
 
@@ -76,6 +135,7 @@ export async function processOfficeCheckInScan(req: OfficeCheckInScanRequest): P
 
   const { visitor, visitorName } = await loadVisitorDisplay(visit.visitor_id);
   const expectations = await loadExpectationsForVisit(visit.visit_id);
+  const registeredBy = await loadRegisteredByName(visit.guard_user_id);
 
   if (expectationsAreFullyCheckedIn(expectations)) {
     return {
@@ -105,6 +165,9 @@ export async function processOfficeCheckInScan(req: OfficeCheckInScanRequest): P
 
   const { expectedOfficeName, scanningOfficeName } = await loadOfficeNames(expectedOfficeId, scanningOfficeId);
   const authorized = Number(scanningOfficeId) === Number(expectedOfficeId);
+  const purposeLabel = visit.visit_type_id === VISIT_TYPE.ENROLLEE ? 'Step' : 'Purpose of Visit';
+  const enrolleeStep = visit.visit_type_id === VISIT_TYPE.ENROLLEE ? await loadEnrolleeStepLabel(visit.visitor_id) : null;
+  const purposeReason = visit.visit_type_id === VISIT_TYPE.ENROLLEE ? enrolleeStep || 'Step' : visit.purpose_reason || '(not provided)';
   const validationStatusId = await resolveValidationStatusId({ favorable: authorized });
   const scanTime = new Date().toISOString();
   const remarks = authorized
@@ -157,6 +220,14 @@ export async function processOfficeCheckInScan(req: OfficeCheckInScanRequest): P
       visitorName,
       passNumber: visitor?.pass_number ?? null,
       controlNumber: visitor?.control_number ?? null,
+      purposeLabel,
+      purposeReason,
+      entryTime: visit.entry_time,
+      scanTime,
+      registeredBy,
+      destinationStatusLabel: 'Wrong office destination',
+      isCorrectDestination: false,
+      destinationOffice: scanningOfficeName,
       expectedOfficeName,
       scanningOfficeName,
       visitId: visit.visit_id,
@@ -169,7 +240,37 @@ export async function processOfficeCheckInScan(req: OfficeCheckInScanRequest): P
 
   if (visit.visit_type_id === VISIT_TYPE.ENROLLEE) {
     const stepStatusId = await resolveCompletedStepStatusId();
-    await completeEnrolleeProgressAtOffice(visit.visitor_id, scanningOfficeId, scanTime, stepStatusId);
+    const enrolleeCompletedStatusId = await resolveCompletedEnrolleeStatusId();
+    const completedAllSteps = await completeEnrolleeProgressAtOffice(
+      visit.visitor_id,
+      scanningOfficeId,
+      scanTime,
+      stepStatusId,
+      enrolleeCompletedStatusId,
+    );
+    if (completedAllSteps) {
+      return {
+        success: true,
+        authorized: true,
+        title: 'Authorized',
+        message: `${visitorName} completed all enrollee steps.`,
+        visitorName,
+        passNumber: visitor?.pass_number ?? null,
+        controlNumber: visitor?.control_number ?? null,
+        purposeLabel,
+        purposeReason,
+        entryTime: visit.entry_time,
+        scanTime,
+        registeredBy,
+        destinationStatusLabel: 'Correct destination',
+        enrolleeStatusLabel: 'Enrollee status: Completed',
+        isCorrectDestination: true,
+        destinationOffice: expectedOfficeName,
+        expectedOfficeName,
+        scanningOfficeName,
+        visitId: visit.visit_id,
+      };
+    }
   }
 
   return {
@@ -180,6 +281,14 @@ export async function processOfficeCheckInScan(req: OfficeCheckInScanRequest): P
     visitorName,
     passNumber: visitor?.pass_number ?? null,
     controlNumber: visitor?.control_number ?? null,
+    purposeLabel,
+    purposeReason,
+    entryTime: visit.entry_time,
+    scanTime,
+    registeredBy,
+    destinationStatusLabel: 'Correct destination',
+    isCorrectDestination: true,
+    destinationOffice: expectedOfficeName,
     expectedOfficeName,
     scanningOfficeName,
     visitId: visit.visit_id,

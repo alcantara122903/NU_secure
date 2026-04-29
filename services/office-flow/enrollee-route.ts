@@ -83,7 +83,8 @@ export async function completeEnrolleeProgressAtOffice(
   scanningOfficeId: number,
   completedAtIso: string,
   stepStatusId: number | null,
-): Promise<void> {
+  enrolleeCompletedStatusId: number | null,
+): Promise<boolean> {
   const { data: enrollee } = await supabase
     .from('enrollee')
     .select('enrollee_id')
@@ -91,7 +92,7 @@ export async function completeEnrolleeProgressAtOffice(
     .maybeSingle();
 
   if (!enrollee?.enrollee_id) {
-    return;
+    return false;
   }
 
   const { data } = await supabase
@@ -108,7 +109,7 @@ export async function completeEnrolleeProgressAtOffice(
   const rows = sortIncompleteByStepOrder(mapQueryToProgressRows(data));
   const target = rows.find((p) => Number(p.step?.office_id) === Number(scanningOfficeId));
   if (!target?.progress_id) {
-    return;
+    return false;
   }
 
   await supabase
@@ -119,5 +120,22 @@ export async function completeEnrolleeProgressAtOffice(
     })
     .eq('progress_id', target.progress_id);
 
-  await supabase.from('enrollee').update({ updated_at: completedAtIso }).eq('enrollee_id', enrollee.enrollee_id);
+  // If no remaining incomplete steps, mark enrollee status as completed.
+  const { data: remaining } = await supabase
+    .from('enrollee_progress')
+    .select('progress_id, completed_at')
+    .eq('enrollee_id', enrollee.enrollee_id);
+  const hasIncomplete = (remaining || []).some((r) => !r.completed_at);
+
+  await supabase
+    .from('enrollee')
+    .update({
+      updated_at: completedAtIso,
+      ...(!hasIncomplete && enrolleeCompletedStatusId != null
+        ? { enrollee_status_id: enrolleeCompletedStatusId }
+        : {}),
+    })
+    .eq('enrollee_id', enrollee.enrollee_id);
+
+  return !hasIncomplete;
 }

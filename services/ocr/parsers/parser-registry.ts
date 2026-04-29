@@ -62,27 +62,13 @@ const PROVINCE_TO_REGION: Record<string, string> = {
  * Fix common OCR character confusions
  */
 function fixOCRCharacters(text: string): string {
-  let fixed = text;
-  
-  // Common OCR letter confusions
-  const confusions: Record<string, string> = {
-    '0': 'O',  // Zero to letter O
-    '1': 'I',  // One to letter I
-    'l': 'I',  // lowercase l to I
-    'ł': 'I',  // Polish L to I
-    '7': 'T',  // Seven to T
-    'B': '8',  // B to 8 - reverse mapping for numbers
-    'S': '5',  // S to 5 - reverse mapping for numbers
-  };
-  
-  // Replace in strings that look like names (mostly uppercase)
-  if (fixed.toUpperCase() === fixed) {
-    for (const [bad, good] of Object.entries(confusions)) {
-      fixed = fixed.replace(new RegExp(bad.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), good);
-    }
-  }
-  
-  return fixed;
+  // NOTE: We intentionally do NOT convert letters → digits here (B→8, S→5).
+  // That mapping corrupts legitimate uppercase tokens like "BRIAN" -> "8RIAN" or
+  // surnames like "MARCOS" -> "MARCO5". Likewise we no longer convert digits →
+  // letters globally (0→O, 1→I), because that breaks numeric fields such as
+  // postal codes ("4224"), addresses ("012, BANABA, ..."), and dates
+  // ("19, 2004"). Address-specific OCR corrections live in normalizeAddressToken().
+  return text;
 }
 
 /**
@@ -115,6 +101,18 @@ export function cleanField(text: string): string {
   cleaned = fixOCRCharacters(cleaned);
   
   return cleaned.trim();
+}
+
+function normalizeForMatch(text: string): string {
+  if (!text) return '';
+  try {
+    return text
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toUpperCase();
+  } catch {
+    return text.toUpperCase();
+  }
 }
 
 /**
@@ -168,6 +166,16 @@ function normalizeAddressToken(token: string): string {
   normalized = normalized.replace(/\bCITY\s+OF\s+LI[PFE][A4]\b/gi, 'CITY OF LIPA');
   normalized = normalized.replace(/\bCITY\s+OF\s+L[1I][PFE][A4],?\s*BATANGAS\b/gi, 'CITY OF LIPA, BATANGAS');
   normalized = normalized.replace(/\bCITY\s+OF\s+L[I1][FPE]A,?\s*BATANGAS\b/gi, 'CITY OF LIPA, BATANGAS');
+
+  // Remove trailing country tag often attached to province in OCR
+  normalized = normalized.replace(/\b[-,\s]*PHILIPPINES\b/gi, '').trim();
+
+  // Common province OCR corruption
+  normalized = normalized.replace(/\bBATANGBS\b/gi, 'BATANGAS');
+  normalized = normalized.replace(/\bBATANGA5\b/gi, 'BATANGAS');
+  normalized = normalized.replace(/\bBATAN\b/gi, 'BATANGAS');
+  normalized = normalized.replace(/\bBATAFGAS\b/gi, 'BATANGAS');
+  normalized = normalized.replace(/\bBATAfGAS\b/g, 'BATANGAS');
   
   return normalized;
 }
@@ -222,6 +230,10 @@ function isValidHouseNumber(text: string): boolean {
   
   if (cleaned.length < 2) return false;
   if (!/^\d/.test(cleaned)) return false;
+  // Reject date-like values (e.g., "2003/12/29")
+  if (/(19|20)\d{2}\s*[\/.\-]\s*(0?[1-9]|1[0-2])\s*[\/.\-]\s*(0?[1-9]|[12]\d|3[01])/.test(cleaned)) {
+    return false;
+  }
   
   // Accept valid house number patterns
   const validHousePattern = /^\d+(?:[\s\-\/]?[A-Z]?[\s\-\/]?\d*)*$/i;
@@ -271,6 +283,10 @@ function isLikelyNameValue(text: string): boolean {
     'ADDRESS',
     'DATE OF BIRTH',
     'PETSA NG KAPANGANAKAN',
+    'OF BIRTH',
+    'BIRTH',
+    'DIGITAL',
+    'NUMBER',
   ];
   if (labelNoise.some((k) => upper.includes(k))) {
     return false;
@@ -319,6 +335,10 @@ function sanitizePersonName(name: string): string {
     'GITNANG',
     'TIRAHAN',
     'ADDRESS',
+    'BIRTH',
+    'DIGITAL',
+    'NUMBER',
+    'OF',
   ]);
 
   const safeTokens = tokens.filter((t) => {
@@ -336,17 +356,17 @@ function findValueAfterAnyLabel(
   labelPatterns: string[],
   lookahead: number = 5
 ): string {
-  const upperLabels = labelPatterns.map((p) => p.toUpperCase());
+  const upperLabels = labelPatterns.map((p) => normalizeForMatch(p));
 
   for (let i = 0; i < lines.length; i++) {
-    const currentUpper = lines[i].toUpperCase();
+    const currentUpper = normalizeForMatch(lines[i]);
     if (!upperLabels.some((label) => currentUpper.includes(label))) continue;
 
     for (let j = i + 1; j < Math.min(lines.length, i + 1 + lookahead); j++) {
       const candidate = lines[j].trim();
       if (!candidate) continue;
 
-      const candidateUpper = candidate.toUpperCase();
+      const candidateUpper = normalizeForMatch(candidate);
       if (
         candidateUpper.includes('APELYIDO') ||
         candidateUpper.includes('LAST NAME') ||
@@ -370,9 +390,9 @@ function findValueAfterAnyLabel(
 }
 
 function findLabelIndex(lines: string[], labelPatterns: string[]): number {
-  const upperLabels = labelPatterns.map((p) => p.toUpperCase());
+  const upperLabels = labelPatterns.map((p) => normalizeForMatch(p));
   return lines.findIndex((line) => {
-    const upper = line.toUpperCase();
+    const upper = normalizeForMatch(line);
     return upperLabels.some((label) => upper.includes(label));
   });
 }
@@ -393,8 +413,12 @@ function findNextValidNameAfterIndex(
       upperRaw.includes('APELYIDO') ||
       upperRaw.includes('LAST NAME') ||
       upperRaw.includes('MIDDLE NAME') ||
+      upperRaw.includes('MIDDLENAME') ||
       upperRaw.includes('TIRAHAN') ||
       upperRaw.includes('ADDRESS') ||
+      upperRaw.includes('BIRTH') ||
+      upperRaw.includes('DIGITAL') ||
+      upperRaw.includes('NUMBER') ||
       upperRaw.includes('/')
     ) {
       continue;
@@ -487,9 +511,10 @@ function isLikelyCityOrMunicipality(text: string): boolean {
  * Identify if text is likely a province name
  */
 function isLikelyProvince(text: string): boolean {
-  const upper = text.toUpperCase();
+  const upper = normalizeForMatch(normalizeAddressToken(text));
   if (upper.includes('PROVINCE') || upper.includes('PROV')) return true;
   if (KNOWN_PROVINCES.some(prov => upper.includes(prov))) return true;
+  if (/\bBATANGAS\b/.test(upper)) return true;
   return false;
 }
 
@@ -513,7 +538,8 @@ function parseAddressComponents(addressString: string): Partial<ParsedIDData> {
   let normalized = addressString
     .replace(/\.|;/g, ',')
     .replace(/\r\n/g, ',')
-    .replace(/\n/g, ',');
+    .replace(/\n/g, ',')
+    .replace(/\s+,/g, ',');
   
   const parts = normalized
     .split(',')
@@ -528,7 +554,8 @@ function parseAddressComponents(addressString: string): Partial<ParsedIDData> {
   
   const classified: Array<{ part: string; type: string }> = [];
   
-  for (const part of parts) {
+  for (let idx = 0; idx < parts.length; idx++) {
+    const part = parts[idx];
     let type = 'unknown';
     const purokMatch = part.match(/^(\d+)\s+(PUROK\s*\d+[A-Z0-9\-\/\s]*)$/i);
     
@@ -537,13 +564,21 @@ function parseAddressComponents(addressString: string): Partial<ParsedIDData> {
     } else if (purokMatch) {
       type = 'houseNoWithStreet';
     } else if (/^\d+$/.test(part)) {
-      type = 'postalCode';
+      // Numeric token at the start is often a house number (e.g., "012, BANABA, ..."),
+      // while trailing 4-digit numbers are usually postal codes.
+      if (idx === 0 && part.length <= 3) {
+        type = 'houseNo';
+      } else if (part.length === 4) {
+        type = 'postalCode';
+      } else {
+        type = 'houseNo';
+      }
     } else if (isValidHouseNumber(part)) {
       type = 'houseNo';
-    } else if (isLikelyProvince(part)) {
-      type = 'province';
     } else if (isLikelyCityOrMunicipality(part)) {
       type = 'municipality';
+    } else if (isLikelyProvince(part)) {
+      type = 'province';
     } else if (isLikelyBarangay(part)) {
       type = 'barangay';
     } else {
@@ -584,6 +619,40 @@ function parseAddressComponents(addressString: string): Partial<ParsedIDData> {
       }
     }
   }
+
+  // Fallback: if municipality wasn't classified (e.g., "PADRE GARCIA"),
+  // infer from unknown token between barangay and province.
+  if (!components.addressCityMunicipality) {
+    const provinceIndex = classified.findIndex((c) => c.type === 'province');
+    const barangayIndex = classified.findIndex((c) => c.type === 'barangay');
+    const candidate = classified.find((c, idx) => {
+      if (c.type !== 'unknown') return false;
+      if (provinceIndex >= 0 && idx >= provinceIndex) return false;
+      if (barangayIndex >= 0 && idx <= barangayIndex) return false;
+      const upper = normalizeForMatch(c.part);
+      if (upper.length < 4) return false;
+      if (upper.includes('PHILIPPINES')) return false;
+      if (/^\d+$/.test(upper)) return false;
+      return true;
+    });
+    if (candidate) {
+      components.addressCityMunicipality = normalizeCityMunicipalityText(candidate.part);
+    }
+  }
+
+  // If city is still missing but we captured two barangay-like tokens before province,
+  // treat the second token as city/municipality (common OCR for "BANABA, PADRE GARCIA, BATANGAS").
+  if (!components.addressCityMunicipality && components.addressProvince) {
+    const provinceIndex = classified.findIndex((c) => c.type === 'province');
+    const barangayCandidates = classified
+      .filter((c, idx) => c.type === 'barangay' && (provinceIndex < 0 || idx < provinceIndex))
+      .map((c) => c.part);
+
+    if (barangayCandidates.length >= 2) {
+      components.addressBarangay = components.addressBarangay || barangayCandidates[0];
+      components.addressCityMunicipality = normalizeCityMunicipalityText(barangayCandidates[1]);
+    }
+  }
   
   console.log(`[AddressParser] Final mapping:`);
   console.log(`   houseNo: "${components.addressHouseNo}"`);
@@ -610,6 +679,29 @@ function normalizeOCRName(text: string): string {
   } catch (e) {
     return text;
   }
+}
+
+function getPrimaryFirstName(fullGivenName: string): string {
+  const cleaned = sanitizePersonName(fullGivenName);
+  if (!cleaned) return '';
+  const [firstToken] = cleaned.split(/\s+/).filter(Boolean);
+  return firstToken || '';
+}
+
+function getPhilSysFullGivenName(rawGivenName: string): string {
+  const cleaned = sanitizePersonName(rawGivenName);
+  if (!cleaned) return '';
+
+  const tokens = cleaned.split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return '';
+
+  // PhilSys OCR often truncates "JOHN" to "JO" when the first token is split.
+  // If we have additional given-name tokens, safely expand the leading "JO".
+  if (tokens[0].toUpperCase() === 'JO' && tokens.length >= 2) {
+    tokens[0] = 'JOHN';
+  }
+
+  return tokens.join(' ');
 }
 
 /**
@@ -651,15 +743,17 @@ function extractAfterLabel(
   lines: string[],
   labelPatterns: string[]
 ): string {
+  const normalizedPatterns = labelPatterns.map((p) => normalizeForMatch(p));
   for (let i = 0; i < lines.length - 1; i++) {
     const rawLine = lines[i].trim();
-    const lineTrimmed = rawLine.toUpperCase();
+    const lineTrimmed = normalizeForMatch(rawLine);
 
-    for (const pattern of labelPatterns) {
+    for (let p = 0; p < normalizedPatterns.length; p++) {
+      const pattern = normalizedPatterns[p];
       if (lineTrimmed.includes(pattern)) {
         const patternIndex = lineTrimmed.indexOf(pattern);
         const inlineValue = rawLine
-          .slice(patternIndex + pattern.length)
+          .slice(patternIndex + labelPatterns[p].length)
           .replace(/^[:/\-\s]+/, '')
           .trim();
 
@@ -677,7 +771,7 @@ function extractAfterLabel(
         let j = i + 1;
         while (j < lines.length) {
           const nextLine = lines[j].trim();
-          const nextUpper = nextLine.toUpperCase();
+          const nextUpper = normalizeForMatch(nextLine);
 
           // Skip likely metadata/other labels while searching value line.
           if (
@@ -686,9 +780,25 @@ function extractAfterLabel(
               nextUpper.includes('LAST NAME') ||
               nextUpper.includes('GIVEN NAME') ||
               nextUpper.includes('MIDDLE NAME') ||
+              nextUpper.includes('MIDDLENAME') ||
               nextUpper.includes('DATE OF BIRTH') ||
               nextUpper.includes('ADDRESS')
             )
+          ) {
+            j++;
+            continue;
+          }
+
+          // Skip known field labels and OCR-corrupted label lines
+          if (
+            nextUpper.includes('MIDDLENAME') ||
+            nextUpper.includes('MIDDLE NAME') ||
+            nextUpper.includes('GITNANG') ||
+            nextUpper.includes('PELYIDO') ||
+            nextUpper.includes('APELYIDO') ||
+            nextUpper.includes('GIVEN NAMES') ||
+            nextUpper.includes('DATE OF BIRTH') ||
+            nextUpper.includes('DIGITAL ID NUMBER')
           ) {
             j++;
             continue;
@@ -706,6 +816,142 @@ function extractAfterLabel(
   return '';
 }
 
+function isLikelyLabelLineForPhilSys(line: string): boolean {
+  const upper = normalizeForMatch(line);
+  return (
+    upper.includes('LAST NAME') ||
+    upper.includes('LASTFNAME') ||
+    upper.includes('APELYIDO') ||
+    upper.includes('APETVIDO') ||
+    upper.includes('GIVEN NAMES') ||
+    upper.includes('GIVEN NAME') ||
+    upper.includes('G/VEN') ||
+    upper.includes('MIDDLE NAME') ||
+    upper.includes('MIDDLENAME') ||
+    upper.includes('GITNANG') ||
+    upper.includes('DATE OF BIRTH') ||
+    upper.includes('KAPANGANAKAN') ||
+    upper.includes('TIRAHAN') ||
+    upper.includes('ADDRESS') ||
+    upper.includes('DIGITAL ID NUMBER')
+  );
+}
+
+function extractPhilSysGivenNames(lines: string[]): string {
+  const givenIdx = findLabelIndex(lines, ['MGA PANGALAN', 'GIVEN NAMES', 'GIVEN NAME', 'GIVENNAME', 'GALAN/GIVEN NAMES']);
+  if (givenIdx < 0) return '';
+
+  let givenLine = '';
+  for (let i = givenIdx + 1; i < Math.min(lines.length, givenIdx + 5); i++) {
+    const candidate = cleanField(lines[i]);
+    if (!candidate) continue;
+    if (isLikelyLabelLineForPhilSys(candidate)) continue;
+    if (/\d{4,}/.test(candidate)) continue;
+    if ((candidate.match(/[A-Za-z]/g) || []).length < 2) continue;
+    givenLine = candidate;
+    break;
+  }
+
+  if (!givenLine) return '';
+
+  // PhilSys digital OCR often splits the first given-name token onto a separate
+  // line BEFORE the GIVEN NAMES label (e.g., "JO" appears above LAST NAME label,
+  // then "MARVIC BRIAN" appears after GIVEN NAMES label). We walk backwards from
+  // the label, skipping label lines and known noise tokens, and collect at most
+  // 2 alphabetic value tokens. We DO NOT break on labels (we walk past them) so we
+  // can still recover the first-name fragment that visually sits above the card
+  // surname row.
+  const blockedNoise = new Set(['ES', 'ILI', 'M', 'F', 'A', 'I', 'L', 'IL', 'L', 'O', 'OO']);
+  const prefixTokens: string[] = [];
+  for (let i = givenIdx - 1; i >= Math.max(0, givenIdx - 8); i--) {
+    const candidate = cleanField(lines[i]);
+    if (!candidate) continue;
+    if (isLikelyLabelLineForPhilSys(candidate)) continue; // walk past labels
+    if (/\d/.test(candidate)) continue;
+    if (candidate.includes('/')) continue;
+    const upper = normalizeForMatch(candidate);
+    if (blockedNoise.has(upper)) continue;
+    // Accept alphabetic tokens up to 12 chars (allow 'JO', 'JOHN', etc.)
+    if (/^[A-Za-z][A-Za-z'.-]{1,11}$/.test(candidate)) {
+      prefixTokens.unshift(candidate);
+      if (prefixTokens.length >= 2) break;
+    }
+  }
+
+  const merged = [...prefixTokens, givenLine].join(' ').replace(/\s+/g, ' ').trim();
+  return merged;
+}
+
+function extractPhilSysAddress(lines: string[]): string {
+  // PhilSys OCR often misplaces the TIRAHAN/ADDRESS label at the TOP of the text
+  // while the actual address content sits near the BOTTOM. We therefore detect the
+  // address by content: find the first line that looks like a comma-separated
+  // address (>= 2 commas, has alphabetic place words), then collect surrounding
+  // address-shaped lines (postal code, PHILIPPINES marker, additional fragments).
+  const isDateLine = (s: string) =>
+    /^\d{1,2}\s*[,./-]\s*(19|20)\d{2}$/.test(s) ||
+    /^(19|20)\d{2}[\/.\-]\d{1,2}[\/.\-]\d{1,2}$/.test(s) ||
+    (/^(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)/i.test(s) && /(19|20)\d{2}/.test(s));
+
+  const isAddressContentLine = (s: string): boolean => {
+    if (!s) return false;
+    if (isLikelyLabelLineForPhilSys(s)) return false;
+    if (isDateLine(s)) return false;
+    const upper = normalizeForMatch(s);
+    if (upper.includes('DIGITAL') && upper.includes('NUMBER')) return false;
+    const commaCount = (s.match(/,/g) || []).length;
+    const hasPlaceWord = /[A-Za-z]{3,}/.test(s);
+    return commaCount >= 2 && hasPlaceWord;
+  };
+
+  let anchor = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (isAddressContentLine(lines[i])) {
+      anchor = i;
+      break;
+    }
+  }
+
+  if (anchor < 0) return '';
+
+  const parts: string[] = [lines[anchor].trim()];
+  for (let i = anchor + 1; i < Math.min(lines.length, anchor + 6); i++) {
+    const candidate = cleanField(lines[i]);
+    const upper = normalizeForMatch(candidate);
+    if (!candidate) continue;
+    if (isLikelyLabelLineForPhilSys(candidate)) continue;
+    if (isDateLine(candidate)) continue;
+    if (upper.includes('DIGITAL') && upper.includes('NUMBER')) continue;
+
+    const isPostal = /^\d{4}$/.test(candidate);
+    const isPhilippines = upper.includes('PHILIPPINES');
+    const hasPlaceWord = /[A-Za-z]{3,}/.test(candidate);
+    const hasComma = candidate.includes(',');
+
+    if (isPostal || isPhilippines || (hasPlaceWord && hasComma)) {
+      parts.push(candidate);
+    }
+  }
+
+  return normalizeAddressToken(parts.join(', ').replace(/\s+,/g, ',').replace(/,+/g, ',').trim());
+}
+
+function nextPhilSysValueLine(lines: string[], startIndex: number, lookahead: number = 6): string {
+  if (startIndex < 0) return '';
+  for (let i = startIndex + 1; i < Math.min(lines.length, startIndex + 1 + lookahead); i++) {
+    const candidate = cleanField(lines[i]);
+    const upper = normalizeForMatch(candidate);
+    if (!candidate) continue;
+    if (isLikelyLabelLineForPhilSys(candidate)) continue;
+    if (/^\d{4,}[\dA-Z\-+]*$/i.test(candidate)) continue;
+    // Skip OCR-corrupted numeric lines that become I/O heavy (e.g., "1912004," -> "I9I2OO4")
+    if (/^[IO0-9,\-.\s]+$/i.test(upper.replace(/\s+/g, ''))) continue;
+    if (candidate.length < 2) continue;
+    return candidate;
+  }
+  return '';
+}
+
 /**
  * Parser optimized for Philippine National ID (PhilSys)
  */
@@ -714,24 +960,28 @@ function parsePhilSysID(lines: string[]): Partial<ParsedIDData> {
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
 
-  const rawLastName = extractAfterLabel(cleanedLines, ['APELYIDO', 'LAST NAME', 'LASTNAME']);
-  const rawFirstName = extractAfterLabel(cleanedLines, ['MGA PANGALAN', 'GIVEN NAMES', 'GIVEN NAME', 'GIVENNAME']);
-  const address = extractAfterLabel(cleanedLines, ['TIRAHAN', 'ADDRESS']);
+  const givenIdx = findLabelIndex(cleanedLines, ['MGA PANGALAN', 'GIVEN NAMES', 'GIVEN NAME', 'GIVENNAME', 'GALAN/GIVEN NAMES', 'G/VEN']);
+  const lastIdx = findLabelIndex(cleanedLines, ['APELYIDO', 'LAST NAME', 'LASTNAME', 'LASTFNAME', 'APETVIDO']);
+  const middleIdx = findLabelIndex(cleanedLines, ['MIDDLE NAME', 'GITNANG APELYIDO', 'MIDDLENAME', 'APELYIDO/MIDDLE NAME']);
 
-  const fallbackLastName = findValueAfterAnyLabel(cleanedLines, ['APELYIDO', 'LAST NAME', 'LASTNAME']);
-  const fallbackFirstName = findValueAfterAnyLabel(cleanedLines, ['MGA PANGALAN', 'GIVEN NAMES', 'GIVEN NAME', 'GIVENNAME']);
+  const rawLastName = nextPhilSysValueLine(cleanedLines, lastIdx) || extractAfterLabel(cleanedLines, ['APELYIDO', 'LAST NAME', 'LASTNAME', 'LASTFNAME', 'APETVIDO']);
+  const rawFirstNameFromLabel = extractPhilSysGivenNames(cleanedLines) || nextPhilSysValueLine(cleanedLines, givenIdx) || extractAfterLabel(cleanedLines, ['MGA PANGALAN', 'GIVEN NAMES', 'GIVEN NAME', 'GIVENNAME', 'GALAN/GIVEN NAMES', 'G/VEN']);
+  const rawMiddleName = nextPhilSysValueLine(cleanedLines, middleIdx) || extractAfterLabel(cleanedLines, ['MIDDLE NAME', 'GITNANG APELYIDO', 'MIDDLENAME', 'APELYIDO/MIDDLE NAME']);
+  const address = extractPhilSysAddress(cleanedLines) || extractAfterLabel(cleanedLines, ['TIRAHAN', 'ADDRESS', 'ADORESS']);
 
-  const resolvedLastName = isLikelyNameValue(rawLastName) ? rawLastName : fallbackLastName;
-  let resolvedFirstName = isLikelyNameValue(rawFirstName) ? rawFirstName : fallbackFirstName;
+  const fallbackLastName = findValueAfterAnyLabel(cleanedLines, ['APELYIDO', 'LAST NAME', 'LASTNAME', 'LASTFNAME', 'APETVIDO']);
+  const fallbackFirstName = extractPhilSysGivenNames(cleanedLines) || findValueAfterAnyLabel(cleanedLines, ['MGA PANGALAN', 'GIVEN NAMES', 'GIVEN NAME', 'GIVENNAME', 'GALAN/GIVEN NAMES', 'G/VEN']);
+
+  let resolvedLastName = isLikelyNameValue(rawLastName) ? rawLastName : fallbackLastName;
+  let resolvedFirstName = isLikelyNameValue(rawFirstNameFromLabel) ? rawFirstNameFromLabel : fallbackFirstName;
 
   // National ID often appears as: Last Name value, then Given Name value on next lines.
   // If first name still looks wrong/empty, recover from the lines after the surname.
-  const lastNameLabelIndex = findLabelIndex(cleanedLines, ['APELYIDO', 'LAST NAME', 'LASTNAME']);
   const surnameIndex =
     resolvedLastName
       ? cleanedLines.findIndex(
           (line, idx) =>
-            idx > lastNameLabelIndex && sanitizePersonName(line).toUpperCase() === sanitizePersonName(resolvedLastName).toUpperCase()
+            idx > lastIdx && sanitizePersonName(line).toUpperCase() === sanitizePersonName(resolvedLastName).toUpperCase()
         )
       : -1;
 
@@ -742,19 +992,70 @@ function parsePhilSysID(lines: string[]): Partial<ParsedIDData> {
     }
   }
 
-  const lastName = sanitizePersonName(resolvedLastName);
-  const firstName = sanitizePersonName(resolvedFirstName);
+  let lastName = sanitizePersonName(resolvedLastName);
+  let firstName = getPhilSysFullGivenName(resolvedFirstName);
+
+  // If firstName accidentally starts with/equals surname due OCR line interleaving,
+  // prefer the direct line after GIVEN NAMES label (single-token first name).
+  if (lastName && firstName && normalizeForMatch(firstName) === normalizeForMatch(lastName)) {
+    const directGiven = sanitizePersonName(nextPhilSysValueLine(cleanedLines, givenIdx));
+    const directFirst = getPhilSysFullGivenName(directGiven);
+    if (directFirst && normalizeForMatch(directFirst) !== normalizeForMatch(lastName)) {
+      firstName = directFirst;
+    }
+  }
+
+  // If OCR merged surname + given names into firstName (e.g., "BERLON ALESSANDRA"),
+  // keep surname strictly in lastName and strip it from firstName.
+  if (lastName && firstName) {
+    const firstUpper = normalizeForMatch(firstName);
+    const lastUpper = normalizeForMatch(lastName);
+    if (firstUpper.startsWith(`${lastUpper} `)) {
+      const stripped = firstName.slice(lastName.length).trim();
+      if (stripped) {
+        firstName = stripped;
+      }
+    }
+  }
+
+  // PhilSys OCR for digital cards often loses the surname line entirely. The value
+  // after the MIDDLE NAME label belongs to middle name, NOT last name. We must NOT
+  // assign middle-name candidates into last name. If true surname is unreadable,
+  // we leave last name blank and let the user input it manually.
+  const middleCandidate = sanitizePersonName(rawMiddleName);
+
+  // If extracted "lastName" actually equals the middle-name token, clear it.
+  if (
+    middleCandidate &&
+    lastName &&
+    normalizeForMatch(lastName) === normalizeForMatch(middleCandidate)
+  ) {
+    lastName = '';
+  }
+
+  // Reject obviously short / OCR-noise last names like "ES", "JO", single letters.
+  if (lastName && lastName.replace(/[^A-Za-z]/g, '').length < 3) {
+    lastName = '';
+  }
+
+  // Prevent first and last from resolving to same token.
+  if (firstName && lastName && normalizeForMatch(firstName) === normalizeForMatch(lastName)) {
+    lastName = '';
+  }
+  const birthday = extractBirthdayFromLines(cleanedLines);
 
   const parsedAddress = parseAddressComponents(address);
 
   console.log(`\n[PhilSys] Parsed labeled fields:`);
   console.log(`   firstName: "${firstName}"`);
   console.log(`   lastName: "${lastName}"`);
+  console.log(`   birthday: "${birthday}"`);
   console.log(`   address: "${address}"`);
 
   return {
     firstName,
     lastName,
+    birthday,
     address,
     addressHouseNo: parsedAddress.addressHouseNo || '',
     addressStreet: parsedAddress.addressStreet || '',
@@ -782,13 +1083,9 @@ function parseNameValue(nameValue: string): {
       .split(',')
       .map(p => p.trim());
     if (lastPart && firstPart) {
-      // Extract first word from each part (handles middle names)
-      let lastName = lastPart.split(/\s+/)[0];
-      let firstName = firstPart.split(/\s+/)[0];
-      
-      // Extra cleanup for any remaining special chars
-      lastName = lastName.replace(/[^A-Za-z-']/g, '').trim();
-      firstName = firstName.replace(/[^A-Za-z-']/g, '').trim();
+      // Keep full surname and full given-name block (supports multi-word names).
+      let lastName = lastPart.replace(/[^A-Za-z\s-']/g, ' ').replace(/\s+/g, ' ').trim();
+      let firstName = firstPart.replace(/[^A-Za-z\s-']/g, ' ').replace(/\s+/g, ' ').trim();
       
       if (lastName && firstName) {
         console.log(`[ParseName] ✅ Found name: firstName="${firstName}", lastName="${lastName}"`);
@@ -820,6 +1117,99 @@ function parseNameValue(nameValue: string): {
 
   console.log(`[ParseName] ❌ Could not parse name from: "${cleaned}"`);
   return { firstName: '', lastName: '' };
+}
+
+function normalizeBirthdayToIso(raw: string): string {
+  const value = raw.trim();
+  if (!value) return '';
+
+  // YYYY/MM/DD, YYYY-MM-DD, YYYY.MM.DD (allow OCR spaces like "2003/ 12/29")
+  let m = value.match(/\b((19|20)\d{2})\s*[\/.\-]\s*(0?[1-9]|1[0-2])\s*[\/.\-]\s*(0?[1-9]|[12]\d|3[01])\b/);
+  if (m) {
+    const y = m[1];
+    const mo = m[3].padStart(2, '0');
+    const d = m[4].padStart(2, '0');
+    return `${y}-${mo}-${d}`;
+  }
+
+  // Month name formats: "JUNE 19, 2004", "FEBRUARY 18, 2003"
+  // Includes common OCR typo "FEPRUARY".
+  const monthMap: Record<string, string> = {
+    JAN: '01', JANUARY: '01',
+    FEB: '02', FEBRUARY: '02', FEPRUARY: '02',
+    MAR: '03', MARCH: '03',
+    APR: '04', APRIL: '04',
+    MAY: '05',
+    JUN: '06', JUNE: '06',
+    JUL: '07', JULY: '07',
+    AUG: '08', AUGUST: '08',
+    SEP: '09', SEPT: '09', SEPTEMBER: '09',
+    OCT: '10', OCTOBER: '10',
+    NOV: '11', NOVEMBER: '11',
+    DEC: '12', DECEMBER: '12',
+  };
+
+  const monthName = value.match(/\b([A-Za-z]{3,10})\s+([0-3]?\d)\s*,\s*((19|20)\d{2})\b/);
+  if (monthName) {
+    const monKey = normalizeForMatch(monthName[1]);
+    const mo = monthMap[monKey];
+    if (mo) {
+      const d = monthName[2].padStart(2, '0');
+      const y = monthName[3];
+      return `${y}-${mo}-${d}`;
+    }
+  }
+
+  // MM/DD/YYYY or DD/MM/YYYY (fallback with month-first preference, allow OCR spaces)
+  m = value.match(/\b(0?[1-9]|1[0-2])\s*[\/.\-]\s*(0?[1-9]|[12]\d|3[01])\s*[\/.\-]\s*((19|20)\d{2})\b/);
+  if (m) {
+    const mo = m[1].padStart(2, '0');
+    const d = m[2].padStart(2, '0');
+    const y = m[3];
+    return `${y}-${mo}-${d}`;
+  }
+
+  // NOTE: when month is missing in OCR (e.g., "19, 2004", "19.2004", "1912004"),
+  // do NOT guess January. Leave birthday blank so the user picks the correct date.
+
+  return '';
+}
+
+function isIsoBirthdayValid(iso: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return false;
+  const parsed = new Date(`${iso}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return parsed <= today;
+}
+
+function extractBirthdayFromLines(lines: string[]): string {
+  // 1) Label-based extraction (Date of Birth, DOB, Birth Date)
+  for (let i = 0; i < lines.length; i++) {
+    const upper = lines[i].toUpperCase();
+    if (
+      upper.includes('DATE OF BIRTH') ||
+      upper.includes('DOB') ||
+      upper.includes('BIRTH DATE') ||
+      upper.includes('PETSA NG KAPANGANAKAN') ||
+      upper.includes('DATEOF BIRTH') ||
+      upper.includes('DATEOFBIRTH')
+    ) {
+      for (let j = i; j <= Math.min(lines.length - 1, i + 2); j++) {
+        const iso = normalizeBirthdayToIso(lines[j]);
+        if (iso && isIsoBirthdayValid(iso)) return iso;
+      }
+    }
+  }
+
+  // 2) Generic scan fallback (handles lines like "M 2003/12/29")
+  for (const line of lines) {
+    const iso = normalizeBirthdayToIso(line);
+    if (iso && isIsoBirthdayValid(iso)) return iso;
+  }
+
+  return '';
 }
 
 /**
@@ -969,6 +1359,7 @@ function isHeaderOrMetadataLine(line: string): boolean {
 function parseGenericID(lines: string[]): Partial<ParsedIDData> {
   let firstName = '';
   let lastName = '';
+  let birthday = '';
   let address = '';
   let addressBarangay = '';
   let addressCityMunicipality = '';
@@ -1006,6 +1397,17 @@ function parseGenericID(lines: string[]): Partial<ParsedIDData> {
     if (line.includes(',')) {
       const parts = line.split(',');
       const letterPct = (line.match(/[A-Za-z]/g) || []).length / line.length;
+      const normalizedLine = normalizeForMatch(line);
+      const isNameLabelLine =
+        normalizedLine.includes('LAST NAME') && normalizedLine.includes('FIRST NAME');
+      if (
+        normalizedLine.includes('PAMBANSANG') ||
+        normalizedLine.includes('PAGKAKAKILAN') ||
+        normalizedLine.includes('PHILIPPINE NATIONAL ID') ||
+        isNameLabelLine
+      ) {
+        continue;
+      }
       
       console.log(`[Generic] Found comma-separated line ${i}: "${line}"`);
       console.log(`[Generic]   - Parts: ${parts.length}, Letters: ${(letterPct * 100).toFixed(1)}%`);
@@ -1043,6 +1445,14 @@ function parseGenericID(lines: string[]): Partial<ParsedIDData> {
       // - Mostly letters (70%+ alphabetic to be strict)
       // - No commas (already checked those above)
       if (words.length >= 2 && letterPct >= 0.7 && !line.includes(',')) {
+        const normalizedLine = normalizeForMatch(line);
+        if (
+          normalizedLine.includes('PAMBANSANG') ||
+          normalizedLine.includes('PAGKAKAKILAN') ||
+          normalizedLine.includes('PHILIPPINE NATIONAL ID')
+        ) {
+          continue;
+        }
         // Check if all words are reasonable (mostly letters)
         const allWordsReasonable = words.every(w => {
           const wordLetters = (w.match(/[A-Za-z]/g) || []).length;
@@ -1073,6 +1483,16 @@ function parseGenericID(lines: string[]): Partial<ParsedIDData> {
 
   if (!firstName && !lastName) {
     console.log(`[Generic] ⚠️ No name found after checking all lines`);
+  }
+
+  console.log(`\n[Generic] === SEARCHING FOR BIRTHDAY ===`);
+  // Use original lines (not filtered) because DOB often appears in mixed text like "M 2003/12/29"
+  // which can be incorrectly filtered out as metadata/noise.
+  birthday = extractBirthdayFromLines(lines);
+  if (birthday) {
+    console.log(`[Generic] ✅ BIRTHDAY FOUND: "${birthday}"`);
+  } else {
+    console.log(`[Generic] ⚠️ No birthday found`);
   }
 
   // Find address by extracting structured components from multiple lines
@@ -1111,15 +1531,23 @@ function parseGenericID(lines: string[]): Partial<ParsedIDData> {
     if (hasDelimiter && hasCityKeyword) {
       console.log(`[Generic] 🔍 Pattern 1 matched (has delimiter + CITY/MUNICIPALITY keyword, including corrupted ones)`);
       // Split by comma or period
-      const parts = line.split(/[,.]/).map(p => p.trim());
+      const parts = line.split(/[,.]/).map(p => p.trim()).filter(Boolean);
       console.log(`[Generic] Split into ${parts.length} parts: [${parts.map(p => `"${p}"`).join(', ')}]`);
       
       if (parts.length >= 2) {
-        // First part = barangay (normalize OCR issues)
-        let barangayRaw = cleanField(parts[0]);
+        // Find city part first, then use the nearest meaningful part before it as barangay.
+        const cityPartIndex = parts.findIndex((p) => hasCorruptedCityKeyword(p));
+        const cityRawCandidate = cityPartIndex >= 0 ? parts[cityPartIndex] : parts[1];
+        const barangayRawCandidate =
+          cityPartIndex > 0
+            ? parts[cityPartIndex - 1]
+            : (parts.find((p) => !hasCorruptedCityKeyword(p) && p.length >= 3) || parts[0]);
+
+        // Barangay token
+        let barangayRaw = cleanField(barangayRawCandidate);
         let barangayNormalized = normalizeAddressToken(barangayRaw);
         
-        console.log(`[Generic] Part[0] classification:`);
+        console.log(`[Generic] Barangay part classification:`);
         console.log(`[Generic]   raw="${barangayRaw}"`);
         console.log(`[Generic]   normalized="${barangayNormalized}"`);
         console.log(`[Generic]   isLikelyBarangay(normalized)=${isLikelyBarangay(barangayNormalized)}`);
@@ -1134,10 +1562,10 @@ function parseGenericID(lines: string[]): Partial<ParsedIDData> {
           console.log(`[Generic]   Word count: ${barangayNormalized.split(/\s+/).length}, Length: ${barangayNormalized.length}`);
         }
         
-        // Second part = City/Municipality (normalize then validate)
-        let cityRaw = cleanField(parts[1]);
+        // City/Municipality token
+        let cityRaw = cleanField(cityRawCandidate);
         // Remove "(CAPITAL)" or similar annotations
-        cityRaw = cityRaw.replace(/\([^)]*\)/g, '').trim();
+        cityRaw = cityRaw.replace(/\([^)]*\)?/g, '').trim();
         // Replace corrupted city keyword with proper text
         cityRaw = cityRaw.replace(/cry$/i, 'city').replace(/citv$/i, 'city').replace(/citi$/i, 'city');
         let cityNormalized = normalizeAddressToken(cityRaw);
@@ -1164,7 +1592,12 @@ function parseGenericID(lines: string[]): Partial<ParsedIDData> {
     // Pattern 2: PROVINCE, ZIPCODE format
     // Example: "8ATANGA5, 4200" → "BATANGAS, 4200"
     // Don't match if line has city keyword (corrupted or not)
-    if (line.includes(',') && !hasCorruptedCityKeyword(line) && line.match(/,\s*\d{4,}/)) {
+    if (
+      line.includes(',') &&
+      !hasCorruptedCityKeyword(line) &&
+      line.match(/,\s*\d{4,}/) &&
+      !line.match(/\b(19|20)\d{2}\s*[\/.\-]\s*(0?[1-9]|1[0-2])\s*[\/.\-]\s*(0?[1-9]|[12]\d|3[01])\b/)
+    ) {
       console.log(`[Generic] 🔍 Pattern 2 matched (PROVINCE, ZIPCODE format)`);
       const parts = line.split(',').map(p => p.trim());
       
@@ -1200,7 +1633,10 @@ function parseGenericID(lines: string[]): Partial<ParsedIDData> {
     // BUT: Don't match if line contains barangay, city (including corrupted), or other address keywords
     if (!addressProvince && !hasCorruptedCityKeyword(line) && !upper.includes('BARANGAY') && !upper.includes('BRGY') && isLikelyProvince(line)) {
       console.log(`[Generic] 🔍 Pattern 3 matched (line looks like province, no city keywords)`);
-      let provinceRaw = cleanField(line);
+      // If OCR line contains province + date (e.g., "BATANGAS, 2003/12/29"),
+      // keep only the first segment as province.
+      const provinceSegment = line.split(',')[0] || line;
+      let provinceRaw = cleanField(provinceSegment);
       let provinceNormalized = normalizeAddressToken(provinceRaw);
       
       console.log(`[Generic] Province candidate: raw="${provinceRaw}" → normalized="${provinceNormalized}"`);
@@ -1247,6 +1683,7 @@ function parseGenericID(lines: string[]): Partial<ParsedIDData> {
   console.log(`[Generic] FINAL VALUES TO RETURN:`);
   console.log(`  firstName: "${firstName}"`);
   console.log(`  lastName: "${lastName}"`);
+  console.log(`  birthday: "${birthday}"`);
   console.log(`  address: "${address}"`);
   console.log(`  addressBarangay: "${addressBarangay}"`);
   console.log(`  addressCityMunicipality: "${addressCityMunicipality}"`);
@@ -1259,6 +1696,7 @@ function parseGenericID(lines: string[]): Partial<ParsedIDData> {
   return { 
     firstName, 
     lastName, 
+    birthday,
     address,
     addressBarangay,
     addressCityMunicipality,
@@ -1285,8 +1723,16 @@ export function parseIDText(rawOcrText: string): ParsedIDData {
   console.log(`\n📋 Text split into ${lines.length} lines`);
   
   // STEP 3: Route to parser based on detected ID type
+  const normalizedRaw = normalizeForMatch(rawOcrText);
+  const looksLikePhilSys =
+    normalizedRaw.includes('PHILIPPINE NATIONAL ID') ||
+    normalizedRaw.includes('PAMBANSANG') ||
+    normalizedRaw.includes('PAGKAKAKILAN') ||
+    (normalizedRaw.includes('GIVEN NAMES') && normalizedRaw.includes('DATE OF BIRTH'));
+
+  const usePhilSysParser = detectionResult.type === 'philsys' || looksLikePhilSys;
   let parserResult: Partial<ParsedIDData>;
-  if (detectionResult.type === 'philsys') {
+  if (usePhilSysParser) {
     const philsysResult = parsePhilSysID(lines);
     const needsFallback = !philsysResult.firstName || !philsysResult.lastName || !philsysResult.address;
 
@@ -1296,8 +1742,11 @@ export function parseIDText(rawOcrText: string): ParsedIDData {
       parserResult = {
         ...genericResult,
         ...philsysResult,
-        firstName: philsysResult.firstName || genericResult.firstName || '',
-        lastName: philsysResult.lastName || genericResult.lastName || '',
+        // For PhilSys, do not allow generic name fallback because generic parser
+        // can misread header text as names. Keep names from PhilSys labeled parser only.
+        firstName: philsysResult.firstName || '',
+        lastName: philsysResult.lastName || '',
+        birthday: philsysResult.birthday || genericResult.birthday || '',
         address: philsysResult.address || genericResult.address || '',
         addressHouseNo: philsysResult.addressHouseNo || genericResult.addressHouseNo || '',
         addressStreet: philsysResult.addressStreet || genericResult.addressStreet || '',
@@ -1324,22 +1773,34 @@ export function parseIDText(rawOcrText: string): ParsedIDData {
     addressProvince: parserResult.addressProvince || '',
     addressRegion: parserResult.addressRegion || '',
   };
+
+  const provinceLooksCombined =
+    !!addressComponents.addressProvince &&
+    (addressComponents.addressProvince.includes(',') ||
+      /\d/.test(addressComponents.addressProvince) ||
+      normalizeForMatch(addressComponents.addressProvince).includes('PHILIPPINES'));
   
   // Only parse combined address string if no individual components were extracted
-  if (!addressComponents.addressBarangay && !addressComponents.addressCityMunicipality && !addressComponents.addressProvince) {
+  if (
+    !addressComponents.addressBarangay ||
+    !addressComponents.addressCityMunicipality ||
+    !addressComponents.addressProvince ||
+    provinceLooksCombined
+  ) {
     const fallback = parseAddressComponents(parserResult.address || '');
-    addressComponents.addressHouseNo = addressComponents.addressHouseNo || fallback.addressHouseNo || '';
-    addressComponents.addressStreet = addressComponents.addressStreet || fallback.addressStreet || '';
-    addressComponents.addressBarangay = addressComponents.addressBarangay || fallback.addressBarangay || '';
-    addressComponents.addressCityMunicipality = addressComponents.addressCityMunicipality || fallback.addressCityMunicipality || '';
-    addressComponents.addressProvince = addressComponents.addressProvince || fallback.addressProvince || '';
-    addressComponents.addressRegion = addressComponents.addressRegion || fallback.addressRegion || '';
+    addressComponents.addressHouseNo = fallback.addressHouseNo || addressComponents.addressHouseNo || '';
+    addressComponents.addressStreet = fallback.addressStreet || addressComponents.addressStreet || '';
+    addressComponents.addressBarangay = fallback.addressBarangay || addressComponents.addressBarangay || '';
+    addressComponents.addressCityMunicipality = fallback.addressCityMunicipality || addressComponents.addressCityMunicipality || '';
+    addressComponents.addressProvince = fallback.addressProvince || addressComponents.addressProvince || '';
+    addressComponents.addressRegion = fallback.addressRegion || addressComponents.addressRegion || '';
   }
   
   // STEP 5: Determine confidence
   const extractedFields: string[] = [];
   if (parserResult.firstName) extractedFields.push('firstName');
   if (parserResult.lastName) extractedFields.push('lastName');
+  if (parserResult.birthday) extractedFields.push('birthday');
   if (parserResult.address) extractedFields.push('address');
   
   let confidence: 'high' | 'medium' | 'low' = 'low';
@@ -1354,6 +1815,7 @@ export function parseIDText(rawOcrText: string): ParsedIDData {
   console.log(`\n✅ Parsing complete:`);
   console.log(`   firstName: "${parserResult.firstName}"`);
   console.log(`   lastName: "${parserResult.lastName}"`);
+  console.log(`   birthday: "${parserResult.birthday || ''}"`);
   console.log(`   address: "${parserResult.address}"`);
   console.log(`   addressComponents extracted from parseGenericID:`);
   console.log(`     addressBarangay: "${addressComponents.addressBarangay}"`);
@@ -1366,6 +1828,7 @@ export function parseIDText(rawOcrText: string): ParsedIDData {
   return {
     firstName: normalizeOCRName(parserResult.firstName || ''),
     lastName: normalizeOCRName(parserResult.lastName || ''),
+    birthday: parserResult.birthday || '',
     address: parserResult.address || '',
     addressHouseNo: addressComponents.addressHouseNo,
     addressStreet: addressComponents.addressStreet,
@@ -1405,6 +1868,7 @@ export function formatParsedData(data: ParsedIDData): ParsedIDData {
   return {
     firstName: cleanField(data.firstName),
     lastName: cleanField(data.lastName),
+    birthday: data.birthday || '',
     address: cleanField(data.address),
     addressHouseNo: normalizeAddressToken(cleanField(data.addressHouseNo || '')),
     addressStreet: normalizeAddressToken(cleanField(data.addressStreet || '')),

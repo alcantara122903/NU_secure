@@ -30,3 +30,19 @@ export async function resolveCompletedStepStatusId(): Promise<number | null> {
   });
   return hit?.step_status_id ?? rows[0].step_status_id;
 }
+
+/** enrollee_status_id for marking an enrollee as fully completed. */
+export async function resolveCompletedEnrolleeStatusId(): Promise<number | null> {
+  const { data: rows } = await supabase
+    .from('enrollee_status')
+    .select('enrollee_status_id, status_name')
+    .limit(40);
+  if (!rows?.length) {
+    return null;
+  }
+  const hit = rows.find((r) => {
+    const n = norm(r.status_name);
+    return n.includes('complete') || n.includes('done') || n.includes('finished');
+  });
+  return hit?.enrollee_status_id ?? rows[0].enrollee_status_id;
+}

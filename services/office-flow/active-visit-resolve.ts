@@ -7,12 +7,14 @@ export type ActiveVisitRow = {
   visit_type_id: number | null;
   primary_office_id: number | null;
   qr_token: string | null;
+  purpose_reason: string | null;
+  guard_user_id: number | null;
   entry_time: string | null;
   exit_time: string | null;
 };
 
 const VISIT_SELECT =
-  'visit_id, visitor_id, visit_type_id, primary_office_id, qr_token, entry_time, exit_time';
+  'visit_id, visitor_id, visit_type_id, primary_office_id, qr_token, purpose_reason, guard_user_id, entry_time, exit_time';
 
 /**
  * Resolves the single active visit (exit_time is null) from a QR scan string:

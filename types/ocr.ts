@@ -31,6 +31,8 @@ export interface IDTypeDetectionResult {
 export interface ParsedIDData {
   firstName: string;
   lastName: string;
+  /** ISO date string formatted as YYYY-MM-DD */
+  birthday?: string;
   address: string;
   // Address components
   addressHouseNo?: string;

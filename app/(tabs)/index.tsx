@@ -1,11 +1,11 @@
-import { Colors } from '@/constants/colors';
-import { useColorScheme } from '@/hooks/use-color-scheme';
-import { authService } from '@/services/auth';
-import { authSessionService } from '@/services/auth-session';
-import type { AuthStatus } from '@/types/auth';
-import { validateLoginForm } from '@/utils/validation';
-import { useRouter } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { Colors } from "@/constants/colors";
+import { useColorScheme } from "@/hooks/use-color-scheme";
+import { authService } from "@/services/auth";
+import { authSessionService } from "@/services/auth-session";
+import type { AuthStatus } from "@/types/auth";
+import { validateLoginForm } from "@/utils/validation";
+import { useRouter } from "expo-router";
+import { useCallback, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -17,31 +17,33 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function LoginScreen() {
   const colorScheme = useColorScheme();
-  const colors = Colors[colorScheme || 'light'];
+  const colors = Colors[colorScheme || "light"];
   const router = useRouter();
 
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [status, setStatus] = useState<AuthStatus>('idle');
-  const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [status, setStatus] = useState<AuthStatus>("idle");
+  const [errors, setErrors] = useState<{ email?: string; password?: string }>(
+    {},
+  );
   const [showPassword, setShowPassword] = useState(false);
 
   const handleLogin = useCallback(async () => {
     // Validate form
     const validation = validateLoginForm(email, password);
-    
+
     if (!validation.isValid) {
       setErrors(validation.errors);
       return;
     }
 
-    setStatus('loading');
+    setStatus("loading");
     setErrors({});
 
     try {
@@ -59,35 +61,38 @@ export default function LoginScreen() {
           });
         }
 
-        setStatus('success');
+        setStatus("success");
         // Navigate to dashboard based on role from database
         setTimeout(() => {
           router.push(response.dashboard);
         }, 200);
       } else {
-        setStatus('error');
-        Alert.alert('Login Failed', response.message || 'Please try again');
+        setStatus("error");
+        Alert.alert("Login Failed", response.message || "Please try again");
       }
     } catch (error) {
-      setStatus('error');
-      const errorMessage = error instanceof Error ? error.message : 'An error occurred';
-      console.error('Login error details:', errorMessage);
-      Alert.alert('Login Error', errorMessage);
+      setStatus("error");
+      const errorMessage =
+        error instanceof Error ? error.message : "An error occurred";
+      console.error("Login error details:", errorMessage);
+      Alert.alert("Login Error", errorMessage);
     }
   }, [email, password, router]);
 
-  const isLoading = status === 'loading';
+  const isLoading = status === "loading";
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.primary }]}>
+    <SafeAreaView
+      style={[styles.container, { backgroundColor: colors.primary }]}
+    >
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
         style={{ flex: 1 }}
       >
         <ScrollView
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
-          scrollEnabled={Platform.OS !== 'web'}
+          scrollEnabled={Platform.OS !== "web"}
         >
           {/* Header Section */}
           <View style={styles.headerSection}>
@@ -101,8 +106,8 @@ export default function LoginScreen() {
           <View style={[styles.formCard, { backgroundColor: colors.surface }]}>
             {/* Logo Section - Inside Card */}
             <View style={styles.logoSectionInCard}>
-              <Image 
-                source={require('@/assets/images/icon.png')}
+              <Image
+                source={require("@/assets/images/icon.png")}
                 style={styles.logoBadge}
                 resizeMode="contain"
               />
@@ -115,7 +120,7 @@ export default function LoginScreen() {
                 style={[
                   styles.inputWrapper,
                   {
-                    borderColor: errors.email ? '#FF6B6B' : colors.border,
+                    borderColor: errors.email ? "#FF6B6B" : colors.border,
                     backgroundColor: colors.background,
                   },
                 ]}
@@ -145,12 +150,14 @@ export default function LoginScreen() {
 
             {/* Password Field */}
             <View style={styles.formGroup}>
-              <Text style={[styles.label, { color: colors.text }]}>Password</Text>
+              <Text style={[styles.label, { color: colors.text }]}>
+                Password
+              </Text>
               <View
                 style={[
                   styles.inputWrapper,
                   {
-                    borderColor: errors.password ? '#FF6B6B' : colors.border,
+                    borderColor: errors.password ? "#FF6B6B" : colors.border,
                     backgroundColor: colors.background,
                   },
                 ]}
@@ -173,11 +180,18 @@ export default function LoginScreen() {
                 <TouchableOpacity
                   onPress={() => setShowPassword(!showPassword)}
                   accessible={true}
-                  accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
+                  accessibilityLabel={
+                    showPassword ? "Hide password" : "Show password"
+                  }
                   disabled={isLoading}
                 >
-                  <Text style={[styles.togglePasswordText, { color: colors.primary }]}>
-                    {showPassword ? '👁️' : '👁️‍🗨️'}
+                  <Text
+                    style={[
+                      styles.togglePasswordText,
+                      { color: colors.primary },
+                    ]}
+                  >
+                    {showPassword ? "👁️" : "👁️‍🗨️"}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -191,7 +205,7 @@ export default function LoginScreen() {
               style={[
                 styles.signInButton,
                 {
-                  backgroundColor: '#5A5A5A',
+                  backgroundColor: "#5A5A5A",
                   opacity: isLoading ? 0.7 : 1,
                 },
               ]}
@@ -210,13 +224,17 @@ export default function LoginScreen() {
 
             {/* Forgot Password Link */}
             <TouchableOpacity
-              onPress={() => Alert.alert('Forgot Password', 'Feature coming soon')}
+              onPress={() =>
+                Alert.alert("Forgot Password", "Feature coming soon")
+              }
               disabled={isLoading}
               accessible={true}
               accessibilityLabel="Forgot password link"
               accessibilityRole="button"
             >
-              <Text style={[styles.forgotPasswordLink, { color: colors.primary }]}>
+              <Text
+                style={[styles.forgotPasswordLink, { color: colors.primary }]}
+              >
                 Forgot password?
               </Text>
             </TouchableOpacity>
@@ -233,29 +251,29 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
-    justifyContent: 'center',
+    justifyContent: "center",
     paddingHorizontal: 20,
     paddingVertical: 20,
   },
   headerSection: {
-    alignItems: 'center',
+    alignItems: "center",
     marginBottom: 32,
   },
   appTitle: {
     fontSize: 32,
-    fontWeight: '700',
+    fontWeight: "700",
     letterSpacing: 2,
     marginBottom: 8,
-    color: '#FFD700',
+    color: "#FFD700",
   },
   appSubtitle: {
     fontSize: 14,
-    fontWeight: '400',
+    fontWeight: "400",
     letterSpacing: 0.5,
-    color: '#E0E0E0',
+    color: "#E0E0E0",
   },
   logoSectionInCard: {
-    alignItems: 'center',
+    alignItems: "center",
     marginBottom: 24,
     paddingTop: 8,
   },
@@ -264,7 +282,7 @@ const styles = StyleSheet.create({
     height: 90,
     ...Platform.select({
       ios: {
-        shadowColor: '#000',
+        shadowColor: "#000",
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.15,
         shadowRadius: 8,
@@ -273,7 +291,7 @@ const styles = StyleSheet.create({
         elevation: 5,
       },
       web: {
-        boxShadow: '0px 4px 8px rgba(0, 0, 0, 0.15)',
+        boxShadow: "0px 4px 8px rgba(0, 0, 0, 0.15)",
       },
     }),
   },
@@ -283,7 +301,7 @@ const styles = StyleSheet.create({
     marginBottom: 32,
     ...Platform.select({
       ios: {
-        shadowColor: '#000',
+        shadowColor: "#000",
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.1,
         shadowRadius: 8,
@@ -292,7 +310,7 @@ const styles = StyleSheet.create({
         elevation: 3,
       },
       web: {
-        boxShadow: '0px 2px 8px rgba(0, 0, 0, 0.1)',
+        boxShadow: "0px 2px 8px rgba(0, 0, 0, 0.1)",
       },
     }),
   },
@@ -301,13 +319,13 @@ const styles = StyleSheet.create({
   },
   label: {
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: "600",
     marginBottom: 8,
     letterSpacing: 0.5,
   },
   inputWrapper: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     borderRadius: 8,
     borderWidth: 1,
     paddingHorizontal: 12,
@@ -316,28 +334,28 @@ const styles = StyleSheet.create({
   input: {
     flex: 1,
     fontSize: 14,
-    fontWeight: '500',
+    fontWeight: "500",
   },
   togglePasswordText: {
     fontSize: 18,
     marginLeft: 8,
   },
   errorText: {
-    color: '#FF6B6B',
+    color: "#FF6B6B",
     fontSize: 12,
     marginTop: 6,
-    fontWeight: '500',
+    fontWeight: "500",
   },
   signInButton: {
     height: 48,
     borderRadius: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     marginTop: 24,
     marginBottom: 16,
     ...Platform.select({
       ios: {
-        shadowColor: '#000',
+        shadowColor: "#000",
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.2,
         shadowRadius: 8,
@@ -346,21 +364,21 @@ const styles = StyleSheet.create({
         elevation: 4,
       },
       web: {
-        boxShadow: '0px 4px 12px rgba(0, 0, 0, 0.2)',
+        boxShadow: "0px 4px 12px rgba(0, 0, 0, 0.2)",
       },
     }),
   },
   signInButtonText: {
-    color: '#FFFFFF',
+    color: "#FFFFFF",
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: "700",
     letterSpacing: 0.5,
   },
   forgotPasswordLink: {
     fontSize: 14,
-    fontWeight: '500',
-    textAlignVertical: 'center',
-    textAlign: 'center',
+    fontWeight: "500",
+    textAlignVertical: "center",
+    textAlign: "center",
     paddingVertical: 8,
   },
 });

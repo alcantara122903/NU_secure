@@ -18,6 +18,8 @@ export interface Visitor {
 export interface IDExtractionData {
   firstName: string;
   lastName: string;
+  /** ISO date string formatted as YYYY-MM-DD */
+  birthday?: string;
   address: string;
   addressHouseNo?: string;
   addressStreet?: string;

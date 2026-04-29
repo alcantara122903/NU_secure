@@ -117,6 +117,7 @@ export const enrolleeService = {
       return {
         firstName: parsedData.firstName,
         lastName: parsedData.lastName,
+        birthday: parsedData.birthday || '',
         address: parsedData.address,
         addressHouseNo: parsedData.addressHouseNo,
         addressStreet: parsedData.addressStreet,

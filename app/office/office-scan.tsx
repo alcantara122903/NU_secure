@@ -23,7 +23,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-type Phase = 'loading_office' | 'need_permission' | 'ready' | 'processing' | 'result' | 'error';
+type Phase = 'loading_office' | 'need_permission' | 'ready' | 'processing' | 'error';
 
 export default function OfficeScanScreen() {
   const router = useRouter();
@@ -42,7 +42,6 @@ export default function OfficeScanScreen() {
 
   const [phase, setPhase] = useState<Phase>('loading_office');
   const [officeData, setOfficeData] = useState<{ office_id: number; office_name: string } | null>(null);
-  const [scanResult, setScanResult] = useState<OfficeCheckInScanResult | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
   const [showManualEntry, setShowManualEntry] = useState(false);
   const [manualRaw, setManualRaw] = useState('');
@@ -102,7 +101,6 @@ export default function OfficeScanScreen() {
 
     isProcessingRef.current = true;
     setPhase('processing');
-    setScanResult(null);
     setErrorMessage('');
 
     try {
@@ -111,9 +109,34 @@ export default function OfficeScanScreen() {
         scanningOfficeId: officeData.office_id,
         scannedByUserId: userId,
       });
+      if (!result.success || !result.visitId) {
+        setErrorMessage(result.message || 'Something went wrong. Please try again.');
+        setPhase('error');
+        return;
+      }
 
-      setScanResult(result);
-      setPhase('result');
+      router.push({
+        pathname: '/office/visitor-info',
+        params: {
+          visitId: String(result.visitId),
+          visitorId: result.passNumber || '',
+          visitorName: result.visitorName || '(visitor not found)',
+          passNumber: result.passNumber || '',
+          controlNumber: result.controlNumber || '',
+          destinationOffice: result.destinationOffice || result.scanningOfficeName || '',
+          expectedOffice: result.expectedOfficeName || '',
+          purposeReason: result.purposeReason || '',
+          purposeLabel: result.purposeLabel || 'Purpose of Visit',
+          entryTime: result.entryTime || '',
+          scanTime: result.scanTime || '',
+          registeredBy: result.registeredBy || '',
+          isCorrectDestination: result.isCorrectDestination ? 'true' : 'false',
+          destinationStatusLabel: result.destinationStatusLabel || '',
+          enrolleeStatusLabel: result.enrolleeStatusLabel || '',
+        },
+      });
+
+      resetScan();
     } catch (e) {
       console.error('[OfficeScan] runScan', e);
       setErrorMessage('Something went wrong. Please try again.');
@@ -124,7 +147,6 @@ export default function OfficeScanScreen() {
   };
 
   const resetScan = () => {
-    setScanResult(null);
     setErrorMessage('');
     setManualRaw('');
     setShowManualEntry(false);
@@ -171,48 +193,6 @@ export default function OfficeScanScreen() {
             </>
           )}
         </View>
-      </SafeAreaView>
-    );
-  }
-
-  if (phase === 'result' && scanResult) {
-    const failed = !scanResult.success;
-    const ok = scanResult.success && scanResult.authorized;
-    const iconName = failed ? 'error-outline' : ok ? 'verified-user' : 'gpp-bad';
-    const accent = failed || !ok ? errorColor : successColor;
-    const headline = failed ? scanResult.title : ok ? 'Authorized' : 'Unauthorized';
-    return (
-      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-        <View style={[styles.header, { backgroundColor: colors.primary }]}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.headerBtn}>
-            <MaterialIcons name="arrow-back" size={24} color="#FFFFFF" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Scan result</Text>
-          <View style={styles.headerBtn} />
-        </View>
-        <ScrollView contentContainerStyle={styles.scrollPad}>
-          <View style={[styles.resultCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <MaterialIcons name={iconName} size={72} color={accent} />
-            <Text style={[styles.resultTitle, { color: accent }]}>{headline}</Text>
-            <Text style={[styles.resultMessage, { color: colors.text }]}>{scanResult.message}</Text>
-            {scanResult.visitorName ? (
-              <Text style={[styles.visitorLine, { color: colors.text }]}>{scanResult.visitorName}</Text>
-            ) : null}
-            {scanResult.expectedOfficeName ? (
-              <Text style={[styles.detailLine, { color: colors.textSecondary }]}>
-                Expected office: {scanResult.expectedOfficeName}
-              </Text>
-            ) : null}
-            {scanResult.scanningOfficeName ? (
-              <Text style={[styles.detailLine, { color: colors.textSecondary }]}>
-                This desk: {scanResult.scanningOfficeName}
-              </Text>
-            ) : null}
-          </View>
-          <TouchableOpacity style={[styles.primaryBtn, { backgroundColor: colors.primary }]} onPress={resetScan}>
-            <Text style={styles.primaryBtnText}>Scan another</Text>
-          </TouchableOpacity>
-        </ScrollView>
       </SafeAreaView>
     );
   }
