@@ -1,743 +1,574 @@
-import { Colors } from "@/constants/colors";
-import { useColorScheme } from "@/hooks/use-color-scheme";
-import { authSessionService } from "@/services/auth-session";
-import { supabase } from "@/services/database";
-import MaterialIcons from "@expo/vector-icons/MaterialIcons";
+import React from "react";
 import { useRouter } from "expo-router";
-import { useCallback, useEffect, useState } from "react";
+import { authSessionService } from "@/services/auth-session";
 import {
-    Alert,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  Alert,
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  SafeAreaView,
+  StatusBar,
+  Platform,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import {
+  Ionicons,
+  MaterialCommunityIcons,
+  FontAwesome5,
+} from "@expo/vector-icons";
 
-export default function OfficePortalScreen() {
-  const colorScheme = useColorScheme();
-  const colors = Colors[colorScheme || "light"];
+export default function AdmissionsDashboardScreen() {
   const router = useRouter();
 
-  const [loadingOfficeData, setLoadingOfficeData] = useState(true);
-  const [officeDataError, setOfficeDataError] = useState<string | null>(null);
-  const [officeData, setOfficeData] = useState({
-    officeName: "",
-    department: "",
-    employeeName: "",
-    position: "",
-    todayVisitors: 0,
-    pendingScans: 0,
-    expectedVisitors: 0,
-    officeId: null as number | null,
-  });
-
-  const quickTips = [
-    "Ask visitor to show their QR ticket",
-    "Ensure QR code is clearly visible",
-    "Hold device steady during scan",
-    "Audio feedback sounds once verified",
-  ];
-
-  const loadOfficeDashboardData = useCallback(async () => {
-    try {
-      setLoadingOfficeData(true);
-      setOfficeDataError(null);
-
-      const userId = authSessionService.getCurrentUserId();
-      if (!userId) {
-        setOfficeDataError("Session not found. Please log in again.");
-        return;
-      }
-
-      const session = authSessionService.getSession();
-
-      const { data: userRow, error: userError } = await supabase
-        .from("users")
-        .select("user_id, first_name, last_name, email, role_id, status")
-        .eq("user_id", userId)
-        .maybeSingle();
-
-      if (userError) {
-        console.error("❌ Failed to fetch users row:", userError);
-        setOfficeDataError("Could not load account profile. Please try again.");
-        return;
-      }
-
-      const { data: staffRow, error: staffError } = await supabase
-        .from("office_staff")
-        .select("staff_id, user_id, office_id, position")
-        .eq("user_id", userId)
-        .maybeSingle();
-
-      if (staffError) {
-        console.error("❌ Failed to fetch office staff mapping:", staffError);
-        if (staffError.code === "PGRST205") {
-          setOfficeDataError(
-            "Office staff table is not available in Supabase schema cache.",
-          );
-        } else {
-          setOfficeDataError(
-            "Could not load office staff mapping. Please try again.",
-          );
-        }
-        return;
-      }
-
-      if (!staffRow) {
-        setOfficeDataError("No office staff account is linked to this user.");
-        return;
-      }
-
-      const { data: officeRow, error: officeError } = await supabase
-        .from("office")
-        .select("office_id, office_name, floor, is_active")
-        .eq("office_id", staffRow.office_id)
-        .maybeSingle();
-
-      if (officeError) {
-        console.error("❌ Failed to fetch office details:", officeError);
-        setOfficeDataError("Could not load office details. Please try again.");
-        return;
-      }
-
-      const now = new Date();
-      const startOfDay = new Date(now);
-      startOfDay.setHours(0, 0, 0, 0);
-      const endOfDay = new Date(now);
-      endOfDay.setHours(23, 59, 59, 999);
-
-      const [todayVisitorsRes, pendingScansRes, expectedVisitorsRes] =
-        await Promise.all([
-          supabase
-            .from("visit")
-            .select("visit_id", { count: "exact", head: true })
-            .eq("primary_office_id", staffRow.office_id)
-            .gte("entry_time", startOfDay.toISOString())
-            .lte("entry_time", endOfDay.toISOString()),
-          supabase
-            .from("office_expectation")
-            .select("expectation_id", { count: "exact", head: true })
-            .eq("office_id", staffRow.office_id)
-            .eq("expectation_status_id", 1),
-          supabase
-            .from("office_expectation")
-            .select("expectation_id", { count: "exact", head: true })
-            .eq("office_id", staffRow.office_id),
-        ]);
-
-      if (
-        todayVisitorsRes.error ||
-        pendingScansRes.error ||
-        expectedVisitorsRes.error
-      ) {
-        console.error("❌ Failed to fetch office stats:", {
-          todayVisitorsError: todayVisitorsRes.error,
-          pendingScansError: pendingScansRes.error,
-          expectedVisitorsError: expectedVisitorsRes.error,
-        });
-        setOfficeDataError(
-          "Could not load office statistics. Please try again.",
-        );
-        return;
-      }
-
-      const employeeName =
-        `${userRow?.first_name || session?.userProfile?.first_name || ""} ${userRow?.last_name || session?.userProfile?.last_name || ""}`.trim();
-
-      setOfficeData({
-        officeName: officeRow?.office_name || "Office",
-        department: officeRow?.office_name || "Office",
-        employeeName:
-          employeeName ||
-          userRow?.email ||
-          session?.userProfile?.email ||
-          "Office Staff",
-        position: staffRow.position || "Office Staff",
-        todayVisitors: todayVisitorsRes.count || 0,
-        pendingScans: pendingScansRes.count || 0,
-        expectedVisitors: expectedVisitorsRes.count || 0,
-        officeId: staffRow.office_id,
-      });
-    } catch (error) {
-      console.error("❌ Error loading office dashboard data:", error);
-      setOfficeDataError(
-        "An unexpected error occurred while loading office data.",
-      );
-    } finally {
-      setLoadingOfficeData(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadOfficeDashboardData();
-  }, [loadOfficeDashboardData]);
-
   const handleScanQR = () => {
-    if (loadingOfficeData || officeDataError) {
-      Alert.alert(
-        "Office data not ready",
-        "Please wait for office profile data before scanning.",
-      );
-      return;
-    }
-
     router.push("/office/office-scan");
   };
 
   const handleLogout = () => {
     Alert.alert("Logout", "Are you sure you want to logout?", [
-      {
-        text: "Cancel",
-        onPress: () => {},
-        style: "cancel",
-      },
+      { text: "Cancel", style: "cancel" },
       {
         text: "Logout",
-        onPress: () => {
-          try {
-            authSessionService.clearSession();
-            console.log("✅ Session cleared successfully");
-            router.replace("/(tabs)");
-          } catch (error) {
-            console.error("❌ Error clearing session:", error);
-            router.replace("/(tabs)");
-          }
-        },
         style: "destructive",
+        onPress: () => {
+          authSessionService.clearSession();
+          router.replace("/(tabs)");
+        },
       },
     ]);
   };
 
   return (
-    <SafeAreaView
-      style={[styles.container, { backgroundColor: colors.background }]}
-    >
-      {/* Header */}
-      <View style={[styles.header, { backgroundColor: colors.primary }]}>
-        <View style={styles.headerContent}>
-          <View style={styles.headerLeft}>
-            <MaterialIcons name="business" size={24} color="#FFD700" />
-            <View style={styles.headerText}>
-              <Text style={styles.headerTitle}>{officeData.officeName}</Text>
-              <Text style={styles.headerSubtitle}>{officeData.department}</Text>
-            </View>
-          </View>
-          <TouchableOpacity
-            onPress={handleLogout}
-            style={[
-              styles.logoutButton,
-              { backgroundColor: "rgba(255, 255, 255, 0.2)" },
-            ]}
-            activeOpacity={0.8}
-          >
-            <MaterialIcons name="logout" size={20} color="#FFFFFF" />
-            <Text style={styles.logoutButtonText}>Logout</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
+    <SafeAreaView style={styles.safeArea}>
+      <StatusBar barStyle="light-content" backgroundColor="#0646A0" />
 
       <ScrollView
-        contentContainerStyle={styles.scrollContent}
+        style={styles.container}
         showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scrollContent}
       >
-        {loadingOfficeData ? (
-          <View style={[styles.stateCard, { backgroundColor: colors.surface }]}>
-            <Text style={[styles.stateTitle, { color: colors.text }]}>
-              Loading office data...
-            </Text>
-            <Text
-              style={[styles.stateSubtitle, { color: colors.textSecondary }]}
-            >
-              Fetching your account profile and dashboard stats.
-            </Text>
-          </View>
-        ) : null}
+        <View style={styles.header}>
+          <View style={styles.headerContent}>
+            <View style={styles.officeIconBox}>
+              <MaterialCommunityIcons name="office-building" size={34} color="#FFD21E" />
+            </View>
 
-        {!loadingOfficeData && officeDataError ? (
-          <View style={[styles.stateCard, { backgroundColor: colors.surface }]}>
-            <Text style={[styles.stateTitle, { color: colors.text }]}>
-              Unable to load office data
-            </Text>
-            <Text
-              style={[styles.stateSubtitle, { color: colors.textSecondary }]}
-            >
-              {officeDataError}
-            </Text>
+            <View style={styles.headerTextBox}>
+              <Text style={styles.headerTitle}>Admissions Office</Text>
+              <Text style={styles.headerSubtitle}>Admissions Office</Text>
+            </View>
+
             <TouchableOpacity
-              style={[styles.retryButton, { backgroundColor: colors.primary }]}
-              onPress={loadOfficeDashboardData}
+              style={styles.logoutButton}
               activeOpacity={0.8}
+              onPress={handleLogout}
             >
-              <Text style={styles.retryButtonText}>Retry</Text>
+              <Ionicons name="log-out-outline" size={26} color="#FFFFFF" />
+              <Text style={styles.logoutText}>Logout</Text>
             </TouchableOpacity>
           </View>
-        ) : null}
+        </View>
 
-        {!loadingOfficeData && !officeDataError ? (
-          <>
-            {/* Employee Info Card */}
-            <View
-              style={[styles.employeeCard, { backgroundColor: colors.surface }]}
-            >
-              <View style={styles.employeeAvatar}>
-                <MaterialIcons
-                  name="person-outline"
-                  size={28}
-                  color={colors.primary}
-                />
-              </View>
-              <View style={styles.employeeDetails}>
-                <Text style={[styles.employeeName, { color: colors.text }]}>
-                  {officeData.employeeName}
-                </Text>
-                <Text
-                  style={[styles.employeeRole, { color: colors.textSecondary }]}
-                >
-                  {officeData.position}
-                </Text>
-              </View>
+        <View style={[styles.card, styles.profileCard]}>
+          <View style={styles.avatarCircle}>
+            <Ionicons name="person-outline" size={38} color="#064AA5" />
+          </View>
+
+          <View>
+            <Text style={styles.profileName}>Ejay Dimayuga</Text>
+            <Text style={styles.profileRole}>Manager</Text>
+          </View>
+        </View>
+
+        <View style={[styles.card, styles.scannerCard]}>
+          <View style={styles.scanFrame}>
+            <View style={[styles.corner, styles.cornerTopLeft]} />
+            <View style={[styles.corner, styles.cornerTopRight]} />
+            <View style={[styles.corner, styles.cornerBottomLeft]} />
+            <View style={[styles.corner, styles.cornerBottomRight]} />
+
+            <MaterialCommunityIcons name="qrcode-scan" size={86} color="#064AA5" />
+
+            <Text style={styles.scanTitle}>Ready to Scan</Text>
+            <Text style={styles.scanSubtitle}>Position QR code in frame</Text>
+          </View>
+        </View>
+
+        <TouchableOpacity
+          style={styles.scanButton}
+          activeOpacity={0.85}
+          onPress={handleScanQR}
+        >
+          <MaterialCommunityIcons name="qrcode-scan" size={28} color="#FFFFFF" />
+          <Text style={styles.scanButtonText}>Tap to Scan QR Code</Text>
+        </TouchableOpacity>
+
+        <View style={[styles.card, styles.tipsCard]}>
+          <View style={styles.tipsHeader}>
+            <View style={styles.tipsIconCircle}>
+              <Ionicons name="bulb-outline" size={24} color="#FFFFFF" />
+            </View>
+            <Text style={styles.tipsTitle}>Quick Tips</Text>
+          </View>
+
+          <View style={styles.divider} />
+
+          <TipItem text="Ask visitor to show their QR ticket" />
+          <TipItem text="Ensure QR code is clearly visible" />
+          <TipItem text="Hold device steady during scan" />
+          <TipItem text="Audio feedback sounds once verified" />
+        </View>
+
+        <View style={styles.statsRow}>
+          <View style={[styles.statCard, styles.greenBorder]}>
+            <View style={styles.statIconGreen}>
+              <FontAwesome5 name="users" size={24} color="#1FA855" />
             </View>
 
-            {/* QR Scanner Card */}
-            <View
-              style={[styles.scannerCard, { backgroundColor: colors.surface }]}
-            >
-              <View style={[styles.qrFrame, { borderColor: colors.primary }]}>
-                <MaterialIcons
-                  name="qr-code-2"
-                  size={64}
-                  color={colors.primary}
-                />
-                <Text
-                  style={[styles.readyText, { color: colors.textSecondary }]}
-                >
-                  Ready to Scan
-                </Text>
-                <Text
-                  style={[styles.scanHintText, { color: colors.textSecondary }]}
-                >
-                  Position QR code in frame
-                </Text>
-              </View>
+            <View>
+              <Text style={styles.statLabel}>Today&apos;s Visitors</Text>
+              <Text style={[styles.statValue, styles.greenText]}>2</Text>
+            </View>
+          </View>
+
+          <View style={[styles.statCard, styles.orangeBorder]}>
+            <View style={styles.statIconOrange}>
+              <MaterialCommunityIcons name="clipboard-clock-outline" size={30} color="#F2A100" />
             </View>
 
-            {/* Scan Button */}
-            <TouchableOpacity
-              style={[styles.scanButton, { backgroundColor: colors.primary }]}
-              onPress={handleScanQR}
-              activeOpacity={0.8}
-              disabled={loadingOfficeData || !!officeDataError}
-            >
-              <MaterialIcons name="qr-code-2" size={24} color="#FFFFFF" />
-              <Text style={styles.scanButtonText}>Tap to Scan QR Code</Text>
-            </TouchableOpacity>
-
-            {/* Quick Tips Card */}
-            <View
-              style={[styles.tipsCard, { backgroundColor: colors.surface }]}
-            >
-              <View style={styles.tipsHeader}>
-                <MaterialIcons
-                  name="lightbulb-outline"
-                  size={18}
-                  color={colors.primary}
-                />
-                <Text style={[styles.tipsTitle, { color: colors.text }]}>
-                  Quick Tips
-                </Text>
-              </View>
-              <View style={styles.tipsList}>
-                {quickTips.map((tip, index) => (
-                  <View key={index} style={styles.tipItem}>
-                    <View
-                      style={[
-                        styles.tipDot,
-                        { backgroundColor: colors.primary },
-                      ]}
-                    />
-                    <Text style={[styles.tipText, { color: colors.text }]}>
-                      {tip}
-                    </Text>
-                  </View>
-                ))}
-              </View>
+            <View>
+              <Text style={styles.statLabel}>Pending Scans</Text>
+              <Text style={[styles.statValue, styles.orangeText]}>40</Text>
             </View>
+          </View>
+        </View>
 
-            {/* Stats Row */}
-            <View style={styles.statsRow}>
-              {/* Today's Visitors Card */}
-              <View
-                style={[styles.statCard, { backgroundColor: colors.surface }]}
-              >
-                <View style={styles.statIcon}>
-                  <MaterialIcons name="groups" size={24} color="#28A745" />
-                </View>
-                <Text
-                  style={[styles.statLabel, { color: colors.textSecondary }]}
-                >
-                  Today&apos;s Visitors
-                </Text>
-                <Text style={[styles.statValue, { color: colors.text }]}>
-                  {officeData.todayVisitors}
-                </Text>
-              </View>
+        <View style={[styles.card, styles.expectedCard]}>
+          <View style={styles.calendarIconCircle}>
+            <Ionicons name="calendar-outline" size={34} color="#064AA5" />
+          </View>
 
-              {/* Pending Scans Card */}
-              <View
-                style={[styles.statCard, { backgroundColor: colors.surface }]}
-              >
-                <View style={styles.statIcon}>
-                  <MaterialIcons
-                    name="pending-actions"
-                    size={24}
-                    color="#FFA500"
-                  />
-                </View>
-                <Text
-                  style={[styles.statLabel, { color: colors.textSecondary }]}
-                >
-                  Pending Scans
-                </Text>
-                <Text style={[styles.statValue, { color: colors.text }]}>
-                  {officeData.pendingScans}
-                </Text>
-              </View>
-            </View>
+          <View style={styles.expectedTextBox}>
+            <Text style={styles.expectedTitle}>Expected Visitors</Text>
+            <Text style={styles.expectedNumber}>45</Text>
+            <Text style={styles.expectedSubtitle}>scheduled for today</Text>
+          </View>
 
-            {/* Expected Visitors Card */}
-            <View
-              style={[styles.expectedCard, { backgroundColor: colors.surface }]}
-            >
-              <Text style={[styles.expectedTitle, { color: colors.text }]}>
-                Expected Visitors
-              </Text>
-              <View style={styles.expectedContent}>
-                <Text
-                  style={[styles.expectedNumber, { color: colors.primary }]}
-                >
-                  {officeData.expectedVisitors}
-                </Text>
-                <Text
-                  style={[
-                    styles.expectedDescription,
-                    { color: colors.textSecondary },
-                  ]}
-                >
-                  scheduled for today
-                </Text>
-              </View>
-            </View>
-          </>
-        ) : null}
+          <View style={styles.peopleDecor}>
+            <FontAwesome5 name="user-friends" size={36} color="#D7E4FF" />
+          </View>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
 }
 
+function TipItem({ text }: { text: string }) {
+  return (
+    <View style={styles.tipItem}>
+      <View style={styles.checkCircle}>
+        <Ionicons name="checkmark" size={14} color="#FFFFFF" />
+      </View>
+      <Text style={styles.tipText}>{text}</Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: "#F4F7FB",
+  },
+
   container: {
     flex: 1,
+    backgroundColor: "#F4F7FB",
   },
+
+  scrollContent: {
+    paddingBottom: 24,
+  },
+
   header: {
+    backgroundColor: "#0646A0",
+    paddingTop: Platform.OS === "android" ? (StatusBar.currentHeight ?? 0) + 18 : 26,
+    paddingBottom: 48,
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
   },
+
   headerContent: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
   },
-  headerLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    flex: 1,
-  },
-  headerText: {
-    flex: 1,
-  },
-  headerTitle: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#FFFFFF",
-    marginBottom: 2,
-  },
-  headerSubtitle: {
-    fontSize: 12,
-    fontWeight: "500",
-    color: "#E0E0E0",
-  },
-  logoutButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-  },
-  logoutButtonText: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: "#FFFFFF",
-  },
-  scrollContent: {
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-  },
-  stateCard: {
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    ...Platform.select({
-      ios: {
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.08,
-        shadowRadius: 3,
-      },
-      android: {
-        elevation: 2,
-      },
-    }),
-  },
-  stateTitle: {
-    fontSize: 16,
-    fontWeight: "700",
-    marginBottom: 6,
-  },
-  stateSubtitle: {
-    fontSize: 13,
-    fontWeight: "500",
-    lineHeight: 18,
-  },
-  retryButton: {
-    marginTop: 12,
-    alignSelf: "flex-start",
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 8,
-  },
-  retryButtonText: {
-    color: "#FFFFFF",
-    fontWeight: "700",
-    fontSize: 13,
-  },
-  employeeCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    ...Platform.select({
-      ios: {
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.08,
-        shadowRadius: 3,
-      },
-      android: {
-        elevation: 2,
-      },
-    }),
-  },
-  employeeAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: "#F0F0F0",
+
+  officeIconBox: {
+    width: 42,
+    height: 42,
     justifyContent: "center",
     alignItems: "center",
     marginRight: 12,
   },
-  employeeDetails: {
+
+  headerTextBox: {
     flex: 1,
   },
-  employeeName: {
-    fontSize: 16,
-    fontWeight: "700",
-    marginBottom: 4,
+
+  headerTitle: {
+    color: "#FFFFFF",
+    fontSize: 19,
+    fontWeight: "800",
+    letterSpacing: 0.2,
   },
-  employeeRole: {
+
+  headerSubtitle: {
+    color: "#DCE8FF",
     fontSize: 13,
     fontWeight: "500",
+    marginTop: 3,
   },
-  scannerCard: {
-    borderRadius: 16,
-    padding: 24,
+
+  logoutButton: {
+    flexDirection: "row",
     alignItems: "center",
-    marginBottom: 16,
-    ...Platform.select({
-      ios: {
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.08,
-        shadowRadius: 3,
-      },
-      android: {
-        elevation: 2,
-      },
-    }),
+    backgroundColor: "rgba(255,255,255,0.18)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.32)",
+    paddingVertical: 9,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+    gap: 7,
   },
-  qrFrame: {
-    width: 160,
-    height: 160,
-    borderWidth: 3,
+
+  logoutText: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+
+  card: {
+    backgroundColor: "#FFFFFF",
     borderRadius: 16,
+    marginHorizontal: 16,
+    shadowColor: "#0B2E5E",
+    shadowOffset: {
+      width: 0,
+      height: 8,
+    },
+    shadowOpacity: 0.11,
+    shadowRadius: 16,
+    elevation: 5,
+  },
+
+  profileCard: {
+    marginTop: -32,
+    padding: 14,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+
+  avatarCircle: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: "#EAF1FF",
     justifyContent: "center",
     alignItems: "center",
-    marginBottom: 12,
+    marginRight: 14,
   },
-  readyText: {
-    fontSize: 14,
-    fontWeight: "600",
-    marginTop: 12,
+
+  profileName: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#111827",
   },
-  scanHintText: {
+
+  profileRole: {
     fontSize: 12,
-    fontWeight: "400",
-    marginTop: 4,
+    color: "#6B7280",
+    fontWeight: "600",
+    marginTop: 5,
   },
+
+  scannerCard: {
+    marginTop: 16,
+    paddingVertical: 16,
+    paddingHorizontal: 14,
+    alignItems: "center",
+  },
+
+  scanFrame: {
+    width: "80%",
+    minHeight: 160,
+    borderWidth: 1.5,
+    borderStyle: "dashed",
+    borderColor: "#B8CDF7",
+    borderRadius: 20,
+    justifyContent: "center",
+    alignItems: "center",
+    position: "relative",
+    backgroundColor: "#FCFDFF",
+  },
+
+  corner: {
+    position: "absolute",
+    width: 26,
+    height: 26,
+    borderColor: "#064AA5",
+  },
+
+  cornerTopLeft: {
+    top: -2,
+    left: -2,
+    borderTopWidth: 4,
+    borderLeftWidth: 4,
+    borderTopLeftRadius: 12,
+  },
+
+  cornerTopRight: {
+    top: -2,
+    right: -2,
+    borderTopWidth: 4,
+    borderRightWidth: 4,
+    borderTopRightRadius: 12,
+  },
+
+  cornerBottomLeft: {
+    bottom: -2,
+    left: -2,
+    borderBottomWidth: 4,
+    borderLeftWidth: 4,
+    borderBottomLeftRadius: 12,
+  },
+
+  cornerBottomRight: {
+    bottom: -2,
+    right: -2,
+    borderBottomWidth: 4,
+    borderRightWidth: 4,
+    borderBottomRightRadius: 12,
+  },
+
+  scanTitle: {
+    marginTop: 12,
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#1F2937",
+  },
+
+  scanSubtitle: {
+    marginTop: 6,
+    fontSize: 12,
+    color: "#6B7280",
+    fontWeight: "500",
+  },
+
   scanButton: {
+    marginHorizontal: 16,
+    marginTop: 14,
+    height: 50,
+    backgroundColor: "#064AA5",
+    borderRadius: 12,
     flexDirection: "row",
     justifyContent: "center",
     alignItems: "center",
-    gap: 12,
-    paddingVertical: 14,
-    paddingHorizontal: 24,
-    borderRadius: 10,
-    marginBottom: 16,
-    ...Platform.select({
-      ios: {
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-      },
-      android: {
-        elevation: 3,
-      },
-    }),
+    gap: 13,
+    shadowColor: "#064AA5",
+    shadowOffset: {
+      width: 0,
+      height: 8,
+    },
+    shadowOpacity: 0.24,
+    shadowRadius: 12,
+    elevation: 6,
   },
+
   scanButtonText: {
-    fontSize: 16,
-    fontWeight: "700",
     color: "#FFFFFF",
+    fontSize: 16,
+    fontWeight: "800",
   },
+
   tipsCard: {
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    ...Platform.select({
-      ios: {
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.08,
-        shadowRadius: 3,
-      },
-      android: {
-        elevation: 2,
-      },
-    }),
+    marginTop: 18,
+    padding: 14,
   },
+
   tipsHeader: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-    marginBottom: 12,
   },
+
+  tipsIconCircle: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "#064AA5",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 12,
+  },
+
   tipsTitle: {
-    fontSize: 14,
-    fontWeight: "700",
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#111827",
   },
-  tipsList: {
-    gap: 10,
+
+  divider: {
+    height: 1,
+    backgroundColor: "#E5EAF2",
+    marginVertical: 12,
   },
+
   tipItem: {
     flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 10,
+    alignItems: "center",
+    marginBottom: 10,
   },
-  tipDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    marginTop: 8,
+
+  checkCircle: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: "#064AA5",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 12,
   },
+
   tipText: {
-    fontSize: 13,
-    fontWeight: "500",
     flex: 1,
-    lineHeight: 18,
+    fontSize: 13,
+    color: "#374151",
+    fontWeight: "500",
+    lineHeight: 20,
   },
+
   statsRow: {
     flexDirection: "row",
-    gap: 12,
-    marginBottom: 16,
+    gap: 10,
+    marginHorizontal: 16,
+    marginTop: 16,
   },
+
   statCard: {
     flex: 1,
-    borderRadius: 12,
-    padding: 16,
+    minHeight: 84,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 14,
+    padding: 10,
+    flexDirection: "row",
     alignItems: "center",
-    ...Platform.select({
-      ios: {
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.08,
-        shadowRadius: 3,
-      },
-      android: {
-        elevation: 2,
-      },
-    }),
+    shadowColor: "#0B2E5E",
+    shadowOffset: {
+      width: 0,
+      height: 7,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 14,
+    elevation: 4,
   },
-  statIcon: {
-    marginBottom: 8,
+
+  greenBorder: {
+    borderLeftWidth: 5,
+    borderLeftColor: "#28B463",
   },
+
+  orangeBorder: {
+    borderLeftWidth: 5,
+    borderLeftColor: "#F2A100",
+  },
+
+  statIconGreen: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#E8F7EF",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 10,
+  },
+
+  statIconOrange: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#FFF4D9",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 10,
+  },
+
   statLabel: {
-    fontSize: 12,
-    fontWeight: "500",
-    marginBottom: 8,
-    textAlign: "center",
+    fontSize: 11.5,
+    color: "#4B5563",
+    fontWeight: "700",
   },
+
   statValue: {
-    fontSize: 24,
-    fontWeight: "700",
+    fontSize: 20,
+    fontWeight: "900",
+    marginTop: 3,
   },
+
+  greenText: {
+    color: "#1FA855",
+  },
+
+  orangeText: {
+    color: "#F2A100",
+  },
+
   expectedCard: {
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 20,
-    ...Platform.select({
-      ios: {
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.08,
-        shadowRadius: 3,
-      },
-      android: {
-        elevation: 2,
-      },
-    }),
-  },
-  expectedTitle: {
-    fontSize: 14,
-    fontWeight: "700",
-    marginBottom: 12,
-  },
-  expectedContent: {
+    marginTop: 16,
+    padding: 14,
+    minHeight: 96,
+    flexDirection: "row",
     alignItems: "center",
   },
-  expectedNumber: {
-    fontSize: 32,
-    fontWeight: "700",
-    marginBottom: 4,
+
+  calendarIconCircle: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: "#EAF1FF",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 12,
   },
-  expectedDescription: {
+
+  expectedTextBox: {
+    flex: 1,
+    alignItems: "center",
+  },
+
+  expectedTitle: {
     fontSize: 13,
-    fontWeight: "500",
+    fontWeight: "800",
+    color: "#111827",
+    alignSelf: "flex-start",
+  },
+
+  expectedNumber: {
+    fontSize: 30,
+    fontWeight: "900",
+    color: "#064AA5",
+    marginTop: 4,
+  },
+
+  expectedSubtitle: {
+    fontSize: 11.5,
+    color: "#6B7280",
+    fontWeight: "600",
+    marginTop: -4,
+  },
+
+  peopleDecor: {
+    width: 48,
+    alignItems: "center",
+    justifyContent: "center",
   },
 });
