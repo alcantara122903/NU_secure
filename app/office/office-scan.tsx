@@ -10,6 +10,7 @@ import { processOfficeCheckInScan, type OfficeCheckInScanResult } from '@/servic
 import { MaterialIcons } from '@expo/vector-icons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useRouter } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -46,6 +47,7 @@ export default function OfficeScanScreen() {
   const [showManualEntry, setShowManualEntry] = useState(false);
   const [manualRaw, setManualRaw] = useState('');
   const isProcessingRef = useRef(false);
+  const hasNavigatedRef = useRef(false);
 
   const loadOfficeData = useCallback(async () => {
     try {
@@ -87,8 +89,18 @@ export default function OfficeScanScreen() {
     loadOfficeData();
   }, [loadOfficeData]);
 
+  useFocusEffect(
+    useCallback(() => {
+      hasNavigatedRef.current = false;
+      if (officeData) {
+        setPhase('ready');
+      }
+      return undefined;
+    }, [officeData]),
+  );
+
   const runScan = async (rawQrValue: string) => {
-    if (!rawQrValue?.trim() || isProcessingRef.current || !officeData) {
+    if (!rawQrValue?.trim() || isProcessingRef.current || hasNavigatedRef.current || !officeData) {
       return;
     }
 
@@ -135,8 +147,7 @@ export default function OfficeScanScreen() {
           enrolleeStatusLabel: result.enrolleeStatusLabel || '',
         },
       });
-
-      resetScan();
+      hasNavigatedRef.current = true;
     } catch (e) {
       console.error('[OfficeScan] runScan', e);
       setErrorMessage('Something went wrong. Please try again.');
@@ -147,6 +158,7 @@ export default function OfficeScanScreen() {
   };
 
   const resetScan = () => {
+    hasNavigatedRef.current = false;
     setErrorMessage('');
     setManualRaw('');
     setShowManualEntry(false);
@@ -156,7 +168,7 @@ export default function OfficeScanScreen() {
   };
 
   const onBarcodeScanned = (data: string) => {
-    if (phase !== 'ready' || isProcessingRef.current) {
+    if (phase !== 'ready' || isProcessingRef.current || hasNavigatedRef.current) {
       return;
     }
     void runScan(data);

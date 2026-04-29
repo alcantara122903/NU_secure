@@ -1,6 +1,10 @@
 import { Colors } from '@/constants/colors';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { loadGuardAlertsDashboard, type ReadyToExitVisitor } from '@/services/guard-alerts-dashboard';
+import {
+  loadGuardAlertsDashboard,
+  type ReadyToExitVisitor,
+  type UnresolvedWrongDestinationAlert,
+} from '@/services/guard-alerts-dashboard';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useFocusEffect } from '@react-navigation/native';
 import { useRouter } from 'expo-router';
@@ -25,20 +29,29 @@ export default function AlertsScreen() {
   const [wrongDestinationVisitCount, setWrongDestinationVisitCount] = useState(0);
   const [readyToExitCount, setReadyToExitCount] = useState(0);
   const [completedVisitors, setCompletedVisitors] = useState<ReadyToExitVisitor[]>([]);
+  const [unresolvedAlerts, setUnresolvedAlerts] = useState<UnresolvedWrongDestinationAlert[]>([]);
+  const [expandedAlertId, setExpandedAlertId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
-      const { wrongDestinationVisitCount, readyToExitVisitors } = await loadGuardAlertsDashboard();
+      const { wrongDestinationVisitCount, readyToExitVisitors, unresolvedWrongDestinationAlerts } =
+        await loadGuardAlertsDashboard();
       setWrongDestinationVisitCount(wrongDestinationVisitCount);
       setCompletedVisitors(readyToExitVisitors);
       setReadyToExitCount(readyToExitVisitors.length);
+      setUnresolvedAlerts(unresolvedWrongDestinationAlerts);
+      setExpandedAlertId((current) =>
+        unresolvedWrongDestinationAlerts.some((a) => a.alertId === current) ? current : null,
+      );
     } catch (e) {
       console.error('AlertsScreen loadData', e);
       setWrongDestinationVisitCount(0);
       setCompletedVisitors([]);
       setReadyToExitCount(0);
+      setUnresolvedAlerts([]);
+      setExpandedAlertId(null);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -85,7 +98,7 @@ export default function AlertsScreen() {
               {loading ? '—' : wrongDestinationVisitCount}
             </Text>
             <Text style={[styles.alertSubtext, { color: colors.textSecondary }]}>
-              Visits with an open issue
+              Unresolved wrong-office scans
             </Text>
           </View>
 
@@ -100,6 +113,62 @@ export default function AlertsScreen() {
             </Text>
             <Text style={[styles.alertSubtext, { color: colors.textSecondary }]}>Ready to exit</Text>
           </View>
+        </View>
+
+        {/* Unresolved Alerts Section */}
+        <View style={styles.visitorsSection}>
+          <View style={styles.sectionHeader}>
+            <MaterialIcons name="error-outline" size={24} color="#D32F2F" />
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>All Alerts (Unresolved)</Text>
+          </View>
+          <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>
+            Every unresolved wrong-destination scan for active visits
+          </Text>
+
+          {!loading && unresolvedAlerts.length === 0 ? (
+            <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+              No unresolved wrong-destination alerts right now.
+            </Text>
+          ) : null}
+
+          {unresolvedAlerts.map((alertItem) => {
+            const isExpanded = expandedAlertId === alertItem.alertId;
+            const identifier = alertItem.controlNumber || alertItem.passNumber || '—';
+            return (
+              <View
+                key={alertItem.alertId}
+                style={[styles.visitorCard, { backgroundColor: colors.surface, borderLeftColor: '#D32F2F', borderLeftWidth: 4 }]}
+              >
+                <View style={styles.visitorContent}>
+                  <View style={[styles.visitorIcon, { backgroundColor: '#FFEBEE' }]}>
+                    <MaterialIcons name="warning-amber" size={28} color="#D32F2F" />
+                  </View>
+                  <View style={styles.visitorInfo}>
+                    <Text style={[styles.visitorName, { color: colors.text }]}>{alertItem.visitorName}</Text>
+                    <Text style={[styles.visitorDetail, { color: colors.textSecondary }]}>
+                      {alertItem.scannedOfficeName} • {identifier}
+                    </Text>
+                    <Text style={[styles.visitorTime, { color: colors.textSecondary }]}>
+                      Raised at {alertItem.createdAtLabel}
+                    </Text>
+                    {isExpanded ? (
+                      <View style={styles.detailContainer}>
+                        <Text style={[styles.detailText, { color: colors.text }]}>Visit ID: {alertItem.visitId}</Text>
+                        <Text style={[styles.detailText, { color: colors.text }]}>Alert: {alertItem.message}</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                </View>
+                <TouchableOpacity
+                  style={[styles.readyToExitButton, { backgroundColor: '#D32F2F' }]}
+                  activeOpacity={0.8}
+                  onPress={() => setExpandedAlertId(isExpanded ? null : alertItem.alertId)}
+                >
+                  <Text style={styles.readyToExitText}>{isExpanded ? 'Hide Details' : 'View Details'}</Text>
+                </TouchableOpacity>
+              </View>
+            );
+          })}
         </View>
 
         {/* Completed Visitors Section */}
@@ -317,5 +386,14 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 20,
     marginBottom: 12,
+  },
+  detailContainer: {
+    marginTop: 8,
+    gap: 4,
+  },
+  detailText: {
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '500',
   },
 });

@@ -11,6 +11,17 @@ import {
   type OfficeExpectationRow,
 } from './expectation-route';
 
+type WrongDestinationAlertPayload = {
+  visit_id: number;
+  visitor_id: number;
+  scan_id: number | null;
+  alert_type: 'Unauthorized';
+  severity: 'Medium';
+  message: string;
+  status: 'Unresolved';
+  created_at: string;
+};
+
 async function loadVisitorDisplay(visitorId: number) {
   const { data: visitor } = await supabase
     .from('visitor')
@@ -41,16 +52,19 @@ async function resolveExpectedStop(
   visit: NonNullable<Awaited<ReturnType<typeof resolveActiveVisitFromScanInput>>>,
   expectations: OfficeExpectationRow[],
 ): Promise<{ expectedOfficeId: number; pending: OfficeExpectationRow | undefined } | null> {
-  const pending = firstPendingExpectation(expectations);
-  if (pending != null) {
-    return { expectedOfficeId: Number(pending.office_id), pending };
-  }
-
+  // For enrollees, source of truth is enrollee step progress order.
+  // This avoids mismatches when office_expectation rows become stale or incomplete.
   if (visit.visit_type_id === VISIT_TYPE.ENROLLEE) {
     const fromProgress = await nextOfficeIdFromEnrolleeProgress(visit.visitor_id);
     if (fromProgress != null) {
-      return { expectedOfficeId: fromProgress, pending: undefined };
+      const pendingByOffice = expectations.find((e) => !e.arrived_at && Number(e.office_id) === Number(fromProgress));
+      return { expectedOfficeId: fromProgress, pending: pendingByOffice };
     }
+  }
+
+  const pending = firstPendingExpectation(expectations);
+  if (pending != null) {
+    return { expectedOfficeId: Number(pending.office_id), pending };
   }
 
   if (visit.primary_office_id != null) {
@@ -119,6 +133,41 @@ async function loadEnrolleeStepLabel(visitorId: number): Promise<string | null> 
   return next.step_name ? `Step: ${next.step_name}` : next.step_order ? `Step ${next.step_order}` : 'Step';
 }
 
+async function createWrongDestinationAlert(payload: WrongDestinationAlertPayload): Promise<void> {
+  const { error: firstErr } = await supabase.from('alerts').insert(payload);
+  if (!firstErr) {
+    return;
+  }
+
+  // Defensive fallback for misaligned alerts.alert_id sequence in production DB.
+  if (firstErr.code !== '23505') {
+    console.error('[OfficeCheckIn] failed to create wrong-destination alert:', firstErr);
+    return;
+  }
+
+  const { data: maxRow, error: maxErr } = await supabase.from('alerts').select('alert_id').order('alert_id', { ascending: false }).limit(1).maybeSingle();
+  if (maxErr) {
+    console.error('[OfficeCheckIn] failed to recover alert sequence (read max alert_id):', maxErr);
+    return;
+  }
+
+  const maxAlertId = typeof maxRow?.alert_id === 'number' && Number.isFinite(maxRow.alert_id) ? maxRow.alert_id : 0;
+  const candidateStart = maxAlertId + 1;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const alert_id = candidateStart + attempt;
+    const { error: retryErr } = await supabase.from('alerts').insert({ ...payload, alert_id });
+    if (!retryErr) {
+      return;
+    }
+    if (retryErr.code !== '23505') {
+      console.error('[OfficeCheckIn] failed to create wrong-destination alert after fallback:', retryErr);
+      return;
+    }
+  }
+
+  console.error('[OfficeCheckIn] failed to create wrong-destination alert after duplicate-key retries.');
+}
+
 export async function processOfficeCheckInScan(req: OfficeCheckInScanRequest): Promise<OfficeCheckInScanResult> {
   const { rawQrValue, scanningOfficeId, scannedByUserId } = req;
 
@@ -135,7 +184,9 @@ export async function processOfficeCheckInScan(req: OfficeCheckInScanRequest): P
 
   const { visitor, visitorName } = await loadVisitorDisplay(visit.visitor_id);
   const expectations = await loadExpectationsForVisit(visit.visit_id);
-  const registeredBy = await loadRegisteredByName(visit.guard_user_id);
+  // In office scan UI, "Registered By" refers to the current office staff
+  // performing this scan, per business requirement.
+  const registeredBy = await loadRegisteredByName(scannedByUserId);
 
   if (expectationsAreFullyCheckedIn(expectations)) {
     return {
@@ -201,7 +252,7 @@ export async function processOfficeCheckInScan(req: OfficeCheckInScanRequest): P
   const scanId = insertedScan?.scan_id;
 
   if (!authorized) {
-    await supabase.from('alerts').insert({
+    await createWrongDestinationAlert({
       visit_id: visit.visit_id,
       visitor_id: visit.visitor_id,
       scan_id: scanId ?? null,

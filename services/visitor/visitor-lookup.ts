@@ -40,19 +40,15 @@ export const visitorLookupService = {
       console.log(`   Last Name: ${criteria.lastName}`);
       console.log(`   Contact: ${criteria.contactNo || 'N/A'}`);
 
-      // Build query with required fields
-      let query = supabase
+      // Always search by name first.
+      // Contact can change format or be omitted on a later registration,
+      // so treat it as a preference, not a hard requirement.
+      const { data: sameNameVisitors, error } = await supabase
         .from('visitor')
         .select('*')
         .ilike('first_name', criteria.firstName)
-        .ilike('last_name', criteria.lastName);
-
-      // Only add contact filter if provided (optional)
-      if (criteria.contactNo && criteria.contactNo.trim()) {
-        query = query.eq('contact_no', criteria.contactNo);
-      }
-
-      const { data: existingVisitors, error } = await query;
+        .ilike('last_name', criteria.lastName)
+        .order('created_at', { ascending: false });
 
       if (error) {
         console.error('❌ Error searching for visitor:', error);
@@ -60,8 +56,38 @@ export const visitorLookupService = {
       }
 
       // Found existing visitor(s)
-      if (existingVisitors && existingVisitors.length > 0) {
-        const visitor = existingVisitors[0];
+      if (sameNameVisitors && sameNameVisitors.length > 0) {
+        const contact = criteria.contactNo?.trim();
+        const preferredByContact =
+          contact != null && contact.length > 0
+            ? sameNameVisitors.find((v) => String(v.contact_no ?? '').trim() === contact)
+            : null;
+        const visitorIds = sameNameVisitors
+          .map((v) => v.visitor_id)
+          .filter((id): id is number => typeof id === 'number' && Number.isFinite(id));
+
+        // Prefer the visitor already tied to an enrollee row (resume scenario),
+        // selecting the most recently updated enrollee when many exist.
+        let preferredByEnrolleeVisitorId: number | null = null;
+        if (visitorIds.length > 0) {
+          const { data: enrolleeRows } = await supabase
+            .from('enrollee')
+            .select('visitor_id, updated_at')
+            .in('visitor_id', visitorIds)
+            .order('updated_at', { ascending: false });
+
+          const firstMatch = (enrolleeRows ?? []).find(
+            (r) => typeof r.visitor_id === 'number' && visitorIds.includes(r.visitor_id),
+          );
+          preferredByEnrolleeVisitorId = firstMatch?.visitor_id ?? null;
+        }
+
+        const preferredByEnrollee =
+          preferredByEnrolleeVisitorId != null
+            ? sameNameVisitors.find((v) => Number(v.visitor_id) === Number(preferredByEnrolleeVisitorId))
+            : null;
+
+        const visitor = preferredByContact ?? preferredByEnrollee ?? sameNameVisitors[0];
         console.log(`✅ Found existing visitor!`);
         console.log(`   Visitor ID: ${visitor.visitor_id}`);
         console.log(`   Name: ${visitor.first_name} ${visitor.last_name}`);
