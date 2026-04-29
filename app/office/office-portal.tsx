@@ -1,27 +1,27 @@
-import React from "react";
-import { useRouter } from "expo-router";
-import { authSessionService } from "@/services/auth-session";
 import {
-  Alert,
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  SafeAreaView,
-  StatusBar,
-  Platform,
-} from "react-native";
-import {
+  FontAwesome5,
   Ionicons,
   MaterialCommunityIcons,
-  FontAwesome5,
 } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
+import React from "react";
+import {
+  Alert,
+  Platform,
+  SafeAreaView,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { authSessionService } from "@/services/auth-session";
 
 export default function AdmissionsDashboardScreen() {
   const router = useRouter();
 
-  const handleScanQR = () => {
+  const handleScanQr = () => {
     router.push("/office/office-scan");
   };
 
@@ -32,8 +32,11 @@ export default function AdmissionsDashboardScreen() {
         text: "Logout",
         style: "destructive",
         onPress: () => {
-          authSessionService.clearSession();
-          router.replace("/(tabs)");
+          try {
+            authSessionService.clearSession();
+          } finally {
+            router.replace("/(tabs)");
+          }
         },
       },
     ]);
@@ -98,7 +101,7 @@ export default function AdmissionsDashboardScreen() {
         <TouchableOpacity
           style={styles.scanButton}
           activeOpacity={0.85}
-          onPress={handleScanQR}
+          onPress={handleScanQr}
         >
           <MaterialCommunityIcons name="qrcode-scan" size={28} color="#FFFFFF" />
           <Text style={styles.scanButtonText}>Tap to Scan QR Code</Text>
