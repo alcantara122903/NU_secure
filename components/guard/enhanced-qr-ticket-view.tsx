@@ -1,18 +1,3 @@
-import React, { useMemo } from 'react';
-import {
-  ActivityIndicator,
-  Dimensions,
-  Image,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
-import QRCode from 'react-native-qrcode-svg';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import Svg, { Circle, Path } from 'react-native-svg';
 import {
   ArrowLeft,
   Building2,
@@ -28,6 +13,21 @@ import {
   Target,
   User,
 } from 'lucide-react-native';
+import React, { useMemo } from 'react';
+import {
+  ActivityIndicator,
+  Dimensions,
+  Image,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import QRCode from 'react-native-qrcode-svg';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import Svg, { Circle, Path } from 'react-native-svg';
 
 export type EnhancedQrRouteOffice = {
   id: number;
@@ -332,19 +332,24 @@ const styles = StyleSheet.create({
   },
   container: {
     flex: 1,
-    backgroundColor: 'transparent',
+    backgroundColor: '#F8FAFC',
+    marginTop: -34,
+    borderTopLeftRadius: 34,
+    borderTopRightRadius: 34,
   },
   scrollContent: {
     flexGrow: 1,
+    paddingTop: 20,
     paddingBottom: 28,
   },
   header: {
-    height: 104,
+    height: 132,
     backgroundColor: '#0648A8',
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
-    paddingHorizontal: 12,
+    paddingHorizontal: 20,
+    paddingTop: 30,
     position: 'relative',
     overflow: 'hidden',
   },
@@ -370,19 +375,14 @@ const styles = StyleSheet.create({
     width: 40,
   },
   floatingSheet: {
-    backgroundColor: '#FFFFFF',
-    marginTop: -36,
+    backgroundColor: 'transparent',
+    marginTop: 0,
     marginHorizontal: 0,
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 0,
     paddingHorizontal: 16,
-    paddingTop: 20,
+    paddingTop: 0,
     paddingBottom: 8,
-    shadowColor: '#0F172A',
-    shadowOpacity: 0.12,
-    shadowRadius: 24,
-    shadowOffset: { width: 0, height: -4 },
-    elevation: 12,
   },
   successBanner: {
     backgroundColor: '#F0FDF4',
