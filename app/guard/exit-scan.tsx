@@ -11,6 +11,7 @@ import {
   ActivityIndicator,
   Platform,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -308,118 +309,140 @@ export default function ExitScanScreen() {
   }
 
   if (!permission) {
-    return (
-      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-        <View style={[styles.header, { backgroundColor: colors.primary }]}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-            <Text style={styles.backText}>← Back</Text>
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Process visitor exit</Text>
-          <View style={{ width: 60 }} />
-        </View>
-        <View style={styles.centeredContent}>
-          <ActivityIndicator size="large" color={colors.primary} />
-          <Text style={[styles.centerText, { color: colors.textSecondary }]}>Loading camera permission...</Text>
-        </View>
-      </SafeAreaView>
-    );
+    return null;
   }
 
-  if (!permission.granted) {
-    return (
-      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-        <View style={[styles.header, { backgroundColor: colors.primary }]}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-            <Text style={styles.backText}>← Back</Text>
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Process visitor exit</Text>
-          <View style={{ width: 60 }} />
-        </View>
-        <View style={styles.centeredContent}>
-          <MaterialIcons name="camera-alt" size={56} color={colors.primary} />
-          <Text style={[styles.permissionTitle, { color: colors.text }]}>Camera access required</Text>
-          <Text style={[styles.permissionText, { color: colors.textSecondary }]}>
-            Exit scan needs the camera to read the visitor QR code.
-          </Text>
-          <TouchableOpacity
-            style={[styles.primaryButton, { backgroundColor: colors.primary }]}
-            onPress={requestPermission}
-          >
-            <Text style={styles.primaryButtonText}>Grant Camera Access</Text>
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
-    );
-  }
+  const hasCameraPermission = permission.granted;
+  const scanned = scanState.type !== 'idle';
+  const helperText =
+    scanState.type === 'processing'
+      ? 'QR detected. Processing exit...'
+      : scanState.type === 'error'
+        ? scanState.message
+        : 'Position QR code within the frame';
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-      <View style={[styles.header, { backgroundColor: colors.primary }]}>
-        <TouchableOpacity onPress={handleBack} style={styles.backButton}>
-          <Text style={styles.backText}>← Back</Text>
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Process visitor exit</Text>
-        <View style={{ width: 60 }} />
-      </View>
+    <SafeAreaView style={styles.exitSafeArea}>
+      <StatusBar barStyle="light-content" backgroundColor="#064AA5" />
 
-      <View style={styles.cameraSection}>
-        <View style={[styles.cameraOuter, { backgroundColor: colors.surface }]}>
-          <View style={[styles.cameraInner, { borderColor: colors.border }]}>
-            <CameraView
-              style={styles.camera}
-              facing="back"
-              barcodeScannerSettings={{
-                barcodeTypes: ['qr'],
-              }}
-              onBarcodeScanned={
-                scanState.type === 'idle' ? (event) => void onQRCodeScanned(event.data) : undefined
-              }
-            />
-            <View style={styles.overlay} pointerEvents="none">
-              <View style={[styles.scanFrame, { borderColor: colors.primary }]} />
+      <ScrollView
+        style={styles.exitContainer}
+        contentContainerStyle={styles.exitScrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.exitHeader}>
+          <TouchableOpacity style={styles.exitBackButton} activeOpacity={0.75} onPress={handleBack}>
+            <MaterialIcons name="arrow-back" size={30} color="#FFFFFF" />
+            <Text style={styles.exitBackText}>Back</Text>
+          </TouchableOpacity>
+          <Text style={styles.exitHeaderTitle}>Process visitor exit</Text>
+          <View style={styles.exitHeaderRightSpace} />
+        </View>
+
+        <View style={styles.exitScannerCard}>
+          <View style={styles.exitCameraBox}>
+            {hasCameraPermission ? (
+              <CameraView
+                style={StyleSheet.absoluteFillObject}
+                facing="back"
+                barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+                onBarcodeScanned={scanState.type === 'idle' ? (event) => void onQRCodeScanned(event.data) : undefined}
+              />
+            ) : (
+              <View style={styles.exitPermissionBox}>
+                <MaterialIcons name="camera-alt" size={56} color="#FFFFFF" />
+                <Text style={styles.exitPermissionTitle}>Camera permission needed</Text>
+                <Text style={styles.exitPermissionText}>Allow camera access to scan the visitor exit QR code.</Text>
+                <TouchableOpacity style={styles.exitPermissionButton} activeOpacity={0.85} onPress={requestPermission}>
+                  <Text style={styles.exitPermissionButtonText}>Allow Camera</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {hasCameraPermission && <View style={styles.exitCameraOverlay} />}
+            {hasCameraPermission && (
+              <>
+                <TouchableOpacity style={styles.exitCameraActionLeft} activeOpacity={0.8}>
+                  <MaterialIcons name="flash-on" size={24} color="#111827" />
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.exitCameraActionRight} activeOpacity={0.8}>
+                  <MaterialIcons name="image" size={24} color="#111827" />
+                </TouchableOpacity>
+              </>
+            )}
+
+            <View style={styles.exitScanFrame}>
+              <View style={[styles.exitScanCorner, styles.exitCornerTopLeft]} />
+              <View style={[styles.exitScanCorner, styles.exitCornerTopRight]} />
+              <View style={[styles.exitScanCorner, styles.exitCornerBottomLeft]} />
+              <View style={[styles.exitScanCorner, styles.exitCornerBottomRight]} />
+              <View style={styles.exitCenterQrIcon}>
+                <MaterialIcons name="qr-code-scanner" size={36} color="#FFFFFF" />
+              </View>
+            </View>
+
+            <View style={styles.exitHelperPill}>
+              <View style={styles.exitHelperIconCircle}>
+                {scanState.type === 'processing' ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <MaterialIcons
+                    name={scanState.type === 'error' ? 'error-outline' : scanned ? 'check-circle-outline' : 'verified-user'}
+                    size={20}
+                    color="#FFFFFF"
+                  />
+                )}
+              </View>
+              <Text style={styles.exitHelperPillText}>{helperText}</Text>
             </View>
           </View>
-          <Text style={[styles.scannerTitle, { color: colors.text }]}>Position QR Code in frame</Text>
-          <Text style={[styles.scannerSubtitle, { color: colors.textSecondary }]}>Hold steady for scanning</Text>
-        </View>
-      </View>
 
-      <View style={[styles.bottomPanel, { backgroundColor: colors.surface }]}>
-        {scanState.type === 'idle' ? (
-          <>
-            <View style={styles.instructionsBlock}>
-              <Text style={[styles.instructionsTitle, { color: colors.primary }]}>How to scan:</Text>
-              <Text style={[styles.instructionLine, { color: colors.text }]}>• Hold phone steady and level</Text>
-              <Text style={[styles.instructionLine, { color: colors.text }]}>• Position QR code within the frame</Text>
-              <Text style={[styles.instructionLine, { color: colors.text }]}>• Wait for automatic detection</Text>
+          <View style={styles.exitScannerTextBox}>
+            <Text style={styles.exitScannerTitle}>Position QR Code in frame</Text>
+            <Text style={styles.exitScannerSubtitle}>Hold steady for scanning</Text>
+          </View>
+        </View>
+
+        {scanned && (
+          <TouchableOpacity style={styles.exitRescanButton} activeOpacity={0.85} onPress={resetScanner}>
+            <MaterialIcons name="refresh" size={22} color="#064AA5" />
+            <Text style={styles.exitRescanText}>Scan Again</Text>
+          </TouchableOpacity>
+        )}
+
+        <View style={styles.exitTipsCard}>
+          <View style={styles.exitTipsHeader}>
+            <View style={styles.exitTipsHeaderIcon}>
+              <MaterialIcons name="lightbulb-outline" size={24} color="#064AA5" />
             </View>
-            <Text style={[styles.hintText, { color: colors.textSecondary }]}>
+            <Text style={styles.exitTipsTitle}>How to scan:</Text>
+          </View>
+          <TipItem icon="smartphone" text="Hold phone steady and level" />
+          <TipItem icon="qr-code-scanner" text="Position QR code within the frame" />
+          <TipItem icon="access-time" text="Wait for automatic detection" last />
+
+          <View style={styles.exitNoteBox}>
+            <View style={styles.exitNoteIcon}>
+              <MaterialIcons name="info" size={24} color="#FFFFFF" />
+            </View>
+            <Text style={styles.exitNoteText}>
               Point the camera at the visitor ticket; exit is recorded when the code is read successfully.
             </Text>
-          </>
-        ) : null}
-
-        {scanState.type === 'processing' ? (
-          <View style={styles.stateRow}>
-            <ActivityIndicator color={colors.primary} />
-            <Text style={[styles.panelText, { color: colors.text }]}>Processing exit...</Text>
           </View>
-        ) : null}
-
-        {scanState.type === 'error' ? (
-          <View style={styles.resultBlock}>
-            <Text style={[styles.errorTitle, { color: '#DC3545' }]}>Scan failed</Text>
-            <Text style={[styles.resultText, { color: colors.text }]}>{scanState.message}</Text>
-            <TouchableOpacity
-              style={[styles.primaryButton, { backgroundColor: colors.primary }]}
-              onPress={resetScanner}
-            >
-              <Text style={styles.primaryButtonText}>Try again</Text>
-            </TouchableOpacity>
-          </View>
-        ) : null}
-      </View>
+        </View>
+      </ScrollView>
     </SafeAreaView>
+  );
+}
+
+function TipItem({ icon, text, last }: { icon: React.ComponentProps<typeof MaterialIcons>['name']; text: string; last?: boolean }) {
+  return (
+    <View style={[styles.exitTipItem, last && styles.exitTipItemLast]}>
+      <View style={styles.exitTipIconBox}>
+        <MaterialIcons name={icon} size={22} color="#064AA5" />
+      </View>
+      <Text style={styles.exitTipText}>{text}</Text>
+    </View>
   );
 }
 
@@ -710,5 +733,334 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: '#FFFFFF',
+  },
+  exitSafeArea: {
+    flex: 1,
+    backgroundColor: '#F4F7FB',
+  },
+  exitContainer: {
+    flex: 1,
+    backgroundColor: '#F4F7FB',
+  },
+  exitScrollContent: {
+    paddingBottom: 24,
+  },
+  exitHeader: {
+    height: 82,
+    backgroundColor: '#064AA5',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    shadowColor: '#0B2E5E',
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.18,
+    shadowRadius: 10,
+    elevation: 5,
+  },
+  exitBackButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: 92,
+  },
+  exitBackText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+    marginLeft: 6,
+  },
+  exitHeaderTitle: {
+    flex: 1,
+    textAlign: 'center',
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  exitHeaderRightSpace: {
+    width: 92,
+  },
+  exitScannerCard: {
+    marginHorizontal: 14,
+    marginTop: 16,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 12,
+    shadowColor: '#0B2E5E',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.12,
+    shadowRadius: 18,
+    elevation: 7,
+    borderWidth: 1,
+    borderColor: '#E6ECF5',
+  },
+  exitCameraBox: {
+    height: 360,
+    borderRadius: 18,
+    overflow: 'hidden',
+    backgroundColor: '#000000',
+    position: 'relative',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  exitCameraOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.12)',
+    zIndex: 1,
+  },
+  exitPermissionBox: {
+    flex: 1,
+    width: '100%',
+    backgroundColor: '#111827',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 28,
+  },
+  exitPermissionTitle: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '900',
+    marginTop: 14,
+    textAlign: 'center',
+  },
+  exitPermissionText: {
+    color: '#D1D5DB',
+    fontSize: 13,
+    lineHeight: 20,
+    textAlign: 'center',
+    marginTop: 8,
+    fontWeight: '500',
+  },
+  exitPermissionButton: {
+    marginTop: 20,
+    backgroundColor: '#064AA5',
+    paddingVertical: 12,
+    paddingHorizontal: 22,
+    borderRadius: 14,
+  },
+  exitPermissionButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  exitCameraActionLeft: {
+    position: 'absolute',
+    top: 16,
+    left: 16,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 4,
+  },
+  exitCameraActionRight: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 4,
+  },
+  exitScanFrame: {
+    width: '72%',
+    height: 220,
+    borderRadius: 22,
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.58)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'relative',
+    zIndex: 3,
+  },
+  exitScanCorner: {
+    position: 'absolute',
+    width: 36,
+    height: 36,
+    borderColor: '#FFFFFF',
+  },
+  exitCornerTopLeft: {
+    top: 12,
+    left: 12,
+    borderTopWidth: 5,
+    borderLeftWidth: 5,
+    borderTopLeftRadius: 14,
+  },
+  exitCornerTopRight: {
+    top: 12,
+    right: 12,
+    borderTopWidth: 5,
+    borderRightWidth: 5,
+    borderTopRightRadius: 14,
+  },
+  exitCornerBottomLeft: {
+    bottom: 12,
+    left: 12,
+    borderBottomWidth: 5,
+    borderLeftWidth: 5,
+    borderBottomLeftRadius: 14,
+  },
+  exitCornerBottomRight: {
+    bottom: 12,
+    right: 12,
+    borderBottomWidth: 5,
+    borderRightWidth: 5,
+    borderBottomRightRadius: 14,
+  },
+  exitCenterQrIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: 14,
+    backgroundColor: 'rgba(6,74,165,0.72)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  exitHelperPill: {
+    position: 'absolute',
+    bottom: 26,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.58)',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 30,
+    zIndex: 4,
+  },
+  exitHelperIconCircle: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#064AA5',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
+  },
+  exitHelperPillText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+    flexShrink: 1,
+  },
+  exitScannerTextBox: {
+    alignItems: 'center',
+    paddingTop: 16,
+    paddingBottom: 2,
+  },
+  exitScannerTitle: {
+    color: '#111827',
+    fontSize: 15,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+  exitScannerSubtitle: {
+    color: '#6B7280',
+    fontSize: 13,
+    fontWeight: '500',
+    marginTop: 6,
+    textAlign: 'center',
+  },
+  exitRescanButton: {
+    marginTop: 12,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EAF1FF',
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    gap: 7,
+  },
+  exitRescanText: {
+    color: '#064AA5',
+    fontSize: 13.5,
+    fontWeight: '800',
+  },
+  exitTipsCard: {
+    marginHorizontal: 14,
+    marginTop: 14,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 14,
+    shadowColor: '#0B2E5E',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.1,
+    shadowRadius: 15,
+    elevation: 5,
+    borderWidth: 1,
+    borderColor: '#E6ECF5',
+  },
+  exitTipsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  exitTipsHeaderIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#EAF1FF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
+  },
+  exitTipsTitle: {
+    color: '#064AA5',
+    fontSize: 18,
+    fontWeight: '900',
+  },
+  exitTipItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5EAF2',
+  },
+  exitTipItemLast: {
+    borderBottomWidth: 0,
+  },
+  exitTipIconBox: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#EAF1FF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 10,
+  },
+  exitTipText: {
+    flex: 1,
+    color: '#374151',
+    fontSize: 14,
+    fontWeight: '600',
+    lineHeight: 20,
+  },
+  exitNoteBox: {
+    marginTop: 12,
+    backgroundColor: '#F8FBFF',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#CFE1FF',
+    padding: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  exitNoteIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#064AA5',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 10,
+  },
+  exitNoteText: {
+    flex: 1,
+    color: '#374151',
+    fontSize: 13,
+    fontWeight: '600',
+    lineHeight: 19,
   },
 });

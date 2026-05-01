@@ -10,6 +10,8 @@ export type OfficeCheckInScanResult = {
   title: string;
   message: string;
   visitorName?: string;
+  /** Public storage URL for visitor face/ID photo (visitor.visitor_photo_with_id_url). */
+  visitorPhotoUrl?: string | null;
   purposeLabel?: string;
   purposeReason?: string | null;
   entryTime?: string | null;

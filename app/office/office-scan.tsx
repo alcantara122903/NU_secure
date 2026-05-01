@@ -135,6 +135,7 @@ export default function OfficeCheckInScreen() {
           isCorrectDestination: result.isCorrectDestination ? "true" : "false",
           destinationStatusLabel: result.destinationStatusLabel || "",
           enrolleeStatusLabel: result.enrolleeStatusLabel || "",
+          visitorPhotoUrl: result.visitorPhotoUrl || "",
         },
       });
 

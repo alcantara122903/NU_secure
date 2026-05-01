@@ -25,7 +25,7 @@ type WrongDestinationAlertPayload = {
 async function loadVisitorDisplay(visitorId: number) {
   const { data: visitor } = await supabase
     .from('visitor')
-    .select('visitor_id, first_name, last_name, pass_number, control_number')
+    .select('visitor_id, first_name, last_name, pass_number, control_number, visitor_photo_with_id_url')
     .eq('visitor_id', visitorId)
     .maybeSingle();
 
@@ -34,7 +34,11 @@ async function loadVisitorDisplay(visitorId: number) {
       ? `${visitor.first_name || ''} ${visitor.last_name || ''}`.trim() || 'Visitor'
       : 'Visitor';
 
-  return { visitor, visitorName };
+  const rawPhoto = visitor?.visitor_photo_with_id_url;
+  const visitorPhotoUrl =
+    typeof rawPhoto === 'string' && rawPhoto.trim().length > 0 ? rawPhoto.trim() : null;
+
+  return { visitor, visitorName, visitorPhotoUrl };
 }
 
 async function loadOfficeNames(expectedOfficeId: number, scanningOfficeId: number) {
@@ -182,7 +186,7 @@ export async function processOfficeCheckInScan(req: OfficeCheckInScanRequest): P
     };
   }
 
-  const { visitor, visitorName } = await loadVisitorDisplay(visit.visitor_id);
+  const { visitor, visitorName, visitorPhotoUrl } = await loadVisitorDisplay(visit.visitor_id);
   const expectations = await loadExpectationsForVisit(visit.visit_id);
   // In office scan UI, "Registered By" refers to the current office staff
   // performing this scan, per business requirement.
@@ -196,6 +200,7 @@ export async function processOfficeCheckInScan(req: OfficeCheckInScanRequest): P
       message:
         'Every office on this ticket has already been checked in. Use exit processing when the visitor leaves.',
       visitorName,
+      visitorPhotoUrl,
       visitId: visit.visit_id,
     };
   }
@@ -269,6 +274,7 @@ export async function processOfficeCheckInScan(req: OfficeCheckInScanRequest): P
       title: 'Unauthorized',
       message: `This visitor is expected at ${expectedOfficeName}, not here.`,
       visitorName,
+      visitorPhotoUrl,
       passNumber: visitor?.pass_number ?? null,
       controlNumber: visitor?.control_number ?? null,
       purposeLabel,
@@ -306,6 +312,7 @@ export async function processOfficeCheckInScan(req: OfficeCheckInScanRequest): P
         title: 'Authorized',
         message: `${visitorName} completed all enrollee steps.`,
         visitorName,
+        visitorPhotoUrl,
         passNumber: visitor?.pass_number ?? null,
         controlNumber: visitor?.control_number ?? null,
         purposeLabel,
@@ -330,6 +337,7 @@ export async function processOfficeCheckInScan(req: OfficeCheckInScanRequest): P
     title: 'Authorized',
     message: `${visitorName} is at the correct office for this step.`,
     visitorName,
+    visitorPhotoUrl,
     passNumber: visitor?.pass_number ?? null,
     controlNumber: visitor?.control_number ?? null,
     purposeLabel,
