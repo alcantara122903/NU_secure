@@ -2,6 +2,7 @@ import { Colors } from '@/constants/colors';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { parseQrTicketRaw } from '@/lib/qr-ticket-payload';
 import { authSessionService } from '@/services/auth-session';
+import { supabase } from '@/services/database';
 import { officeExitApiService } from '@/services/office-exit-api';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
@@ -9,6 +10,7 @@ import { useRouter } from 'expo-router';
 import React, { useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Image,
   Platform,
   ScrollView,
   StatusBar,
@@ -36,6 +38,7 @@ interface ScannedInfo {
   visitorId?: number;
   controlNumber?: string;
   message?: string;
+  pictureUrl?: string | null;
 }
 
 type GuardScanState =
@@ -64,6 +67,23 @@ const formatDurationMinutes = (m: number): string => {
   const h = Math.floor(m / 60);
   const min = m % 60;
   return min > 0 ? `${h} hr ${min} min` : `${h} hr`;
+};
+
+const resolvePhotoUri = (raw: string | null | undefined): string => {
+  const value = (raw || '').trim();
+  if (!value) {
+    return '';
+  }
+  if (value.startsWith('http://') || value.startsWith('https://')) {
+    return value;
+  }
+  const trimmed = value.replace(/^\/+/, '');
+  const storagePath = trimmed.startsWith('visitor-files/') ? trimmed.slice('visitor-files/'.length) : trimmed;
+  if (!storagePath) {
+    return '';
+  }
+  const { data } = supabase.storage.from('visitor-files').getPublicUrl(storagePath);
+  return data.publicUrl || '';
 };
 
 const extractQrToken = (rawValue: string): string => {
@@ -173,6 +193,7 @@ export default function ExitScanScreen() {
         visitorId: result.data.visitorId,
         controlNumber: result.data.controlNumber || undefined,
         message: result.message || 'Visitor exit processed successfully.',
+        pictureUrl: result.data.visitorPhotoUrl ?? null,
       });
       setScanState({ type: 'idle' });
     } catch (err) {
@@ -197,112 +218,180 @@ export default function ExitScanScreen() {
   };
 
   if (scannedInfo) {
+    const ghVisitor = {
+      gh_full_name: scannedInfo.name || 'Visitor',
+      gh_pass_number: scannedInfo.passNumber || '—',
+      gh_control_number: scannedInfo.controlNumber || '—',
+      gh_destination: [scannedInfo.destinationOffice, scannedInfo.destinationText].filter(Boolean).join(' · ') || '—',
+      gh_purpose: scannedInfo.purposeReason || '—',
+      gh_entry_time: scannedInfo.entryTimeFormatted || '—',
+      gh_exit_time: scannedInfo.exitTimeFormatted || '—',
+      gh_duration: scannedInfo.durationLabel || '—',
+      gh_exit_status: scannedInfo.exitStatusName || 'Completed',
+      gh_picture:
+        resolvePhotoUri(scannedInfo.pictureUrl) ||
+        'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?q=80&w=800&auto=format&fit=crop',
+    };
+
     return (
-      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-        <View style={[styles.header, { backgroundColor: colors.primary }]}>
-          <TouchableOpacity onPress={handleBack} style={styles.backButton}>
-            <Text style={styles.backText}>← Back</Text>
+      <SafeAreaView style={styles.gh_safe_area}>
+        <StatusBar barStyle="light-content" backgroundColor="#0A4DB3" />
+
+        <View style={styles.gh_header}>
+          <View style={styles.gh_header_bg_icon_left}>
+            <MaterialIcons name="business" size={120} color="rgba(255,255,255,0.06)" />
+          </View>
+
+          <View style={styles.gh_header_bg_icon_right}>
+            <MaterialIcons name="shield" size={140} color="rgba(255,255,255,0.07)" />
+          </View>
+
+          <TouchableOpacity style={styles.gh_back_button} activeOpacity={0.8} onPress={handleBack}>
+            <MaterialIcons name="arrow-back" size={26} color="#FFFFFF" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Process visitor exit</Text>
-          <View style={{ width: 60 }} />
+
+          <Text style={styles.gh_header_title}>Process visitor exit</Text>
         </View>
 
-        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-          <View style={[styles.successCard, { backgroundColor: colors.surface }]}>
-            <MaterialIcons name="logout" size={48} color={colors.primary} />
-            <Text style={[styles.successTitle, { color: colors.text }]}>Exit recorded</Text>
-            <Text style={[styles.successSubtitle, { color: colors.textSecondary }]}>
-              Visit closed — times below are from this visit record
-            </Text>
-          </View>
+        <ScrollView
+          style={styles.gh_container}
+          contentContainerStyle={styles.gh_scroll_content}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.gh_main_wrapper}>
+            <View style={styles.gh_success_card}>
+              <View style={styles.gh_success_left}>
+                <View style={styles.gh_success_icon_outer}>
+                  <View style={styles.gh_success_icon_inner}>
+                    <MaterialIcons name="check" size={38} color="#FFFFFF" />
+                  </View>
+                </View>
+              </View>
 
-          <View style={[styles.infoCard, { backgroundColor: colors.surface }]}>
-            <View style={styles.infoRow}>
-              <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Visitor</Text>
-              <Text style={[styles.infoValue, { color: colors.text }]}>{scannedInfo.name}</Text>
-            </View>
-            <View style={[styles.divider, { backgroundColor: colors.border }]} />
-            <View style={styles.infoRow}>
-              <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Entry time</Text>
-              <Text style={[styles.infoValue, { color: colors.text }]}>{scannedInfo.entryTimeFormatted}</Text>
-            </View>
-            <View style={[styles.divider, { backgroundColor: colors.border }]} />
-            <View style={styles.infoRow}>
-              <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Exit time</Text>
-              <Text style={[styles.infoValue, { color: colors.text }]}>{scannedInfo.exitTimeFormatted}</Text>
-            </View>
-            <View style={[styles.divider, { backgroundColor: colors.border }]} />
-            <View style={styles.infoRow}>
-              <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Duration</Text>
-              <Text style={[styles.infoValue, { color: colors.text }]}>{scannedInfo.durationLabel}</Text>
-            </View>
-            {scannedInfo.exitStatusName ? (
-              <>
-                <View style={[styles.divider, { backgroundColor: colors.border }]} />
-                <View style={styles.infoRow}>
-                  <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Exit status</Text>
-                  <Text style={[styles.infoValue, { color: colors.text }]}>{scannedInfo.exitStatusName}</Text>
-                </View>
-              </>
-            ) : null}
-            {scannedInfo.passNumber ? (
-              <>
-                <View style={[styles.divider, { backgroundColor: colors.border }]} />
-                <View style={styles.infoRow}>
-                  <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Pass number</Text>
-                  <Text style={[styles.infoValue, { color: colors.text }]}>{scannedInfo.passNumber}</Text>
-                </View>
-              </>
-            ) : null}
-            {scannedInfo.controlNumber ? (
-              <>
-                <View style={[styles.divider, { backgroundColor: colors.border }]} />
-                <View style={styles.infoRow}>
-                  <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Control number</Text>
-                  <Text style={[styles.infoValue, { color: colors.text }]}>{scannedInfo.controlNumber}</Text>
-                </View>
-              </>
-            ) : null}
-            {scannedInfo.destinationOffice || scannedInfo.destinationText ? (
-              <>
-                <View style={[styles.divider, { backgroundColor: colors.border }]} />
-                <View style={styles.infoRow}>
-                  <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Destination</Text>
-                  <Text style={[styles.infoValue, { color: colors.text }]}>
-                    {[scannedInfo.destinationOffice, scannedInfo.destinationText].filter(Boolean).join(' · ') ||
-                      '—'}
-                  </Text>
-                </View>
-              </>
-            ) : null}
-            {scannedInfo.purposeReason ? (
-              <>
-                <View style={[styles.divider, { backgroundColor: colors.border }]} />
-                <View style={[styles.infoRow, styles.infoRowMultiline]}>
-                  <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Purpose</Text>
-                  <Text style={[styles.infoValueMultiline, { color: colors.text }]}>{scannedInfo.purposeReason}</Text>
-                </View>
-              </>
-            ) : null}
-            {scannedInfo.registeredBy ? (
-              <>
-                <View style={[styles.divider, { backgroundColor: colors.border }]} />
-                <View style={styles.infoRow}>
-                  <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Registered by</Text>
-                  <Text style={[styles.infoValue, { color: colors.text }]}>{scannedInfo.registeredBy}</Text>
-                </View>
-              </>
-            ) : null}
-          </View>
+              <View style={styles.gh_success_center}>
+                <Text style={styles.gh_success_title}>Exit processed!</Text>
 
-          <TouchableOpacity
-            style={[styles.completeButton, { backgroundColor: colors.primary }]}
-            onPress={handleCompleteExit}
-            activeOpacity={0.8}
-          >
-            <MaterialIcons name="check-circle" size={28} color="#FFFFFF" />
-            <Text style={styles.completeButtonText}>Done</Text>
-          </TouchableOpacity>
+                <View style={styles.gh_success_badge}>
+                  <Text style={styles.gh_success_badge_text}>{ghVisitor.gh_exit_status}</Text>
+                </View>
+              </View>
+
+              <View style={styles.gh_success_right}>
+                <MaterialIcons name="verified-user" size={34} color="#BEEFD3" />
+              </View>
+            </View>
+
+            <View style={styles.gh_profile_card}>
+              <View style={styles.gh_profile_left}>
+                <Image source={{ uri: ghVisitor.gh_picture }} style={styles.gh_profile_image} resizeMode="cover" />
+
+                <View style={styles.gh_profile_info_block}>
+                  <View style={styles.gh_info_row}>
+                    <MaterialIcons name="person" size={22} color="#0A4DB3" />
+                    <View style={styles.gh_info_text_wrap}>
+                      <Text style={styles.gh_info_label}>Full Name</Text>
+                      <Text style={styles.gh_info_value}>{ghVisitor.gh_full_name}</Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.gh_line} />
+
+                  <View style={styles.gh_info_row}>
+                    <MaterialIcons name="credit-card" size={22} color="#0A4DB3" />
+                    <View style={styles.gh_info_text_wrap}>
+                      <Text style={styles.gh_info_label}>Pass Number</Text>
+                      <Text style={styles.gh_info_value}>{ghVisitor.gh_pass_number}</Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.gh_line} />
+
+                  <View style={styles.gh_info_row}>
+                    <MaterialIcons name="assignment" size={22} color="#0A4DB3" />
+                    <View style={styles.gh_info_text_wrap}>
+                      <Text style={styles.gh_info_label}>Control Number</Text>
+                      <Text style={styles.gh_info_value_blue}>{ghVisitor.gh_control_number}</Text>
+                    </View>
+                  </View>
+                </View>
+              </View>
+
+              <View style={styles.gh_profile_right}>
+                <View style={styles.gh_summary_top}>
+                  <Text style={styles.gh_summary_title}>Visit Summary</Text>
+                </View>
+
+                <View style={styles.gh_summary_item}>
+                  <View style={styles.gh_summary_item_left}>
+                    <MaterialIcons name="login" size={20} color="#0A4DB3" />
+                    <Text style={styles.gh_summary_label}>Entry time</Text>
+                  </View>
+                  <Text style={styles.gh_summary_value}>{ghVisitor.gh_entry_time}</Text>
+                </View>
+
+                <View style={styles.gh_summary_divider} />
+
+                <View style={styles.gh_summary_item}>
+                  <View style={styles.gh_summary_item_left}>
+                    <MaterialIcons name="logout" size={20} color="#0A4DB3" />
+                    <Text style={styles.gh_summary_label}>Exit time</Text>
+                  </View>
+                  <Text style={styles.gh_summary_value}>{ghVisitor.gh_exit_time}</Text>
+                </View>
+
+                <View style={styles.gh_summary_divider} />
+
+                <View style={styles.gh_summary_item}>
+                  <View style={styles.gh_summary_item_left}>
+                    <MaterialIcons name="schedule" size={20} color="#0A4DB3" />
+                    <Text style={styles.gh_summary_label}>Duration</Text>
+                  </View>
+                  <Text style={styles.gh_summary_value_green}>{ghVisitor.gh_duration}</Text>
+                </View>
+
+                <View style={styles.gh_summary_divider} />
+
+                <View style={styles.gh_summary_item}>
+                  <View style={styles.gh_summary_item_left}>
+                    <MaterialIcons name="check-circle-outline" size={20} color="#0A4DB3" />
+                    <Text style={styles.gh_summary_label}>Exit status</Text>
+                  </View>
+
+                  <View style={styles.gh_status_chip}>
+                    <MaterialIcons name="check-circle" size={16} color="#16A34A" />
+                    <Text style={styles.gh_status_chip_text}>{ghVisitor.gh_exit_status}</Text>
+                  </View>
+                </View>
+              </View>
+
+              <View style={styles.gh_bottom_strip}>
+                <View style={styles.gh_bottom_item}>
+                  <MaterialIcons name="track-changes" size={24} color="#0A4DB3" />
+                  <View style={styles.gh_bottom_text_wrap}>
+                    <Text style={styles.gh_bottom_label}>Purpose</Text>
+                    <Text style={styles.gh_bottom_value}>{ghVisitor.gh_purpose}</Text>
+                  </View>
+                </View>
+
+                <View style={styles.gh_bottom_vertical_line} />
+
+                <View style={styles.gh_bottom_item}>
+                  <MaterialIcons name="business" size={24} color="#0A4DB3" />
+                  <View style={styles.gh_bottom_text_wrap}>
+                    <Text style={styles.gh_bottom_label}>Destination</Text>
+                    <Text style={styles.gh_bottom_value}>{ghVisitor.gh_destination}</Text>
+                  </View>
+                </View>
+              </View>
+            </View>
+
+            <TouchableOpacity style={styles.gh_done_button} activeOpacity={0.85} onPress={handleCompleteExit}>
+              <View style={styles.gh_done_icon_circle}>
+                <MaterialIcons name="check" size={30} color="#0A4DB3" />
+              </View>
+              <Text style={styles.gh_done_button_text}>Done</Text>
+            </TouchableOpacity>
+          </View>
         </ScrollView>
       </SafeAreaView>
     );
@@ -325,20 +414,20 @@ export default function ExitScanScreen() {
     <SafeAreaView style={styles.exitSafeArea}>
       <StatusBar barStyle="light-content" backgroundColor="#064AA5" />
 
+      <View style={styles.exitHeader}>
+        <TouchableOpacity style={styles.exitBackButton} activeOpacity={0.75} onPress={handleBack}>
+          <MaterialIcons name="arrow-back" size={30} color="#FFFFFF" />
+          <Text style={styles.exitBackText}>Back</Text>
+        </TouchableOpacity>
+        <Text style={styles.exitHeaderTitle}>Process visitor exit</Text>
+        <View style={styles.exitHeaderRightSpace} />
+      </View>
+
       <ScrollView
         style={styles.exitContainer}
         contentContainerStyle={styles.exitScrollContent}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.exitHeader}>
-          <TouchableOpacity style={styles.exitBackButton} activeOpacity={0.75} onPress={handleBack}>
-            <MaterialIcons name="arrow-back" size={30} color="#FFFFFF" />
-            <Text style={styles.exitBackText}>Back</Text>
-          </TouchableOpacity>
-          <Text style={styles.exitHeaderTitle}>Process visitor exit</Text>
-          <View style={styles.exitHeaderRightSpace} />
-        </View>
-
         <View style={styles.exitScannerCard}>
           <View style={styles.exitCameraBox}>
             {hasCameraPermission ? (
@@ -733,6 +822,306 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: '#FFFFFF',
+  },
+  gh_safe_area: {
+    flex: 1,
+    backgroundColor: '#F4F6F8',
+  },
+  gh_container: {
+    flex: 1,
+    backgroundColor: '#F4F6F8',
+  },
+  gh_scroll_content: {
+    paddingBottom: 20,
+  },
+  gh_header: {
+    backgroundColor: '#0A4DB3',
+    paddingTop: 12,
+    paddingBottom: 24,
+    paddingHorizontal: 16,
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  gh_header_bg_icon_left: {
+    position: 'absolute',
+    left: -15,
+    bottom: -20,
+  },
+  gh_header_bg_icon_right: {
+    position: 'absolute',
+    right: -20,
+    top: 5,
+  },
+  gh_back_button: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    borderWidth: 1.2,
+    borderColor: 'rgba(255,255,255,0.25)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 14,
+  },
+  gh_header_title: {
+    color: '#FFFFFF',
+    fontSize: 20,
+    fontWeight: '800',
+    textAlign: 'center',
+    marginTop: -42,
+  },
+  gh_main_wrapper: {
+    marginTop: -10,
+    backgroundColor: '#F4F6F8',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingTop: 12,
+    paddingHorizontal: 12,
+  },
+  gh_success_card: {
+    backgroundColor: '#F3FFF8',
+    borderWidth: 1,
+    borderColor: '#D7F3E3',
+    borderRadius: 16,
+    padding: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  gh_success_left: {
+    marginRight: 10,
+  },
+  gh_success_icon_outer: {
+    width: 62,
+    height: 62,
+    borderRadius: 31,
+    backgroundColor: '#E9FCF1',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  gh_success_icon_inner: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: '#10B981',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  gh_success_center: {
+    flex: 1,
+  },
+  gh_success_title: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: '#111827',
+  },
+  gh_success_badge: {
+    alignSelf: 'flex-start',
+    marginTop: 6,
+    backgroundColor: '#16A34A',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+  gh_success_badge_text: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  gh_success_right: {
+    marginLeft: 6,
+  },
+  gh_profile_card: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    marginTop: 12,
+    padding: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  gh_profile_left: {
+    flexDirection: 'row',
+  },
+  gh_profile_image: {
+    width: 92,
+    height: 108,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#DCE4F0',
+    backgroundColor: '#E5E7EB',
+  },
+  gh_profile_info_block: {
+    flex: 1,
+    marginLeft: 10,
+    justifyContent: 'center',
+  },
+  gh_info_row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+  },
+  gh_info_text_wrap: {
+    marginLeft: 8,
+    flex: 1,
+  },
+  gh_info_label: {
+    fontSize: 11,
+    color: '#6B7280',
+    marginBottom: 2,
+  },
+  gh_info_value: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  gh_info_value_blue: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#0A4DB3',
+  },
+  gh_line: {
+    height: 1,
+    backgroundColor: '#E5E7EB',
+    marginVertical: 2,
+  },
+  gh_profile_right: {
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: '#D9E5F5',
+    borderRadius: 14,
+    padding: 10,
+    backgroundColor: '#FAFCFF',
+  },
+  gh_summary_top: {
+    marginBottom: 4,
+  },
+  gh_summary_title: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#0A4DB3',
+  },
+  gh_summary_item: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  gh_summary_item_left: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    marginRight: 10,
+  },
+  gh_summary_label: {
+    marginLeft: 6,
+    fontSize: 12,
+    color: '#374151',
+    fontWeight: '600',
+  },
+  gh_summary_value: {
+    flex: 1,
+    textAlign: 'right',
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  gh_summary_value_green: {
+    flex: 1,
+    textAlign: 'right',
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#16A34A',
+  },
+  gh_summary_divider: {
+    height: 1,
+    backgroundColor: '#E5E7EB',
+  },
+  gh_status_chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EAFBF0',
+    borderWidth: 1,
+    borderColor: '#BEE7CB',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+  gh_status_chip_text: {
+    marginLeft: 6,
+    color: '#16A34A',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  gh_bottom_strip: {
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: '#D9E5F5',
+    borderRadius: 14,
+    padding: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FBFDFF',
+  },
+  gh_bottom_item: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  gh_bottom_text_wrap: {
+    marginLeft: 8,
+    flex: 1,
+  },
+  gh_bottom_label: {
+    fontSize: 11,
+    color: '#6B7280',
+    marginBottom: 2,
+  },
+  gh_bottom_value: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  gh_bottom_vertical_line: {
+    width: 1,
+    height: 34,
+    backgroundColor: '#D1D5DB',
+    marginHorizontal: 8,
+  },
+  gh_done_button: {
+    marginTop: 14,
+    backgroundColor: '#0A4DB3',
+    borderRadius: 14,
+    height: 52,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#0A4DB3',
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  gh_done_icon_circle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#FFFFFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
+  },
+  gh_done_button_text: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '800',
   },
   exitSafeArea: {
     flex: 1,

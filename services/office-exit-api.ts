@@ -35,6 +35,8 @@ export interface ExitScanResult {
     /** From `visit.destination_text` when set. */
     destinationText?: string | null;
     officeScanInserted?: boolean;
+    /** Public URL or storage path from visitor.visitor_photo_with_id_url. */
+    visitorPhotoUrl?: string | null;
   };
   debug?: {
     functionName: string;
@@ -171,7 +173,7 @@ const resolveScanByDatabase = async (payload: ExitScanRequest): Promise<ExitScan
   if (visit && !visitor) {
     const { data: visitVisitor } = await supabase
       .from('visitor')
-      .select('visitor_id, first_name, last_name, pass_number, control_number')
+      .select('visitor_id, first_name, last_name, pass_number, control_number, visitor_photo_with_id_url')
       .eq('visitor_id', visit.visitor_id)
       .maybeSingle();
     if (visitVisitor) {
@@ -195,7 +197,7 @@ const resolveScanByDatabase = async (payload: ExitScanRequest): Promise<ExitScan
     } else {
       const { data: byControl } = await supabase
         .from('visitor')
-        .select('visitor_id, first_name, last_name, pass_number, control_number')
+        .select('visitor_id, first_name, last_name, pass_number, control_number, visitor_photo_with_id_url')
         .eq('control_number', candidate)
         .maybeSingle();
 
@@ -204,7 +206,7 @@ const resolveScanByDatabase = async (payload: ExitScanRequest): Promise<ExitScan
       } else {
         const { data: byPass } = await supabase
           .from('visitor')
-          .select('visitor_id, first_name, last_name, pass_number, control_number')
+          .select('visitor_id, first_name, last_name, pass_number, control_number, visitor_photo_with_id_url')
           .eq('pass_number', candidate)
           .maybeSingle();
         if (byPass) {
@@ -231,7 +233,7 @@ const resolveScanByDatabase = async (payload: ExitScanRequest): Promise<ExitScan
     if (visit) {
       const { data: visitVisitor } = await supabase
         .from('visitor')
-        .select('visitor_id, first_name, last_name, pass_number, control_number')
+      .select('visitor_id, first_name, last_name, pass_number, control_number, visitor_photo_with_id_url')
         .eq('visitor_id', visit.visitor_id)
         .maybeSingle();
 
@@ -406,6 +408,11 @@ const resolveScanByDatabase = async (payload: ExitScanRequest): Promise<ExitScan
       exitStatusId,
       exitStatusName: exitStatusName || null,
       officeScanInserted,
+      visitorPhotoUrl:
+        typeof visitor.visitor_photo_with_id_url === 'string' &&
+        visitor.visitor_photo_with_id_url.trim().length > 0
+          ? visitor.visitor_photo_with_id_url.trim()
+          : null,
     },
     debug: {
       functionName: OFFICE_EXIT_SCAN_FUNCTION,
