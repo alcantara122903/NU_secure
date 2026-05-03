@@ -4,6 +4,16 @@
  * Prevents timeout issues when uploading large images to OCR.Space
  */
 
+const IMAGE_PREP_VERBOSE_LOGS = false;
+
+const logInfo = (...args: unknown[]) => {
+  if (IMAGE_PREP_VERBOSE_LOGS) console.log(...args);
+};
+
+const logWarn = (...args: unknown[]) => {
+  if (IMAGE_PREP_VERBOSE_LOGS) console.warn(...args);
+};
+
 /**
  * Compress base64 image by converting to canvas and reducing quality
  * Works in React Native environment
@@ -15,10 +25,10 @@ export const compressBase64Image = async (
   maxHeight: number = 600
 ): Promise<string> => {
   try {
-    console.log('[Compression] Starting image compression...');
-    console.log(`   Input size: ${(base64DataUrl.length / 1024).toFixed(2)} KB`);
-    console.log(`   Target quality: ${maxQuality * 100}%`);
-    console.log(`   Max dimensions: ${maxWidth}x${maxHeight}`);
+    logInfo('[Compression] Starting image compression...');
+    logInfo(`   Input size: ${(base64DataUrl.length / 1024).toFixed(2)} KB`);
+    logInfo(`   Target quality: ${maxQuality * 100}%`);
+    logInfo(`   Max dimensions: ${maxWidth}x${maxHeight}`);
 
     // Extract clean base64 from data URL
     let cleanBase64 = base64DataUrl;
@@ -34,8 +44,8 @@ export const compressBase64Image = async (
     // For now, we'll reduce by truncating quality indicator if possible
     // A better approach would be to use expo-image-manipulator
 
-    console.log('[Compression] Compression complete');
-    console.log(`   Output size: ${(base64DataUrl.length / 1024).toFixed(2)} KB`);
+    logInfo('[Compression] Compression complete');
+    logInfo(`   Output size: ${(base64DataUrl.length / 1024).toFixed(2)} KB`);
 
     return base64DataUrl;
   } catch (error) {
@@ -58,7 +68,7 @@ export const estimateBase64SizeKB = (base64: string): number => {
  */
 export const isImageTooLarge = (base64: string, thresholdKB: number = 500): boolean => {
   const sizeKB = estimateBase64SizeKB(base64);
-  console.log(`[ImageValidation] Base64 size: ${sizeKB} KB (threshold: ${thresholdKB} KB)`);
+  logInfo(`[ImageValidation] Base64 size: ${sizeKB} KB (threshold: ${thresholdKB} KB)`);
   return sizeKB > thresholdKB;
 };
 
@@ -79,24 +89,24 @@ export const validateAndPrepareImageForOCR = async (
   let isCompressed = false;
 
   const originalSizeKB = estimateBase64SizeKB(base64DataUrl);
-  console.log(`\n📊 [OCR Preparation] Image validation:`);
-  console.log(`   Original size: ${originalSizeKB} KB`);
+  logInfo(`\n📊 [OCR Preparation] Image validation:`);
+  logInfo(`   Original size: ${originalSizeKB} KB`);
 
   // Warn if too large
   if (originalSizeKB > 1000) {
     warnings.push(`Large image (${originalSizeKB} KB) - OCR processing may be slow`);
-    console.warn(`⚠️  ${warnings[warnings.length - 1]}`);
+    logWarn(`⚠️  ${warnings[warnings.length - 1]}`);
   }
 
   // If image is very large, suggest reducing on next attempt
   if (originalSizeKB > 2000) {
     warnings.push('Very large image - consider taking a new photo with better lighting/focus');
-    console.warn(`⚠️  ${warnings[warnings.length - 1]}`);
+    logWarn(`⚠️  ${warnings[warnings.length - 1]}`);
   }
 
   const finalSizeKB = estimateBase64SizeKB(finalBase64);
-  console.log(`   Final size: ${finalSizeKB} KB`);
-  console.log(`   Compressed: ${isCompressed ? 'Yes' : 'No'}\n`);
+  logInfo(`   Final size: ${finalSizeKB} KB`);
+  logInfo(`   Compressed: ${isCompressed ? 'Yes' : 'No'}\n`);
 
   return {
     base64: finalBase64,

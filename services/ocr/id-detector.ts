@@ -82,7 +82,9 @@ export function detectIdType(rawOcrText: string): IDTypeDetectionResult {
   // UMID detection
   if (
     upperText.includes('UMID') ||
-    (upperText.includes('UNIFIED MULTI-PURPOSE') && upperText.includes('IDENTIFICATION'))
+    (upperText.includes('UNIFIED MULTI-PURPOSE') && upperText.includes('IDENTIFICATION')) ||
+    upperText.includes('UNIFIED MULTI-PURPOSE ID') ||
+    (upperText.includes('UNIFIED') && upperText.includes('MULTI-PURPOSE') && upperText.includes('ID'))
   ) {
     typeScores.umid += 3;
     detectedKeywords.push('UMID keywords found');
@@ -129,7 +131,10 @@ export function detectIdType(rawOcrText: string): IDTypeDetectionResult {
   // Senior Citizen ID detection
   if (
     upperText.includes('SENIOR CITIZEN') ||
-    upperText.includes('SENIOR CITIZEN ID')
+    upperText.includes('SENIOR CITIZEN ID') ||
+    upperText.includes('SENIOR CITIZENS AFFAIRS') ||
+    upperText.includes('OFFICE FOR SENIOR') ||
+    upperText.includes('OSCA')
   ) {
     typeScores.senior_citizen += 3;
     detectedKeywords.push('Senior Citizen ID keywords found');

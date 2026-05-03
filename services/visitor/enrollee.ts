@@ -16,6 +16,23 @@ import {
 import { uploadFacePhoto } from '../storage/upload';
 import { visitorLookupService } from './visitor-lookup';
 
+type IdExtractionCacheEntry = {
+  key: string;
+  result: IDExtractionData | null;
+  at: number;
+};
+
+const ID_EXTRACTION_CACHE_TTL_MS = 2 * 60 * 1000;
+let lastIdExtractionCache: IdExtractionCacheEntry | null = null;
+
+function fingerprintBase64(payload: string): string {
+  // Fast non-cryptographic hash; good enough for same-image repeat detection.
+  let hash = 5381;
+  for (let i = 0; i < payload.length; i += 1) {
+    hash = ((hash << 5) + hash) ^ payload.charCodeAt(i);
+  }
+  return `${payload.length}:${(hash >>> 0).toString(16)}`;
+}
 
 export const enrolleeService = {
   /**
@@ -26,6 +43,17 @@ export const enrolleeService = {
   async extractDataFromID(base64Image: string): Promise<IDExtractionData | null> {
     try {
       console.log('\n\n========== ID EXTRACTION PROCESS STARTED ==========\n');
+
+      const cacheKey = fingerprintBase64(base64Image);
+      const now = Date.now();
+      if (
+        lastIdExtractionCache &&
+        lastIdExtractionCache.key === cacheKey &&
+        now - lastIdExtractionCache.at <= ID_EXTRACTION_CACHE_TTL_MS
+      ) {
+        console.log('⚡ Cache hit: reusing previous ID extraction result');
+        return lastIdExtractionCache.result;
+      }
       
       // STEP 1: OCR
       console.log('📊 STEP 1: Calling OCR.Space API');
@@ -34,13 +62,8 @@ export const enrolleeService = {
       const ocrRawText = await extractDataFromIDViaBackend(base64Image);
       
       if (!ocrRawText) {
-        console.error('\n❌ STEP 1 FAILED: OCR.Space did not return text');
-        console.error('\n💡 Troubleshooting suggestions:');
-        console.error('   1. Check internet connection - OCR.Space needs connectivity');
-        console.error('   2. Image may be too blurry or poorly lit - try retaking the photo');
-        console.error('   3. ID may be at an angle - ensure it\'s straight and well-centered');
-        console.error('   4. Try uploading from gallery instead of camera');
-        console.error('   5. If problem persists, you can enter information manually in Step 3');
+        console.warn('\n⚠️ STEP 1 FAILED: OCR.Space did not return text');
+        console.warn('💡 Tips: check network, retake clearer photo, or use gallery/manual entry.');
         return null;
       }
 
@@ -79,8 +102,8 @@ export const enrolleeService = {
       const isValid = validateParsedData(parsedData);
       
       if (!isValid) {
-        console.error('\n❌ STEP 3 FAILED: No fields could be extracted');
-        console.error('   The OCR text was too corrupted or unrecognizable');
+        console.warn('\n⚠️ STEP 3 FAILED: No fields could be extracted');
+        console.warn('   OCR text was too corrupted or unrecognizable');
         return null;
       }
 
@@ -113,8 +136,8 @@ export const enrolleeService = {
       }
       console.log(`   ✓ Message: ${message}`);
       console.log('\n========== ID EXTRACTION PROCESS COMPLETED ==========\n');
-      
-      return {
+
+      const result: IDExtractionData = {
         firstName: parsedData.firstName,
         lastName: parsedData.lastName,
         birthday: parsedData.birthday || '',
@@ -130,11 +153,20 @@ export const enrolleeService = {
         detectedIdType: parsedData.detectedIdType,
         rawOcrText: ocrRawText,
       };
+
+      lastIdExtractionCache = {
+        key: cacheKey,
+        result,
+        at: Date.now(),
+      };
+      
+      return result;
     } catch (error) {
       console.error('\n❌ EXTRACTION ERROR: Exception thrown');
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.error(`   Details: ${errorMessage}`);
       console.error('\n========== ID EXTRACTION PROCESS FAILED ==========\n');
+      lastIdExtractionCache = null;
       return null;
     }
   },

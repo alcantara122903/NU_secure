@@ -11,6 +11,8 @@ import { BARANGAY_KEYWORDS, BLACKLIST_KEYWORDS, KNOWN_CITIES, KNOWN_PROVINCES, M
 import type { ParsedIDData } from '@/types/ocr';
 import { detectIdType } from '../id-detector';
 
+const OCR_PARSER_VERBOSE_LOGS = false;
+
 /**
  * Province to Region mapping for Philippines
  * Auto-populates region based on province extraction
@@ -1066,6 +1068,505 @@ function parsePhilSysID(lines: string[]): Partial<ParsedIDData> {
   };
 }
 
+function isLikelyLabelLineForUmid(line: string): boolean {
+  const upper = normalizeForMatch(line);
+  return (
+    upper.includes('SURNAME') ||
+    upper.includes('LAST NAME') ||
+    upper.includes('GIVEN NAME') ||
+    upper.includes('FIRST NAME') ||
+    upper.includes('MIDDLE NAME') ||
+    upper.includes('NAME') ||
+    upper.includes('DATE OF BIRTH') ||
+    upper.includes('BIRTH DATE') ||
+    upper.includes('DOB') ||
+    upper.includes('ADDRESS') ||
+    upper.includes('HOME ADDRESS') ||
+    upper.includes('CARD') ||
+    upper.includes('UNIFIED') ||
+    upper.includes('MULTI-PURPOSE') ||
+    upper.includes('SSS') ||
+    upper.includes('GSIS') ||
+    upper.includes('PHILHEALTH') ||
+    upper.includes('PAG-IBIG')
+  );
+}
+
+function parseUmidID(lines: string[]): Partial<ParsedIDData> {
+  const cleanedLines = lines.map((line) => cleanField(line)).filter(Boolean);
+
+  const rawLastName =
+    extractAfterLabel(cleanedLines, ['SURNAME', 'LAST NAME']) ||
+    findValueAfterAnyLabel(cleanedLines, ['SURNAME', 'LAST NAME']);
+  const rawFirstName =
+    extractAfterLabel(cleanedLines, ['GIVEN NAME', 'FIRST NAME']) ||
+    findValueAfterAnyLabel(cleanedLines, ['GIVEN NAME', 'FIRST NAME']);
+
+  let firstName = sanitizePersonName(rawFirstName);
+  let lastName = sanitizePersonName(rawLastName);
+
+  // Heuristic for common UMID OCR layout:
+  // CRN line, then surname on next line, then given name on next line.
+  if (!firstName || !lastName) {
+    const crnIndex = cleanedLines.findIndex((line) => /(?:^|\s)CRN(?:\s|$|[-:])/i.test(line));
+    if (crnIndex >= 0) {
+      const afterCrn = cleanedLines.slice(crnIndex + 1, crnIndex + 6).filter((line) => {
+        const upper = normalizeForMatch(line);
+        if (isLikelyLabelLineForUmid(line)) return false;
+        if (/\d/.test(line)) return false;
+        if (upper.includes('MALE') || upper.includes('FEMALE')) return false;
+        if (upper.includes('CITY') || upper.includes('BRGY') || upper.includes('BARANGAY')) return false;
+        return /^[A-Za-z][A-Za-z\s.'-]{1,40}$/.test(line);
+      });
+
+      if (!lastName && afterCrn[0]) {
+        lastName = sanitizePersonName(afterCrn[0]);
+      }
+      if (!firstName && afterCrn[1]) {
+        firstName = sanitizePersonName(afterCrn[1]);
+      }
+    }
+  }
+
+  if (!firstName || !lastName) {
+    for (let idx = 0; idx < cleanedLines.length; idx++) {
+      const line = cleanedLines[idx];
+      const upper = normalizeForMatch(line);
+      if (isLikelyLabelLineForUmid(line)) continue;
+      if (upper.includes('REPUBLIC') || upper.includes('PHILIPPINES')) continue;
+
+      if (line.includes(',')) {
+        const parsed = parseNameValue(line);
+        if (parsed.firstName || parsed.lastName) {
+          firstName = firstName || sanitizePersonName(parsed.firstName);
+          lastName = lastName || sanitizePersonName(parsed.lastName);
+          break;
+        }
+      } else {
+        // Last fallback: consecutive alpha lines can be surname + given name.
+        const next = cleanedLines[idx + 1] || '';
+        const nextUpper = normalizeForMatch(next);
+        const currentLooksName = /^[A-Za-z][A-Za-z\s.'-]{1,40}$/.test(line) && !/\d/.test(line);
+        const nextLooksName =
+          /^[A-Za-z][A-Za-z\s.'-]{1,40}$/.test(next) &&
+          !/\d/.test(next) &&
+          !nextUpper.includes('MALE') &&
+          !nextUpper.includes('FEMALE');
+        if (currentLooksName && nextLooksName) {
+          lastName = lastName || sanitizePersonName(line);
+          firstName = firstName || sanitizePersonName(next);
+          break;
+        }
+      }
+    }
+  }
+
+  const birthday = extractBirthdayFromLines(cleanedLines);
+
+  const birthdayLineIndex = cleanedLines.findIndex((line) => normalizeBirthdayToIso(line) !== '');
+  const addressCandidateLines = cleanedLines
+    .slice(birthdayLineIndex >= 0 ? birthdayLineIndex + 1 : 0)
+    .filter((line) => {
+      const upper = normalizeForMatch(line);
+      if (!line) return false;
+      if (isLikelyLabelLineForUmid(line)) return false;
+      if (upper.includes('MALE') || upper.includes('FEMALE')) return false;
+      return true;
+    });
+
+  let umidHouseNo = '';
+  let umidBarangay = '';
+  let umidCityMunicipality = '';
+  let umidProvince = '';
+  let umidRegion = '';
+
+  for (const rawLine of addressCandidateLines) {
+    const line = cleanField(rawLine);
+    const upper = normalizeForMatch(line);
+
+    // Example: "216 BRGY."
+    if (/\b(BRGY|BARANGAY)\b/i.test(upper)) {
+      const houseNoMatch = line.match(/\b(\d{1,6}[A-Za-z-]?)\b/);
+      if (!umidHouseNo && houseNoMatch) {
+        umidHouseNo = houseNoMatch[1];
+      }
+      const barangayTail = line
+        .replace(/\b\d{1,6}[A-Za-z-]?\b/g, ' ')
+        .replace(/\b(BRGY\.?|BARANGAY)\b/gi, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (!umidBarangay && barangayTail) {
+        umidBarangay = normalizeAddressToken(barangayTail);
+      }
+      continue;
+    }
+
+    // Example: "MALITLIT LIPA CITY" -> barangay MALITLIT, city LIPA CITY
+    if (/\b(CITY|MUNICIPALITY)\b/i.test(upper)) {
+      const normalizedLine = cleanField(line).replace(/\b(PHL|PHILIPPINES)\b/gi, '').trim();
+      const words = normalizedLine.split(/\s+/).filter(Boolean);
+      const cityIdx = words.findIndex((w) => /^CITY$/i.test(w));
+      const municipalityIdx = words.findIndex((w) => /^MUNICIPALITY$/i.test(w));
+
+      if (cityIdx > 0) {
+        // Last token before CITY is the city name (e.g., LIPA CITY).
+        const cityName = `${words[cityIdx - 1]} CITY`;
+        if (!umidCityMunicipality) {
+          umidCityMunicipality = normalizeCityMunicipalityText(cityName);
+        }
+        const barangayHead = words.slice(0, cityIdx - 1).join(' ').trim();
+        if (!umidBarangay && barangayHead) {
+          umidBarangay = normalizeAddressToken(
+            barangayHead.replace(/\b(BRGY\.?|BARANGAY)\b/gi, '').trim(),
+          );
+        }
+      } else if (municipalityIdx > 0) {
+        const cityName = `${words[municipalityIdx - 1]} MUNICIPALITY`;
+        if (!umidCityMunicipality) {
+          umidCityMunicipality = normalizeCityMunicipalityText(cityName);
+        }
+        const barangayHead = words.slice(0, municipalityIdx - 1).join(' ').trim();
+        if (!umidBarangay && barangayHead) {
+          umidBarangay = normalizeAddressToken(
+            barangayHead.replace(/\b(BRGY\.?|BARANGAY)\b/gi, '').trim(),
+          );
+        }
+      }
+      continue;
+    }
+
+    // Example: "BATANGAS PHL" -> province BATANGAS
+    if (!umidProvince && isLikelyProvince(line)) {
+      const provinceToken = cleanField(line.split(',')[0] || line)
+        .replace(/\b(PHL|PHILIPPINES)\b/gi, '')
+        .trim();
+      const normalizedProvince = normalizeAddressToken(provinceToken);
+      if (normalizedProvince) {
+        umidProvince = normalizedProvince;
+        umidRegion = PROVINCE_TO_REGION[normalizeForMatch(normalizedProvince)] || '';
+      }
+      continue;
+    }
+  }
+
+  let address =
+    extractAfterLabel(cleanedLines, ['HOME ADDRESS', 'CURRENT ADDRESS', 'ADDRESS']) ||
+    findValueAfterAnyLabel(cleanedLines, ['HOME ADDRESS', 'CURRENT ADDRESS', 'ADDRESS']);
+
+  if (!address) {
+    const birthdayLineIndex = cleanedLines.findIndex((line) => normalizeBirthdayToIso(line) !== '');
+    const start = birthdayLineIndex >= 0 ? birthdayLineIndex + 1 : 0;
+    const addressLines = cleanedLines.slice(start).filter((line) => {
+      if (isLikelyLabelLineForUmid(line)) return false;
+      if (!/[A-Za-z]{3,}/.test(line)) return false;
+      const upper = normalizeForMatch(line);
+      if (upper.includes('MALE') || upper.includes('FEMALE')) return false;
+      return (
+        /BARANGAY|BRGY|CITY|MUNICIPALITY|PROVINCE|BATANGAS|LAGUNA|CAVITE|QUEZON|RIZAL/i.test(line) ||
+        /\d{3,}/.test(line)
+      );
+    });
+    if (addressLines.length > 0) {
+      address = addressLines.join(', ');
+    }
+  }
+
+  if (!address) {
+    const parts = [umidHouseNo, umidBarangay, umidCityMunicipality, umidProvince].filter(Boolean);
+    address = parts.join(', ');
+  }
+
+  const parsedAddress = parseAddressComponents(address);
+
+  return {
+    firstName,
+    lastName,
+    birthday,
+    address,
+    addressHouseNo: umidHouseNo || parsedAddress.addressHouseNo || '',
+    addressStreet: parsedAddress.addressStreet || '',
+    addressBarangay: umidBarangay || parsedAddress.addressBarangay || '',
+    addressCityMunicipality: umidCityMunicipality || parsedAddress.addressCityMunicipality || '',
+    addressProvince: umidProvince || parsedAddress.addressProvince || '',
+    addressRegion: umidRegion || parsedAddress.addressRegion || '',
+  };
+}
+
+function isLikelyLabelLineForSeniorId(line: string): boolean {
+  const upper = normalizeForMatch(line);
+  return (
+    upper.includes('REPUBLIC OF THE PHILIPPINES') ||
+    upper.includes('OFFICE FOR SENIOR CITIZENS AFFAIRS') ||
+    upper.includes('SENIOR CITIZEN') ||
+    upper.includes('CITY OF') ||
+    upper.includes('NAME') ||
+    upper.includes('ADDRESS') ||
+    upper.includes('DATE OF BIRTH') ||
+    upper.includes('DATE ISSUE') ||
+    upper.includes('PRINTED NAME') ||
+    upper.includes('SIGNATURE') ||
+    upper.includes('THUMBMARK') ||
+    upper.includes('CTRL NO')
+  );
+}
+
+function parseSeniorCitizenID(lines: string[]): Partial<ParsedIDData> {
+  const cleanedLines = lines.map((line) => cleanField(line)).filter(Boolean);
+
+  let firstName = '';
+  let lastName = '';
+
+  const nameLabelIdx = findLabelIndex(cleanedLines, ['NAME']);
+  if (nameLabelIdx > 0) {
+    const candidate = sanitizePersonName(cleanedLines[nameLabelIdx - 1]);
+    const parsed = parseNameValue(candidate);
+    firstName = parsed.firstName || '';
+    lastName = parsed.lastName || '';
+  }
+
+  if (!firstName || !lastName) {
+    const nameLine = cleanedLines.find((line) => {
+      const upper = normalizeForMatch(line);
+      if (isLikelyLabelLineForSeniorId(line)) return false;
+      if (upper.includes('CITY')) return false;
+      if (!/[A-Za-z]{3,}/.test(line)) return false;
+      if (/\d/.test(line)) return false;
+      return line.split(/\s+/).length >= 2 && line.split(/\s+/).length <= 5;
+    });
+
+    if (nameLine) {
+      const parsed = parseNameValue(sanitizePersonName(nameLine));
+      firstName = parsed.firstName || firstName;
+      lastName = parsed.lastName || lastName;
+    }
+  }
+
+  const birthday = extractBirthdayFromLines(cleanedLines);
+
+  let address = '';
+  const addressLabelIdx = findLabelIndex(cleanedLines, ['ADDRESS']);
+  if (addressLabelIdx > 0) {
+    const before = cleanField(cleanedLines[addressLabelIdx - 1]);
+    if (before && !isLikelyLabelLineForSeniorId(before)) {
+      address = before;
+    }
+  }
+
+  if (!address) {
+    const candidate = cleanedLines.find((line) => {
+      const upper = normalizeForMatch(line);
+      if (isLikelyLabelLineForSeniorId(line)) return false;
+      if (!line.includes(',')) return false;
+      if (!/[A-Za-z]{3,}/.test(line)) return false;
+      if (upper.includes('DATE') || upper.includes('ISSUE')) return false;
+      return true;
+    });
+    address = candidate || '';
+  }
+
+  const parsedAddress = parseAddressComponents(address);
+
+  return {
+    firstName,
+    lastName,
+    birthday,
+    address,
+    addressHouseNo: parsedAddress.addressHouseNo || '',
+    addressStreet: parsedAddress.addressStreet || '',
+    addressBarangay: parsedAddress.addressBarangay || '',
+    addressCityMunicipality: parsedAddress.addressCityMunicipality || '',
+    addressProvince: parsedAddress.addressProvince || '',
+    addressRegion: parsedAddress.addressRegion || '',
+  };
+}
+
+function isLikelyLabelLineForVotersId(line: string): boolean {
+  const upper = normalizeForMatch(line);
+  return (
+    upper.includes('REPUBLIC OF THE PHILIPPINES') ||
+    upper.includes('COMMISSION ON ELECTIONS') ||
+    upper.includes('COMELEC') ||
+    upper.includes('VOTER') ||
+    upper.includes('CERTIFICATE') ||
+    upper.includes('NAME') ||
+    upper.includes('ADDRESS') ||
+    upper.includes('DATE OF BIRTH') ||
+    upper.includes('BIRTH DATE') ||
+    upper.includes('AGE') ||
+    upper.includes('PRECINCT') ||
+    upper.includes('SIGNATURE')
+  );
+}
+
+function parseVotersID(lines: string[]): Partial<ParsedIDData> {
+  const cleanedLines = lines.map((line) => cleanField(line)).filter(Boolean);
+
+  let firstName = '';
+  let lastName = '';
+
+  // 1) Labeled extraction first
+  const rawName =
+    extractAfterLabel(cleanedLines, ['NAME', 'FULL NAME']) ||
+    findValueAfterAnyLabel(cleanedLines, ['NAME', 'FULL NAME']);
+  if (rawName) {
+    const parsed = parseNameValue(sanitizePersonName(rawName));
+    firstName = parsed.firstName || '';
+    lastName = parsed.lastName || '';
+  }
+
+  // 2) Common layout: full name line before "NAME"
+  if (!firstName || !lastName) {
+    const nameIdx = findLabelIndex(cleanedLines, ['NAME', 'FULL NAME']);
+    if (nameIdx > 0) {
+      const candidate = sanitizePersonName(cleanedLines[nameIdx - 1]);
+      const parsed = parseNameValue(candidate);
+      firstName = firstName || parsed.firstName || '';
+      lastName = lastName || parsed.lastName || '';
+    }
+  }
+
+  // 3) Fallback: first strong name-looking line
+  if (!firstName || !lastName) {
+    // Common Voter's ID layout:
+    // <SURNAME>\n<GIVEN NAME>\n<MIDDLE NAME>\nDate of Birth
+    const dobIndex = cleanedLines.findIndex((line) => /DATE OF BIRTH/i.test(normalizeForMatch(line)));
+    if (dobIndex > 1) {
+      const window = cleanedLines.slice(Math.max(0, dobIndex - 4), dobIndex);
+      const nameTokens = window.filter((line) => {
+        if (isLikelyLabelLineForVotersId(line)) return false;
+        if (/\d/.test(line)) return false;
+        if (line.includes(',')) return false; // avoid city/province like "LIPA CITY, BATANGAS"
+        const upper = normalizeForMatch(line);
+        if (upper.includes('CITY') || upper.includes('BARANGAY') || upper.includes('PROVINCE')) return false;
+        return /^[A-Za-z][A-Za-z\s.'-]{1,40}$/.test(line);
+      });
+
+      if (nameTokens.length >= 2) {
+        // First token is usually surname, second is given name.
+        lastName = lastName || sanitizePersonName(nameTokens[0]);
+        firstName = firstName || sanitizePersonName(nameTokens[1]);
+      }
+    }
+  }
+
+  if (!firstName || !lastName) {
+    const nameLine = cleanedLines.find((line) => {
+      if (isLikelyLabelLineForVotersId(line)) return false;
+      if (/\d/.test(line)) return false;
+      if (line.includes(',')) return false; // avoid location lines "CITY, PROVINCE"
+      const upper = normalizeForMatch(line);
+      if (upper.includes('CITY') || upper.includes('BARANGAY') || upper.includes('PROVINCE')) return false;
+      const words = line.split(/\s+/).filter(Boolean);
+      return words.length >= 2 && words.length <= 5 && /[A-Za-z]{3,}/.test(line);
+    });
+    if (nameLine) {
+      const parsed = parseNameValue(sanitizePersonName(nameLine));
+      firstName = firstName || parsed.firstName || '';
+      lastName = lastName || parsed.lastName || '';
+    }
+  }
+
+  const birthday = extractBirthdayFromLines(cleanedLines);
+
+  let address =
+    extractAfterLabel(cleanedLines, ['ADDRESS', 'RESIDENCE', 'RESIDENTIAL ADDRESS']) ||
+    findValueAfterAnyLabel(cleanedLines, ['ADDRESS', 'RESIDENCE', 'RESIDENTIAL ADDRESS']);
+
+  // Voter's ID often has location header like "LIPA CITY, BATANGAS".
+  const cityProvinceHeader =
+    cleanedLines.find((line) => /[A-Za-z]{2,}\s+CITY\s*,\s*[A-Za-z]{2,}/i.test(line)) || '';
+
+  if (!address) {
+    const candidate = cleanedLines.find((line) => {
+      if (isLikelyLabelLineForVotersId(line)) return false;
+      if (!/[A-Za-z]{3,}/.test(line)) return false;
+      return (
+        line.includes(',') ||
+        /BRGY|BARANGAY|CITY|MUNICIPALITY|PROVINCE/i.test(line)
+      );
+    });
+    address = candidate || '';
+  }
+
+  // If address was only barangay (e.g., "MALITLIT"), enrich it from nearby lines.
+  // Example OCR:
+  // - "Address ."
+  // - "MALITLIT"
+  // - "MALITLIT LIPA CITY"
+  // - "LIPA CITY, BATANGAS"
+  const lineAfterAddressLabel = (() => {
+    const idx = findLabelIndex(cleanedLines, ['ADDRESS']);
+    if (idx >= 0 && idx + 1 < cleanedLines.length) {
+      return cleanField(cleanedLines[idx + 1]);
+    }
+    return '';
+  })();
+  const barangayFromLine = lineAfterAddressLabel || address;
+  const barangayCityLine =
+    cleanedLines.find((line) => {
+      const upper = normalizeForMatch(line);
+      if (!upper.includes('CITY')) return false;
+      if (line.includes(',')) return false;
+      if (isLikelyLabelLineForVotersId(line)) return false;
+      return /[A-Za-z]{3,}/.test(line);
+    }) || '';
+
+  // Canonicalize to avoid duplicates like:
+  // "MALITLIT, MALITLIT LIPA CITY, LIPA CITY, BATANGAS"
+  let votersBarangay = cleanField(barangayFromLine)
+    .replace(/\b(BRGY\.?|BARANGAY)\b/gi, '')
+    .trim();
+  let votersCity = '';
+  let votersProvince = '';
+
+  if (barangayCityLine) {
+    const normalized = cleanField(barangayCityLine).replace(/\b(PHL|PHILIPPINES)\b/gi, '').trim();
+    const words = normalized.split(/\s+/).filter(Boolean);
+    const cityIdx = words.findIndex((w) => /^CITY$/i.test(w));
+    if (cityIdx > 0) {
+      votersCity = normalizeCityMunicipalityText(`${words[cityIdx - 1]} CITY`);
+      if (!votersBarangay) {
+        votersBarangay = words.slice(0, cityIdx - 1).join(' ').trim();
+      }
+    }
+  }
+
+  if (cityProvinceHeader) {
+    const parts = cityProvinceHeader.split(',').map((p) => cleanField(p)).filter(Boolean);
+    if (!votersCity && parts[0]) {
+      votersCity = normalizeCityMunicipalityText(parts[0]);
+    }
+    if (parts[1]) {
+      votersProvince = normalizeAddressToken(parts[1].replace(/\b(PHL|PHILIPPINES)\b/gi, '').trim());
+    }
+  }
+
+  const composedAddressParts: string[] = [];
+  if (votersBarangay) composedAddressParts.push(votersBarangay);
+  if (votersCity) composedAddressParts.push(votersCity);
+  if (votersProvince) composedAddressParts.push(votersProvince);
+
+  const composedAddress = [...new Set(composedAddressParts.filter(Boolean))].join(', ');
+  if (composedAddress) {
+    address = composedAddress;
+  }
+
+  const parsedAddress = parseAddressComponents(address);
+
+  return {
+    firstName,
+    lastName,
+    birthday,
+    address,
+    addressHouseNo: parsedAddress.addressHouseNo || '',
+    addressStreet: parsedAddress.addressStreet || '',
+    addressBarangay: parsedAddress.addressBarangay || '',
+    addressCityMunicipality: parsedAddress.addressCityMunicipality || '',
+    addressProvince: parsedAddress.addressProvince || '',
+    addressRegion: parsedAddress.addressRegion || '',
+  };
+}
+
 /**
  * Parse generic name format: "LASTNAME, FIRSTNAME" or "FIRSTNAME LASTNAME"
  */
@@ -1132,7 +1633,7 @@ function normalizeBirthdayToIso(raw: string): string {
     return `${y}-${mo}-${d}`;
   }
 
-  // Month name formats: "JUNE 19, 2004", "FEBRUARY 18, 2003"
+  // Month name formats: "JUNE 19, 2004", "FEBRUARY 18, 2003", "OCTOBER 23. 1963"
   // Includes common OCR typo "FEPRUARY".
   const monthMap: Record<string, string> = {
     JAN: '01', JANUARY: '01',
@@ -1149,7 +1650,7 @@ function normalizeBirthdayToIso(raw: string): string {
     DEC: '12', DECEMBER: '12',
   };
 
-  const monthName = value.match(/\b([A-Za-z]{3,10})\s+([0-3]?\d)\s*,\s*((19|20)\d{2})\b/);
+  const monthName = value.match(/\b([A-Za-z]{3,10})\s+([0-3]?\d)\s*[,.]\s*((19|20)\d{2})\b/);
   if (monthName) {
     const monKey = normalizeForMatch(monthName[1]);
     const mo = monthMap[monKey];
@@ -1656,6 +2157,19 @@ function parseGenericID(lines: string[]): Partial<ParsedIDData> {
         }
       }
     }
+
+    // Performance short-circuit:
+    // once core fields are all captured, stop scanning remaining lines.
+    if (
+      firstName &&
+      lastName &&
+      birthday &&
+      addressBarangay &&
+      addressCityMunicipality &&
+      addressProvince
+    ) {
+      break;
+    }
   }
 
   // Build generic address from parts if structured extraction worked
@@ -1712,134 +2226,211 @@ function parseGenericID(lines: string[]): Partial<ParsedIDData> {
  * Routes to appropriate parser based on ID type detection
  */
 export function parseIDText(rawOcrText: string): ParsedIDData {
-  console.log('\n\n========== ID PARSING STARTED ==========\n');
-  
-  // STEP 1: Detect ID type
-  const detectionResult = detectIdType(rawOcrText);
-  console.log(`\n📋 Detected ID Type: ${detectionResult.type} (${detectionResult.confidence})`);
-  
-  // STEP 2: Prepare for parsing - split into lines
-  const lines = rawOcrText.trim().split('\n').map(l => l.trim());
-  console.log(`\n📋 Text split into ${lines.length} lines`);
-  
-  // STEP 3: Route to parser based on detected ID type
-  const normalizedRaw = normalizeForMatch(rawOcrText);
-  const looksLikePhilSys =
-    normalizedRaw.includes('PHILIPPINE NATIONAL ID') ||
-    normalizedRaw.includes('PAMBANSANG') ||
-    normalizedRaw.includes('PAGKAKAKILAN') ||
-    (normalizedRaw.includes('GIVEN NAMES') && normalizedRaw.includes('DATE OF BIRTH'));
+  const originalConsoleLog = console.log;
+  if (!OCR_PARSER_VERBOSE_LOGS) {
+    console.log = () => {};
+  }
 
-  const usePhilSysParser = detectionResult.type === 'philsys' || looksLikePhilSys;
-  let parserResult: Partial<ParsedIDData>;
-  if (usePhilSysParser) {
-    const philsysResult = parsePhilSysID(lines);
-    const needsFallback = !philsysResult.firstName || !philsysResult.lastName || !philsysResult.address;
+  try {
+    console.log('\n\n========== ID PARSING STARTED ==========\n');
+    
+    // STEP 1: Detect ID type
+    const detectionResult = detectIdType(rawOcrText);
+    console.log(`\n📋 Detected ID Type: ${detectionResult.type} (${detectionResult.confidence})`);
+    
+    // STEP 2: Prepare for parsing - split into lines
+    const lines = rawOcrText.trim().split('\n').map(l => l.trim());
+    console.log(`\n📋 Text split into ${lines.length} lines`);
+    
+    // STEP 3: Route to parser based on detected ID type
+    const normalizedRaw = normalizeForMatch(rawOcrText);
+    const looksLikePhilSys =
+      normalizedRaw.includes('PHILIPPINE NATIONAL ID') ||
+      normalizedRaw.includes('PAMBANSANG') ||
+      normalizedRaw.includes('PAGKAKAKILAN') ||
+      (normalizedRaw.includes('GIVEN NAMES') && normalizedRaw.includes('DATE OF BIRTH'));
+    const looksLikeUmid =
+      normalizedRaw.includes('UNIFIED MULTI-PURPOSE ID') ||
+      (normalizedRaw.includes('UNIFIED') && normalizedRaw.includes('MULTI-PURPOSE') && normalizedRaw.includes('ID'));
+    const looksLikeSenior =
+      normalizedRaw.includes('OFFICE FOR SENIOR') ||
+      normalizedRaw.includes('SENIOR CITIZENS AFFAIRS') ||
+      normalizedRaw.includes('DATE OF BIRTH / AGE');
+    const looksLikeVoters =
+      normalizedRaw.includes('COMELEC') ||
+      normalizedRaw.includes('COMMISSION ON ELECTIONS') ||
+      (normalizedRaw.includes('VOTER') && normalizedRaw.includes('ADDRESS'));
 
-    if (needsFallback) {
-      console.log('[PhilSys] Incomplete labeled extraction. Running generic fallback parser...');
-      const genericResult = parseGenericID(lines);
+    const usePhilSysParser = detectionResult.type === 'philsys' || looksLikePhilSys;
+    const useUmidParser = detectionResult.type === 'umid' || looksLikeUmid;
+    const useSeniorParser = detectionResult.type === 'senior_citizen' || looksLikeSenior;
+    const useVotersParser = detectionResult.type === 'voters' || looksLikeVoters;
+    let parserResult: Partial<ParsedIDData>;
+    if (usePhilSysParser) {
+      const philsysResult = parsePhilSysID(lines);
+      const needsFallback = !philsysResult.firstName || !philsysResult.lastName || !philsysResult.address;
+
+      if (needsFallback) {
+        console.log('[PhilSys] Incomplete labeled extraction. Running generic fallback parser...');
+        const genericResult = parseGenericID(lines);
+        parserResult = {
+          ...genericResult,
+          ...philsysResult,
+          // For PhilSys, do not allow generic name fallback because generic parser
+          // can misread header text as names. Keep names from PhilSys labeled parser only.
+          firstName: philsysResult.firstName || '',
+          lastName: philsysResult.lastName || '',
+          birthday: philsysResult.birthday || genericResult.birthday || '',
+          address: philsysResult.address || genericResult.address || '',
+          addressHouseNo: philsysResult.addressHouseNo || genericResult.addressHouseNo || '',
+          addressStreet: philsysResult.addressStreet || genericResult.addressStreet || '',
+          addressBarangay: philsysResult.addressBarangay || genericResult.addressBarangay || '',
+          addressCityMunicipality: philsysResult.addressCityMunicipality || genericResult.addressCityMunicipality || '',
+          addressProvince: philsysResult.addressProvince || genericResult.addressProvince || '',
+          addressRegion: philsysResult.addressRegion || genericResult.addressRegion || '',
+        };
+      } else {
+        parserResult = philsysResult;
+      }
+    } else if (useUmidParser) {
+      const umidResult = parseUmidID(lines);
+      const needsFallback = !umidResult.firstName || !umidResult.lastName || !umidResult.address || !umidResult.birthday;
+      const genericResult = needsFallback ? parseGenericID(lines) : null;
       parserResult = {
-        ...genericResult,
-        ...philsysResult,
-        // For PhilSys, do not allow generic name fallback because generic parser
-        // can misread header text as names. Keep names from PhilSys labeled parser only.
-        firstName: philsysResult.firstName || '',
-        lastName: philsysResult.lastName || '',
-        birthday: philsysResult.birthday || genericResult.birthday || '',
-        address: philsysResult.address || genericResult.address || '',
-        addressHouseNo: philsysResult.addressHouseNo || genericResult.addressHouseNo || '',
-        addressStreet: philsysResult.addressStreet || genericResult.addressStreet || '',
-        addressBarangay: philsysResult.addressBarangay || genericResult.addressBarangay || '',
-        addressCityMunicipality: philsysResult.addressCityMunicipality || genericResult.addressCityMunicipality || '',
-        addressProvince: philsysResult.addressProvince || genericResult.addressProvince || '',
-        addressRegion: philsysResult.addressRegion || genericResult.addressRegion || '',
+        ...(genericResult || {}),
+        ...umidResult,
+        firstName: umidResult.firstName || genericResult?.firstName || '',
+        lastName: umidResult.lastName || genericResult?.lastName || '',
+        birthday: umidResult.birthday || genericResult?.birthday || '',
+        address: umidResult.address || genericResult?.address || '',
+        addressHouseNo: umidResult.addressHouseNo || genericResult?.addressHouseNo || '',
+        addressStreet: umidResult.addressStreet || genericResult?.addressStreet || '',
+        addressBarangay: umidResult.addressBarangay || genericResult?.addressBarangay || '',
+        addressCityMunicipality: umidResult.addressCityMunicipality || genericResult?.addressCityMunicipality || '',
+        addressProvince: umidResult.addressProvince || genericResult?.addressProvince || '',
+        addressRegion: umidResult.addressRegion || genericResult?.addressRegion || '',
+      };
+    } else if (useSeniorParser) {
+      const seniorResult = parseSeniorCitizenID(lines);
+      const needsFallback = !seniorResult.firstName || !seniorResult.lastName || !seniorResult.address;
+      const genericResult = needsFallback ? parseGenericID(lines) : null;
+      parserResult = {
+        ...(genericResult || {}),
+        ...seniorResult,
+        firstName: seniorResult.firstName || genericResult?.firstName || '',
+        lastName: seniorResult.lastName || genericResult?.lastName || '',
+        birthday: seniorResult.birthday || genericResult?.birthday || '',
+        address: seniorResult.address || genericResult?.address || '',
+        addressHouseNo: seniorResult.addressHouseNo || genericResult?.addressHouseNo || '',
+        addressStreet: seniorResult.addressStreet || genericResult?.addressStreet || '',
+        addressBarangay: seniorResult.addressBarangay || genericResult?.addressBarangay || '',
+        addressCityMunicipality: seniorResult.addressCityMunicipality || genericResult?.addressCityMunicipality || '',
+        addressProvince: seniorResult.addressProvince || genericResult?.addressProvince || '',
+        addressRegion: seniorResult.addressRegion || genericResult?.addressRegion || '',
+      };
+    } else if (useVotersParser) {
+      const votersResult = parseVotersID(lines);
+      const needsFallback = !votersResult.firstName || !votersResult.lastName || !votersResult.address;
+      const genericResult = needsFallback ? parseGenericID(lines) : null;
+      parserResult = {
+        ...(genericResult || {}),
+        ...votersResult,
+        firstName: votersResult.firstName || genericResult?.firstName || '',
+        lastName: votersResult.lastName || genericResult?.lastName || '',
+        birthday: votersResult.birthday || genericResult?.birthday || '',
+        address: votersResult.address || genericResult?.address || '',
+        addressHouseNo: votersResult.addressHouseNo || genericResult?.addressHouseNo || '',
+        addressStreet: votersResult.addressStreet || genericResult?.addressStreet || '',
+        addressBarangay: votersResult.addressBarangay || genericResult?.addressBarangay || '',
+        addressCityMunicipality: votersResult.addressCityMunicipality || genericResult?.addressCityMunicipality || '',
+        addressProvince: votersResult.addressProvince || genericResult?.addressProvince || '',
+        addressRegion: votersResult.addressRegion || genericResult?.addressRegion || '',
       };
     } else {
-      parserResult = philsysResult;
+      parserResult = parseGenericID(lines);
     }
-  } else {
-    parserResult = parseGenericID(lines);
-  }
-  
-  // STEP 4: Use individual address components from parseGenericID
-  // parseGenericID already extracts and auto-populates region, so use those components directly
-  // Fallback to parseAddressComponents only if individual components are empty
-  let addressComponents = {
-    addressHouseNo: parserResult.addressHouseNo || '',
-    addressStreet: parserResult.addressStreet || '',
-    addressBarangay: parserResult.addressBarangay || '',
-    addressCityMunicipality: parserResult.addressCityMunicipality || '',
-    addressProvince: parserResult.addressProvince || '',
-    addressRegion: parserResult.addressRegion || '',
-  };
+    
+    // STEP 4: Use individual address components from parseGenericID
+    // parseGenericID already extracts and auto-populates region, so use those components directly
+    // Fallback to parseAddressComponents only if individual components are empty
+    let addressComponents = {
+      addressHouseNo: parserResult.addressHouseNo || '',
+      addressStreet: parserResult.addressStreet || '',
+      addressBarangay: parserResult.addressBarangay || '',
+      addressCityMunicipality: parserResult.addressCityMunicipality || '',
+      addressProvince: parserResult.addressProvince || '',
+      addressRegion: parserResult.addressRegion || '',
+    };
 
-  const provinceLooksCombined =
-    !!addressComponents.addressProvince &&
-    (addressComponents.addressProvince.includes(',') ||
-      /\d/.test(addressComponents.addressProvince) ||
-      normalizeForMatch(addressComponents.addressProvince).includes('PHILIPPINES'));
-  
-  // Only parse combined address string if no individual components were extracted
-  if (
-    !addressComponents.addressBarangay ||
-    !addressComponents.addressCityMunicipality ||
-    !addressComponents.addressProvince ||
-    provinceLooksCombined
-  ) {
-    const fallback = parseAddressComponents(parserResult.address || '');
-    addressComponents.addressHouseNo = fallback.addressHouseNo || addressComponents.addressHouseNo || '';
-    addressComponents.addressStreet = fallback.addressStreet || addressComponents.addressStreet || '';
-    addressComponents.addressBarangay = fallback.addressBarangay || addressComponents.addressBarangay || '';
-    addressComponents.addressCityMunicipality = fallback.addressCityMunicipality || addressComponents.addressCityMunicipality || '';
-    addressComponents.addressProvince = fallback.addressProvince || addressComponents.addressProvince || '';
-    addressComponents.addressRegion = fallback.addressRegion || addressComponents.addressRegion || '';
+    const provinceLooksCombined =
+      !!addressComponents.addressProvince &&
+      (addressComponents.addressProvince.includes(',') ||
+        /\d/.test(addressComponents.addressProvince) ||
+        normalizeForMatch(addressComponents.addressProvince).includes('PHILIPPINES'));
+    
+    // Only parse combined address string if no individual components were extracted
+    if (
+      !addressComponents.addressBarangay ||
+      !addressComponents.addressCityMunicipality ||
+      !addressComponents.addressProvince ||
+      provinceLooksCombined
+    ) {
+      const fallback = parseAddressComponents(parserResult.address || '');
+      addressComponents.addressHouseNo = fallback.addressHouseNo || addressComponents.addressHouseNo || '';
+      addressComponents.addressStreet = fallback.addressStreet || addressComponents.addressStreet || '';
+      addressComponents.addressBarangay = fallback.addressBarangay || addressComponents.addressBarangay || '';
+      addressComponents.addressCityMunicipality = fallback.addressCityMunicipality || addressComponents.addressCityMunicipality || '';
+      addressComponents.addressProvince = fallback.addressProvince || addressComponents.addressProvince || '';
+      addressComponents.addressRegion = fallback.addressRegion || addressComponents.addressRegion || '';
+    }
+    
+    // STEP 5: Determine confidence
+    const extractedFields: string[] = [];
+    if (parserResult.firstName) extractedFields.push('firstName');
+    if (parserResult.lastName) extractedFields.push('lastName');
+    if (parserResult.birthday) extractedFields.push('birthday');
+    if (parserResult.address) extractedFields.push('address');
+    
+    let confidence: 'high' | 'medium' | 'low' = 'low';
+    if (extractedFields.length === 3 && detectionResult.confidence === 'high') {
+      confidence = 'high';
+    } else if (extractedFields.length >= 2) {
+      confidence = 'medium';
+    } else {
+      confidence = 'low';
+    }
+    
+    console.log(`\n✅ Parsing complete:`);
+    console.log(`   firstName: "${parserResult.firstName}"`);
+    console.log(`   lastName: "${parserResult.lastName}"`);
+    console.log(`   birthday: "${parserResult.birthday || ''}"`);
+    console.log(`   address: "${parserResult.address}"`);
+    console.log(`   addressComponents extracted from parseGenericID:`);
+    console.log(`     addressBarangay: "${addressComponents.addressBarangay}"`);
+    console.log(`     addressCityMunicipality: "${addressComponents.addressCityMunicipality}"`);
+    console.log(`     addressProvince: "${addressComponents.addressProvince}"`);
+    console.log(`     addressRegion: "${addressComponents.addressRegion}"`);
+    console.log(`   confidence: ${confidence}`);
+    console.log('========== ID PARSING COMPLETED ==========\n\n');
+    
+    return {
+      firstName: normalizeOCRName(parserResult.firstName || ''),
+      lastName: normalizeOCRName(parserResult.lastName || ''),
+      birthday: parserResult.birthday || '',
+      address: parserResult.address || '',
+      addressHouseNo: addressComponents.addressHouseNo,
+      addressStreet: addressComponents.addressStreet,
+      addressBarangay: addressComponents.addressBarangay,
+      addressCityMunicipality: addressComponents.addressCityMunicipality,
+      addressProvince: addressComponents.addressProvince,
+      addressRegion: addressComponents.addressRegion,
+      confidence,
+      detectedIdType: detectionResult.type,
+      rawOcrText,
+    };
+  } finally {
+    console.log = originalConsoleLog;
   }
-  
-  // STEP 5: Determine confidence
-  const extractedFields: string[] = [];
-  if (parserResult.firstName) extractedFields.push('firstName');
-  if (parserResult.lastName) extractedFields.push('lastName');
-  if (parserResult.birthday) extractedFields.push('birthday');
-  if (parserResult.address) extractedFields.push('address');
-  
-  let confidence: 'high' | 'medium' | 'low' = 'low';
-  if (extractedFields.length === 3 && detectionResult.confidence === 'high') {
-    confidence = 'high';
-  } else if (extractedFields.length >= 2) {
-    confidence = 'medium';
-  } else {
-    confidence = 'low';
-  }
-  
-  console.log(`\n✅ Parsing complete:`);
-  console.log(`   firstName: "${parserResult.firstName}"`);
-  console.log(`   lastName: "${parserResult.lastName}"`);
-  console.log(`   birthday: "${parserResult.birthday || ''}"`);
-  console.log(`   address: "${parserResult.address}"`);
-  console.log(`   addressComponents extracted from parseGenericID:`);
-  console.log(`     addressBarangay: "${addressComponents.addressBarangay}"`);
-  console.log(`     addressCityMunicipality: "${addressComponents.addressCityMunicipality}"`);
-  console.log(`     addressProvince: "${addressComponents.addressProvince}"`);
-  console.log(`     addressRegion: "${addressComponents.addressRegion}"`);
-  console.log(`   confidence: ${confidence}`);
-  console.log('========== ID PARSING COMPLETED ==========\n\n');
-  
-  return {
-    firstName: normalizeOCRName(parserResult.firstName || ''),
-    lastName: normalizeOCRName(parserResult.lastName || ''),
-    birthday: parserResult.birthday || '',
-    address: parserResult.address || '',
-    addressHouseNo: addressComponents.addressHouseNo,
-    addressStreet: addressComponents.addressStreet,
-    addressBarangay: addressComponents.addressBarangay,
-    addressCityMunicipality: addressComponents.addressCityMunicipality,
-    addressProvince: addressComponents.addressProvince,
-    addressRegion: addressComponents.addressRegion,
-    confidence,
-    detectedIdType: detectionResult.type,
-    rawOcrText,
-  };
 }
 
 /**
