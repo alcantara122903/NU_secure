@@ -98,10 +98,16 @@ export async function printVisitorThermalTicket(
     throw new Error('Missing QR data for printing.');
   }
 
-  const printer = await RN.connectPrinter(deviceAddress, {
-    type: 'BLUETOOTH',
-    encoding: 'UTF-8',
-  });
+  await initThermalPrinter();
+  const devices = await RN.getDeviceList();
+  const printer = devices.find((d) => d.getAddress() === deviceAddress);
+  if (!printer) {
+    throw new Error(
+      `Printer not found for address ${deviceAddress}. Pair it in Bluetooth settings and try again.`,
+    );
+  }
+  // connectPrinter() alone often leaves JS `connected` false; instance connect() sets it after native link.
+  await printer.connect({ type: 'BLUETOOTH', encoding: 'UTF-8' });
 
   try {
     await printer.printText('VISITOR QR PASS\n', {
@@ -136,9 +142,13 @@ export async function printVisitorThermalTicket(
     }
   } finally {
     try {
-      await RN.disconnectPrinter();
+      await printer.disconnect();
     } catch {
-      // ignore
+      try {
+        await RN.disconnectPrinter();
+      } catch {
+        // ignore
+      }
     }
   }
 }

@@ -20,9 +20,9 @@ import * as Sharing from 'expo-sharing';
 import { useEffect, useState } from 'react';
 import {
   Alert,
-  FlatList,
   Modal,
   Platform,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -474,11 +474,14 @@ export default function QRTicketScreen() {
             <Text style={[styles.btModalTitle, { color: colors.text }]}>
               Choose Bluetooth printer
             </Text>
-            <FlatList
-              data={btPrinterRows}
-              keyExtractor={(item) => item.address}
-              renderItem={({ item }) => (
+            <ScrollView
+              style={styles.btPrinterScroll}
+              keyboardShouldPersistTaps="handled"
+              nestedScrollEnabled
+            >
+              {btPrinterRows.map((item) => (
                 <TouchableOpacity
+                  key={item.address}
                   style={[styles.btPrinterRow, { borderColor: colors.border }]}
                   onPress={() => void handleSelectBluetoothPrinter(item.address)}
                 >
@@ -491,8 +494,8 @@ export default function QRTicketScreen() {
                   </View>
                   <MaterialIcons name="chevron-right" size={22} color={colors.textSecondary} />
                 </TouchableOpacity>
-              )}
-            />
+              ))}
+            </ScrollView>
             <TouchableOpacity
               style={[styles.btModalCancel, { backgroundColor: colors.border }]}
               onPress={() => setBtPrinterModalVisible(false)}
@@ -537,6 +540,9 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     marginBottom: 12,
+  },
+  btPrinterScroll: {
+    maxHeight: 280,
   },
   btPrinterRow: {
     flexDirection: 'row',
