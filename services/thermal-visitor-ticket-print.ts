@@ -7,6 +7,17 @@ import type { ThermalPrinterDevice } from 'react-native-thermal-pos-printer';
 
 const LINE_WIDTH = 24;
 
+/** Two-line header; size kept moderate so glyphs fit the printer’s line box. */
+const SIZE_VISITOR_QR_PASS_HEADER = 18;
+const QR_MODULE_SIZE = 5;
+
+/** ESC/POS: taller line spacing (dots) while header prints — avoids bottom of letters clipping. */
+const ESC_SET_LINE_SPACING = (n: number): number[] => [0x1b, 0x33, n & 0xff];
+/** ESC/POS: restore default line spacing (1/6"). */
+const ESC_DEFAULT_LINE_SPACING = [0x1b, 0x32];
+/** Raise if letters still clip; lower if header has too much gap (many printers: 40–56). */
+const HEADER_LINE_SPACING_DOTS = 0x2c;
+
 const DEV_BUILD_MESSAGE =
   'Bluetooth thermal printing needs a development build with native code (not Expo Go). Run: npx expo prebuild then npx expo run:android, or use an EAS development build.';
 
@@ -109,13 +120,22 @@ export async function printVisitorThermalTicket(
   // connectPrinter() alone often leaves JS `connected` false; instance connect() sets it after native link.
   await printer.connect({ type: 'BLUETOOTH', encoding: 'UTF-8' });
 
+  const headerOpts = {
+    align: 'CENTER' as const,
+    bold: true,
+    size: SIZE_VISITOR_QR_PASS_HEADER,
+  };
+
   try {
-    await printer.printText('VISITOR QR PASS\n', {
-      align: 'CENTER',
-      bold: true,
-      size: 24,
-    });
+    await printer.sendRawCommand(ESC_SET_LINE_SPACING(HEADER_LINE_SPACING_DOTS));
+    await printer.printText('VISITOR QR\n', headerOpts);
+    await RN.newLine(1);
+    await printer.printText('PASS\n', headerOpts);
+    await RN.newLine(1);
+    await printer.sendRawCommand(ESC_DEFAULT_LINE_SPACING);
+
     await printer.printText(`${dashedLine()}\n`, { align: 'CENTER' });
+    await RN.newLine(1);
 
     await printer.printText('NAME:\n', { bold: true });
     await printer.printText(`${name}\n\n`);
@@ -125,15 +145,15 @@ export async function printVisitorThermalTicket(
 
     await printer.printQRCode(qr, {
       align: 'CENTER',
-      size: 6,
+      size: QR_MODULE_SIZE,
       errorLevel: 'M',
     });
-    await RN.newLine(2);
+    await RN.newLine(3);
 
     await printer.printText('Please present this ticket.\n', {
       align: 'CENTER',
     });
-    await RN.newLine(2);
+    await RN.newLine(3);
 
     try {
       await printer.cutPaper();
