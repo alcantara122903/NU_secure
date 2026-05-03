@@ -14,7 +14,7 @@ import Svg, { Circle, Path } from 'react-native-svg';
 import {
   ArrowLeft,
   ArrowRight,
-  BriefcaseBusiness,
+  Briefcase,
   Building2,
   CalendarDays,
   CheckSquare,
@@ -33,6 +33,12 @@ export type VisitorInformationStepProps = {
   badgeIconLetter: string;
   badgeLabel: string;
   showDestinationOffice: boolean;
+  /** When true (contractor), destination matches Contact No. row + list below; when false/omitted (normal visitor), single bordered panel with list inside. */
+  compactDestinationOffice?: boolean;
+  /** When true, show a text field instead of office checklists (contractor typed destination). */
+  destinationOfficeFreeText?: boolean;
+  destinationOfficeTypedValue?: string;
+  onChangeDestinationOfficeTyped?: (v: string) => void;
   showReasonForVisit: boolean;
   offices: string[];
   selectedOffices: string[];
@@ -143,6 +149,8 @@ function FormInput({
   icon,
   keyboardType = 'default',
   multiline = false,
+  maxLength,
+  digitsOnly = false,
 }: {
   label: string;
   placeholder: string;
@@ -151,7 +159,18 @@ function FormInput({
   icon: React.ReactNode;
   keyboardType?: 'default' | 'phone-pad' | 'number-pad' | 'email-address';
   multiline?: boolean;
+  maxLength?: number;
+  /** Strip non-digits before applying maxLength (use with phone-pad). */
+  digitsOnly?: boolean;
 }) {
+  const handleChange = (text: string) => {
+    let next = digitsOnly ? text.replace(/\D/g, '') : text;
+    if (maxLength != null) {
+      next = next.slice(0, maxLength);
+    }
+    onChangeText(next);
+  };
+
   return (
     <View style={styles.inputOuter}>
       <Text style={styles.inputLabel}>{label}</Text>
@@ -159,13 +178,14 @@ function FormInput({
         <View style={styles.inputIconBox}>{icon}</View>
         <TextInput
           value={value}
-          onChangeText={onChangeText}
+          onChangeText={handleChange}
           placeholder={placeholder}
           placeholderTextColor="#7A8290"
           style={[styles.textInput, multiline && styles.textInputMultiline]}
           keyboardType={keyboardType}
           multiline={multiline}
           textAlignVertical={multiline ? 'top' : 'center'}
+          maxLength={digitsOnly && maxLength != null ? undefined : maxLength}
         />
       </View>
     </View>
@@ -177,6 +197,10 @@ export function VisitorInformationStepScreen(props: VisitorInformationStepProps)
     badgeIconLetter,
     badgeLabel,
     showDestinationOffice,
+    compactDestinationOffice = false,
+    destinationOfficeFreeText = false,
+    destinationOfficeTypedValue = '',
+    onChangeDestinationOfficeTyped,
     showReasonForVisit,
     offices,
     selectedOffices,
@@ -342,42 +366,122 @@ export function VisitorInformationStepScreen(props: VisitorInformationStepProps)
                 onChangeText={onChangeContactNo}
                 icon={<Phone size={17} color="#0648A8" strokeWidth={2.2} />}
                 keyboardType="phone-pad"
+                maxLength={11}
+                digitsOnly
               />
             </View>
           </View>
 
           {showDestinationOffice ? (
             <View style={styles.card}>
-              <SectionHeader
-                icon={
-                  <BriefcaseBusiness size={15} color="#FFFFFF" strokeWidth={2.2} />
-                }
-                title="Destination Office"
-              />
-              <View style={styles.officeGrid}>
-                {offices.map((office) => {
-                  const isSelected = selectedOffices.includes(office);
-                  return (
-                    <TouchableOpacity
-                      key={office}
-                      activeOpacity={0.82}
-                      style={[styles.officeOption, isSelected && styles.officeOptionSelected]}
-                      onPress={() => onToggleOffice(office)}
-                    >
-                      {isSelected ? (
-                        <CheckSquare size={18} color="#0648A8" strokeWidth={2.4} />
-                      ) : (
-                        <Square size={18} color="#0648A8" strokeWidth={2.2} />
-                      )}
+              {destinationOfficeFreeText ? (
+                <FormInput
+                  label="Destination Office"
+                  placeholder="e.g., HR Office, Registrar's Office"
+                  value={destinationOfficeTypedValue}
+                  onChangeText={onChangeDestinationOfficeTyped ?? (() => {})}
+                  icon={<Building2 size={17} color="#0648A8" strokeWidth={2.2} />}
+                />
+              ) : (
+              <View style={styles.inputOuter}>
+                {compactDestinationOffice ? (
+                  <>
+                    <Text style={styles.inputLabel}>Destination Office</Text>
+                    <View style={styles.inputBox}>
+                      <View style={styles.inputIconBox}>
+                        <Building2 size={17} color="#0648A8" strokeWidth={2.2} />
+                      </View>
                       <Text
-                        style={[styles.officeText, isSelected && styles.officeTextSelected]}
+                        style={[
+                          styles.destinationOfficeFieldText,
+                          selectedOffices.length === 0 &&
+                            styles.destinationOfficeFieldPlaceholder,
+                        ]}
+                        numberOfLines={2}
                       >
-                        {office}
+                        {selectedOffices.length === 0
+                          ? 'e.g., Administration, Engineering'
+                          : selectedOffices.join(', ')}
                       </Text>
-                    </TouchableOpacity>
-                  );
-                })}
+                    </View>
+                    <View style={styles.destinationOfficeListWrap}>
+                      <View style={styles.destinationOfficeList}>
+                        {offices.map((office) => {
+                          const isSelected = selectedOffices.includes(office);
+                          return (
+                            <TouchableOpacity
+                              key={office}
+                              activeOpacity={0.82}
+                              style={[
+                                styles.destinationOfficeRow,
+                                isSelected && styles.destinationOfficeRowSelected,
+                              ]}
+                              onPress={() => onToggleOffice(office)}
+                            >
+                              {isSelected ? (
+                                <CheckSquare size={18} color="#0648A8" strokeWidth={2.4} />
+                              ) : (
+                                <Square size={18} color="#0648A8" strokeWidth={2.2} />
+                              )}
+                              <Text
+                                style={[
+                                  styles.destinationOfficeRowText,
+                                  isSelected && styles.destinationOfficeRowTextSelected,
+                                ]}
+                              >
+                                {office}
+                              </Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+                    </View>
+                  </>
+                ) : (
+                  <>
+                    <View style={styles.destinationOfficeGridHeader}>
+                      <View style={styles.destinationOfficeGridIconCircle}>
+                        <Briefcase size={14} color="#FFFFFF" strokeWidth={2.4} />
+                      </View>
+                      <Text style={styles.destinationOfficeGridTitle}>
+                        Destination Office
+                      </Text>
+                    </View>
+                    <View style={styles.destinationOfficeGrid}>
+                      {offices.map((office) => {
+                        const isSelected = selectedOffices.includes(office);
+                        return (
+                          <TouchableOpacity
+                            key={office}
+                            activeOpacity={0.82}
+                            style={[
+                              styles.destinationOfficeGridCell,
+                              isSelected && styles.destinationOfficeGridCellSelected,
+                            ]}
+                            onPress={() => onToggleOffice(office)}
+                          >
+                            {isSelected ? (
+                              <CheckSquare size={18} color="#0648A8" strokeWidth={2.4} />
+                            ) : (
+                              <Square size={18} color="#0648A8" strokeWidth={2.2} />
+                            )}
+                            <Text
+                              style={[
+                                styles.destinationOfficeGridCellText,
+                                isSelected && styles.destinationOfficeGridCellTextSelected,
+                              ]}
+                              numberOfLines={3}
+                            >
+                              {office}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </>
+                )}
               </View>
+              )}
             </View>
           ) : null}
 
@@ -633,39 +737,103 @@ const styles = StyleSheet.create({
     minHeight: 56,
     paddingTop: 2,
   },
-  officeGrid: {
+  destinationOfficeGridHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  destinationOfficeGridIconCircle: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#0648A8',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  destinationOfficeGridTitle: {
+    flex: 1,
+    color: '#0F2847',
+    fontSize: 16,
+    fontWeight: '800',
+    letterSpacing: -0.2,
+  },
+  destinationOfficeGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
-    rowGap: 8,
   },
-  officeOption: {
+  destinationOfficeGridCell: {
     width: '48%',
-    minHeight: 44,
+    marginBottom: 10,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: '#D1D9E4',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 10,
+    borderRadius: 11,
     paddingHorizontal: 10,
-    paddingVertical: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
+    paddingVertical: 11,
   },
-  officeOptionSelected: {
+  destinationOfficeGridCellSelected: {
     borderColor: '#0648A8',
     backgroundColor: '#EAF2FF',
   },
-  officeText: {
+  destinationOfficeGridCellText: {
     flex: 1,
-    color: '#111827',
-    fontSize: 12,
-    fontWeight: '500',
     marginLeft: 8,
-    lineHeight: 16,
+    color: '#111827',
+    fontSize: 13,
+    fontWeight: '600',
+    lineHeight: 18,
   },
-  officeTextSelected: {
+  destinationOfficeGridCellTextSelected: {
     color: '#0648A8',
-    fontWeight: '800',
+  },
+  destinationOfficeFieldText: {
+    flex: 1,
+    minWidth: 0,
+    color: '#111827',
+    fontSize: 14,
+    fontWeight: '500',
+    paddingVertical: 0,
+    lineHeight: 20,
+  },
+  destinationOfficeFieldPlaceholder: {
+    color: '#7A8290',
+  },
+  destinationOfficeListWrap: {
+    marginTop: 10,
+  },
+  destinationOfficeList: {
+    gap: 6,
+  },
+  destinationOfficeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 40,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    borderRadius: 10,
+    backgroundColor: '#FAFBFC',
+    borderWidth: 1,
+    borderColor: '#E8ECF2',
+  },
+  destinationOfficeRowSelected: {
+    borderColor: '#0648A8',
+    backgroundColor: '#EAF2FF',
+  },
+  destinationOfficeRowText: {
+    flex: 1,
+    marginLeft: 8,
+    color: '#111827',
+    fontSize: 13,
+    fontWeight: '500',
+    lineHeight: 18,
+  },
+  destinationOfficeRowTextSelected: {
+    color: '#0648A8',
+    fontWeight: '700',
   },
   controlBox: {
     minHeight: 52,

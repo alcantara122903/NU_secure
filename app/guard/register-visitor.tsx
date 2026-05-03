@@ -199,10 +199,8 @@ export default function RegisterVisitorScreen() {
   const [contractorRegion, setContractorRegion] = useState("");
   const [contractorContactNo, setContractorContactNo] = useState("");
   const [contractorBirthday, setContractorBirthday] = useState("");
-  const [
-    selectedContractorDestinationOffices,
-    setSelectedContractorDestinationOffices,
-  ] = useState<string[]>([]);
+  const [contractorDestinationOffice, setContractorDestinationOffice] =
+    useState("");
   const [contractorPassNumber, setContractorPassNumber] = useState("");
   const [contractorControlNumber, setContractorControlNumber] = useState("");
   const [contractorReasonForVisit, setContractorReasonForVisit] = useState("");
@@ -369,22 +367,20 @@ export default function RegisterVisitorScreen() {
       if (visitorType === "enrollee") {
         handleCreateEnrollee();
       } else if (visitorType === "contractor") {
-        // Get office IDs for the selected destination offices
-        const selectedOfficeIds = await officeService.getOfficeIds(
-          selectedContractorDestinationOffices,
+        const resolvedOffice = await officeService.resolveOfficeFromUserInput(
+          contractorDestinationOffice,
         );
 
-        if (selectedOfficeIds.length === 0) {
+        if (!resolvedOffice) {
           Alert.alert(
-            "Error",
-            "Could not find selected offices. Please try again.",
+            "Office not found",
+            `We could not match "${contractorDestinationOffice.trim()}" to a single campus office. Type the office name as listed (e.g., ${offices.slice(0, 3).join(", ")}).`,
           );
           setIsCreatingEnrollee(false);
           return;
         }
 
-        // Use the first selected office as primary destination
-        const primaryOfficeId = selectedOfficeIds[0];
+        const primaryOfficeId = resolvedOffice.office_id;
 
         // Register contractor and generate QR pass
         const result = await contractorService.registerAndGenerateQRPass({
@@ -407,13 +403,13 @@ export default function RegisterVisitorScreen() {
         });
 
         if (result) {
-          const route = selectedContractorDestinationOffices.map(
-            (name, index) => ({
-              order: index + 1,
-              office_id: selectedOfficeIds[index] ?? index,
-              office_name: name,
-            }),
-          );
+          const route = [
+            {
+              order: 1,
+              office_id: resolvedOffice.office_id,
+              office_name: resolvedOffice.office_name,
+            },
+          ];
           const qrPayload = buildQRTicketPayloadV1({
             kind: "contractor",
             qr_token: result.qrToken,
@@ -438,12 +434,12 @@ export default function RegisterVisitorScreen() {
             address: `${contractorHouseNo} ${contractorStreet}, ${contractorBarangay}, ${contractorCity}, ${contractorProvince}`,
             purpose: contractorReasonForVisit,
             facePhotoUri: photoPreview ?? undefined,
-            offices: selectedContractorDestinationOffices.map(
-              (name, index) => ({
-                id: selectedOfficeIds[index] || index,
-                name,
-              }),
-            ),
+            offices: [
+              {
+                id: resolvedOffice.office_id,
+                name: resolvedOffice.office_name,
+              },
+            ],
           };
 
           router.replace({
@@ -1158,16 +1154,13 @@ export default function RegisterVisitorScreen() {
           badgeIconLetter="C"
           badgeLabel="Contractor"
           showDestinationOffice
+          destinationOfficeFreeText
+          destinationOfficeTypedValue={contractorDestinationOffice}
+          onChangeDestinationOfficeTyped={setContractorDestinationOffice}
           showReasonForVisit
-          offices={offices}
-          selectedOffices={selectedContractorDestinationOffices}
-          onToggleOffice={(office) => {
-            setSelectedContractorDestinationOffices((prev) =>
-              prev.includes(office)
-                ? prev.filter((o) => o !== office)
-                : [...prev, office],
-            );
-          }}
+          offices={[]}
+          selectedOffices={[]}
+          onToggleOffice={() => {}}
           onBack={handleBack}
           onContinue={() => {
             const missingFields: string[] = [];
@@ -1176,7 +1169,7 @@ export default function RegisterVisitorScreen() {
             if (!contractorBirthday?.trim()) missingFields.push("Birthday");
             if (!contractorPassNumber?.trim())
               missingFields.push("ID Pass Number");
-            if (selectedContractorDestinationOffices.length === 0) {
+            if (!contractorDestinationOffice?.trim()) {
               missingFields.push("Destination Office");
             }
             if (!contractorReasonForVisit?.trim())
