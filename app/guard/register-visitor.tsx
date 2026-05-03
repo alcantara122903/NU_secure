@@ -201,6 +201,7 @@ export default function RegisterVisitorScreen() {
   const [contractorBirthday, setContractorBirthday] = useState("");
   const [contractorDestinationOffice, setContractorDestinationOffice] =
     useState("");
+  const [contractorContactPerson, setContractorContactPerson] = useState("");
   const [contractorPassNumber, setContractorPassNumber] = useState("");
   const [contractorControlNumber, setContractorControlNumber] = useState("");
   const [contractorReasonForVisit, setContractorReasonForVisit] = useState("");
@@ -258,6 +259,10 @@ export default function RegisterVisitorScreen() {
     today.setHours(0, 0, 0, 0);
     return parsed <= today;
   };
+
+  const CONTACT_NO_DIGITS = 11;
+  const isValidContactNo11 = (value: string): boolean =>
+    value.replace(/\D/g, "").length === CONTACT_NO_DIGITS;
 
   const offices = [
     "Admissions Office",
@@ -398,6 +403,7 @@ export default function RegisterVisitorScreen() {
           idPassNumber: contractorPassNumber,
           controlNumber: contractorControlNumber,
           reasonForVisit: contractorReasonForVisit,
+          contactPerson: contractorContactPerson.trim(),
           facePhotoUri: capturedFacePhoto || undefined,
           idPhotoUri: capturedIdPhoto || undefined,
         });
@@ -785,6 +791,7 @@ export default function RegisterVisitorScreen() {
     if (!extractedLastName?.trim()) missingFields.push("Last Name");
     if (!enrolleeBirthday?.trim()) missingFields.push("Birthday");
     if (!passNumber?.trim()) missingFields.push("ID Pass Number");
+    if (!contactNumber?.trim()) missingFields.push("Contact No.");
     // At least one address component should be filled
     const hasAddressData =
       addressHouseNo?.trim() ||
@@ -808,6 +815,15 @@ export default function RegisterVisitorScreen() {
       Alert.alert(
         "Invalid Birthday",
         "Please select a valid date of birth. It cannot be in the future.",
+      );
+      return;
+    }
+
+    if (!isValidContactNo11(contactNumber)) {
+      Alert.alert(
+        "Invalid Contact No.",
+        "Enter exactly 11 digits (e.g. 09171234567).",
+        [{ text: "OK" }],
       );
       return;
     }
@@ -1100,6 +1116,7 @@ export default function RegisterVisitorScreen() {
             if (!extractedLastName?.trim()) missingFields.push("Last Name");
             if (!enrolleeBirthday?.trim()) missingFields.push("Birthday");
             if (!passNumber?.trim()) missingFields.push("ID Pass Number");
+            if (!contactNumber?.trim()) missingFields.push("Contact No.");
             if (missingFields.length > 0) {
               Alert.alert(
                 "⚠️ Missing Required Information",
@@ -1112,6 +1129,14 @@ export default function RegisterVisitorScreen() {
               Alert.alert(
                 "Invalid Birthday",
                 "Please select a valid date of birth. It cannot be in the future.",
+              );
+              return;
+            }
+            if (!isValidContactNo11(contactNumber)) {
+              Alert.alert(
+                "Invalid Contact No.",
+                "Enter exactly 11 digits (e.g. 09171234567).",
+                [{ text: "OK" }],
               );
               return;
             }
@@ -1157,6 +1182,8 @@ export default function RegisterVisitorScreen() {
           destinationOfficeFreeText
           destinationOfficeTypedValue={contractorDestinationOffice}
           onChangeDestinationOfficeTyped={setContractorDestinationOffice}
+          contactPerson={contractorContactPerson}
+          onChangeContactPerson={setContractorContactPerson}
           showReasonForVisit
           offices={[]}
           selectedOffices={[]}
@@ -1172,8 +1199,13 @@ export default function RegisterVisitorScreen() {
             if (!contractorDestinationOffice?.trim()) {
               missingFields.push("Destination Office");
             }
+            if (!contractorContactPerson?.trim()) {
+              missingFields.push("Contact Person");
+            }
             if (!contractorReasonForVisit?.trim())
               missingFields.push("Reason For Visit");
+            if (!contractorContactNo?.trim())
+              missingFields.push("Contact No.");
             if (missingFields.length > 0) {
               Alert.alert(
                 "⚠️ Missing Required Information",
@@ -1186,6 +1218,14 @@ export default function RegisterVisitorScreen() {
               Alert.alert(
                 "Invalid Birthday",
                 "Please select a valid date of birth. It cannot be in the future.",
+              );
+              return;
+            }
+            if (!isValidContactNo11(contractorContactNo)) {
+              Alert.alert(
+                "Invalid Contact No.",
+                "Enter exactly 11 digits (e.g. 09171234567).",
+                [{ text: "OK" }],
               );
               return;
             }
@@ -1255,6 +1295,14 @@ export default function RegisterVisitorScreen() {
             Alert.alert(
               "Invalid Birthday",
               "Please select a valid date of birth. It cannot be in the future.",
+            );
+            return;
+          }
+          if (!isValidContactNo11(normalVisitorContactNo)) {
+            Alert.alert(
+              "Invalid Contact No.",
+              "Enter exactly 11 digits (e.g. 09171234567).",
+              [{ text: "OK" }],
             );
             return;
           }

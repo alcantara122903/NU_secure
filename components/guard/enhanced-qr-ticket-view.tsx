@@ -155,6 +155,7 @@ export function EnhancedQrTicketView({
         style={styles.container}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        removeClippedSubviews={false}
       >
         <View style={styles.floatingSheet}>
           <View style={styles.successBanner}>
@@ -225,7 +226,9 @@ export function EnhancedQrTicketView({
                   <View style={[styles.qrCorner, styles.qrCornerTopRight]} />
                   <View style={[styles.qrCorner, styles.qrCornerBottomLeft]} />
                   <View style={[styles.qrCorner, styles.qrCornerBottomRight]} />
-                  <QRCode value={qrValue} size={qrSize} />
+                  <View collapsable={false} style={styles.qrSvgHost}>
+                    <QRCode key={qrValue} value={qrValue} size={qrSize} />
+                  </View>
                 </View>
 
                 <Text style={styles.qrFooter}>at each stop on your route.</Text>
@@ -469,7 +472,8 @@ const styles = StyleSheet.create({
   ticketCard: {
     backgroundColor: '#F8FAFC',
     borderRadius: 16,
-    overflow: 'hidden',
+    /* overflow visible: avoids Fabric + react-native-svg QR clipping bugs ("child already has a parent") */
+    overflow: 'visible',
     marginBottom: 12,
     borderWidth: 1,
     borderColor: '#E8EDF3',
@@ -563,6 +567,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
+  },
+  qrSvgHost: {
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   qrCorner: {
     position: 'absolute',

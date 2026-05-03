@@ -36,6 +36,8 @@ export const contractorService = {
     idPassNumber: string;
     controlNumber?: string;
     reasonForVisit: string;
+    /** Saved to contractor.contact_person (on-site / destination contact). */
+    contactPerson?: string;
   }): Promise<{
     qrToken: string;
     passNumber: string;
@@ -53,6 +55,7 @@ export const contractorService = {
       console.log(`   idPassNumber: ${contractorData.idPassNumber}`);
       console.log(`   reasonForVisit: ${contractorData.reasonForVisit}`);
       console.log(`   destinationOfficeId: ${contractorData.destinationOfficeId}`);
+      console.log(`   contactPerson: ${contractorData.contactPerson?.trim() || '(derive from visitor name)'}`);
 
       // STEP 1: Create address record if components provided
       let addressId: number | null = null;
@@ -221,48 +224,8 @@ export const contractorService = {
 
       console.log(`✅ Visitor created: visitor_id=${visitorId}, pass=${passNumber}, control=${controlNumber}`);
 
-      // STEP 3: Create contractor record
-      console.log('\n📝 STEP 3: Creating contractor record...');
-      let contractorData_db: any = null;
-      let contractorError: any = null;
-
-      for (let attempt = 1; attempt <= 3; attempt++) {
-        console.log(`   Attempt ${attempt}/3...`);
-
-        const result = await supabase
-          .from('contractor')
-          .insert([{
-            visitor_id: visitorId,
-            company_name: contractorData.idPassNumber, // Store as company_name for now
-            purpose: contractorData.reasonForVisit,
-            status: 'active',
-            created_at: new Date().toISOString(),
-          }])
-          .select('contractor_id');
-
-        contractorData_db = result.data;
-        contractorError = result.error;
-
-        if (!contractorError) {
-          console.log(`   ✅ Insert succeeded on attempt ${attempt}`);
-          break;
-        }
-
-        console.log(`   ⚠️ Attempt ${attempt} failed: ${contractorError.message}`);
-        if (attempt < 3) {
-          await new Promise(resolve => setTimeout(resolve, 500 * attempt));
-        }
-      }
-
-      if (contractorError) {
-        console.error('❌ Contractor creation failed:', contractorError.message);
-        console.warn('⚠️ Visitor record was created, but contractor details could not be saved');
-      }
-
-      const contractorId = contractorData_db?.[0]?.contractor_id || 0;
-
-      // STEP 4: Create visit record
-      console.log('\n📝 STEP 4: Creating visit record...');
+      // STEP 3: Create visit record (contractor row needs visit_id)
+      console.log('\n📝 STEP 3: Creating visit record...');
       const qrToken = generateQRToken();
 
       let visitData: any = null;
@@ -327,6 +290,49 @@ export const contractorService = {
       }
 
       console.log(`✅ Visit created: visit_id=${visitId}, qr_token=${qrToken}`);
+
+      // STEP 4: Contractor table — contractor_id, contact_person, visit_id only
+      console.log('\n📝 STEP 4: Creating contractor record...');
+      const contactPerson =
+        (contractorData.contactPerson && contractorData.contactPerson.trim()) ||
+        `${contractorData.firstName} ${contractorData.lastName}`.trim() ||
+        contractorData.contactNo?.trim() ||
+        '—';
+
+      let contractorData_db: any = null;
+      let contractorError: any = null;
+
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        console.log(`   Attempt ${attempt}/3...`);
+
+        const result = await supabase
+          .from('contractor')
+          .insert([{
+            visit_id: visitId,
+            contact_person: contactPerson,
+          }])
+          .select('contractor_id');
+
+        contractorData_db = result.data;
+        contractorError = result.error;
+
+        if (!contractorError) {
+          console.log(`   ✅ Insert succeeded on attempt ${attempt}`);
+          break;
+        }
+
+        console.log(`   ⚠️ Attempt ${attempt} failed: ${contractorError.message}`);
+        if (attempt < 3) {
+          await new Promise(resolve => setTimeout(resolve, 500 * attempt));
+        }
+      }
+
+      if (contractorError) {
+        console.error('❌ Contractor creation failed:', contractorError.message);
+        console.warn('⚠️ Visit was created, but contractor link row could not be saved');
+      }
+
+      const contractorId = contractorData_db?.[0]?.contractor_id || 0;
 
       // STEP 5: Create office expectation for destination office
       console.log('\n📝 STEP 5: Creating office expectation...');

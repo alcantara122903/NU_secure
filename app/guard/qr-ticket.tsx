@@ -20,6 +20,7 @@ import * as Sharing from 'expo-sharing';
 import { useEffect, useState } from 'react';
 import {
   Alert,
+  InteractionManager,
   Modal,
   Platform,
   ScrollView,
@@ -70,6 +71,8 @@ export default function QRTicketScreen() {
   const [isDownloading, setIsDownloading] = useState(false);
   const [btPrinterModalVisible, setBtPrinterModalVisible] = useState(false);
   const [btPrinterRows, setBtPrinterRows] = useState<{ name: string; address: string }[]>([]);
+  /** Defer heavy native views (SVG QR) until after stack transition — avoids Fabric addViewAt crashes on Android. */
+  const [nativeContentReady, setNativeContentReady] = useState(false);
 
   const paramsDataKey = typeof params.data === 'string' ? params.data : params.data?.[0] ?? '';
 
@@ -90,6 +93,20 @@ export default function QRTicketScreen() {
     }
   }, [paramsDataKey, router]);
 
+  useEffect(() => {
+    if (!ticketData) {
+      setNativeContentReady(false);
+      return;
+    }
+    setNativeContentReady(false);
+    const task = InteractionManager.runAfterInteractions(() => {
+      setNativeContentReady(true);
+    });
+    return () => {
+      task.cancel?.();
+    };
+  }, [ticketData]);
+
   const runThermalPrintToAddress = async (address: string) => {
     if (!ticketData) return;
     const visitorName = `${ticketData.firstName} ${ticketData.lastName}`.trim();
@@ -103,6 +120,7 @@ export default function QRTicketScreen() {
       fullName: visitorName,
       destination,
       qrData,
+      controlNumber: String(ticketData.controlNumber ?? '').trim() || '—',
     });
     Alert.alert('Success', 'Ticket sent to the thermal printer.');
   };
@@ -410,7 +428,7 @@ export default function QRTicketScreen() {
     }
   };
 
-  if (isGenerating || !ticketData) {
+  if (isGenerating || !ticketData || !nativeContentReady) {
     return (
       <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
         <View style={styles.centerContent}>
@@ -478,6 +496,7 @@ export default function QRTicketScreen() {
               style={styles.btPrinterScroll}
               keyboardShouldPersistTaps="handled"
               nestedScrollEnabled
+              removeClippedSubviews={false}
             >
               {btPrinterRows.map((item) => (
                 <TouchableOpacity

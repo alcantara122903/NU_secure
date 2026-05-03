@@ -39,6 +39,9 @@ export type VisitorInformationStepProps = {
   destinationOfficeFreeText?: boolean;
   destinationOfficeTypedValue?: string;
   onChangeDestinationOfficeTyped?: (v: string) => void;
+  /** Shown below destination when set (e.g. contractor on-site contact). */
+  contactPerson?: string;
+  onChangeContactPerson?: (v: string) => void;
   showReasonForVisit: boolean;
   offices: string[];
   selectedOffices: string[];
@@ -201,6 +204,8 @@ export function VisitorInformationStepScreen(props: VisitorInformationStepProps)
     destinationOfficeFreeText = false,
     destinationOfficeTypedValue = '',
     onChangeDestinationOfficeTyped,
+    contactPerson = '',
+    onChangeContactPerson,
     showReasonForVisit,
     offices,
     selectedOffices,
@@ -361,7 +366,7 @@ export function VisitorInformationStepScreen(props: VisitorInformationStepProps)
               />
               <FormInput
                 label="Contact No."
-                placeholder="e.g., 09xxxxxxxxx"
+                placeholder="11 digits (e.g. 09171234567)"
                 value={contactNo}
                 onChangeText={onChangeContactNo}
                 icon={<Phone size={17} color="#0648A8" strokeWidth={2.2} />}
@@ -375,13 +380,24 @@ export function VisitorInformationStepScreen(props: VisitorInformationStepProps)
           {showDestinationOffice ? (
             <View style={styles.card}>
               {destinationOfficeFreeText ? (
-                <FormInput
-                  label="Destination Office"
-                  placeholder="e.g., HR Office, Registrar's Office"
-                  value={destinationOfficeTypedValue}
-                  onChangeText={onChangeDestinationOfficeTyped ?? (() => {})}
-                  icon={<Building2 size={17} color="#0648A8" strokeWidth={2.2} />}
-                />
+                <>
+                  <FormInput
+                    label="Destination Office"
+                    placeholder="e.g., HR Office, Registrar's Office"
+                    value={destinationOfficeTypedValue}
+                    onChangeText={onChangeDestinationOfficeTyped ?? (() => {})}
+                    icon={<Building2 size={17} color="#0648A8" strokeWidth={2.2} />}
+                  />
+                  {onChangeContactPerson != null ? (
+                    <FormInput
+                      label="Contact Person"
+                      placeholder="Person to contact at the destination office"
+                      value={contactPerson}
+                      onChangeText={onChangeContactPerson}
+                      icon={<User size={17} color="#0648A8" strokeWidth={2.2} />}
+                    />
+                  ) : null}
+                </>
               ) : (
               <View style={styles.inputOuter}>
                 {compactDestinationOffice ? (

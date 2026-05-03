@@ -7,16 +7,26 @@ import type { ThermalPrinterDevice } from 'react-native-thermal-pos-printer';
 
 const LINE_WIDTH = 24;
 
-/** Two-line header; size kept moderate so glyphs fit the printer’s line box. */
-const SIZE_VISITOR_QR_PASS_HEADER = 18;
-const QR_MODULE_SIZE = 5;
+/** Single-line header; keep ≤12 for compact width on 58mm (24 columns). */
+const SIZE_VISITOR_QR_PASS_HEADER = 12;
+/** Footer: numeric size ≤12 is smallest GS scale bucket; use font B for smaller glyphs. */
+const SIZE_FOOTER_NOTE = 12;
+const SIZE_CONTROL_TEXT = 12;
+/** Value lines use Font B (~24 cols on 58mm). */
+const CONTROL_NO_WRAP_WIDTH = 24;
+/** Blank lines after footer before cut — room to pull ticket without tearing through text. */
+const FOOTER_FEED_LINES_BEFORE_CUT = 4;
+/** Smaller QR = less native feed + tighter gap before CONTROL NO. Raise to 5 if scan reliability drops. */
+const QR_MODULE_SIZE = 4;
 
 /** ESC/POS: taller line spacing (dots) while header prints — avoids bottom of letters clipping. */
 const ESC_SET_LINE_SPACING = (n: number): number[] => [0x1b, 0x33, n & 0xff];
 /** ESC/POS: restore default line spacing (1/6"). */
 const ESC_DEFAULT_LINE_SPACING = [0x1b, 0x32];
 /** Raise if letters still clip; lower if header has too much gap (many printers: 40–56). */
-const HEADER_LINE_SPACING_DOTS = 0x2c;
+const HEADER_LINE_SPACING_DOTS = 0x24;
+/** Tall line box after QR for CONTROL + value + footer — default spacing clips bottom of glyphs on many 58mm units. */
+const CONTROL_BLOCK_LINE_SPACING_DOTS = 0x4e;
 
 const DEV_BUILD_MESSAGE =
   'Bluetooth thermal printing needs a development build with native code (not Expo Go). Run: npx expo prebuild then npx expo run:android, or use an EAS development build.';
@@ -91,6 +101,45 @@ export interface VisitorThermalTicketPayload {
   destination: string;
   /** Same string encoded in the on-screen QR */
   qrData: string;
+  /** Printed centered below the QR image (optional — defaults to em dash) */
+  controlNumber?: string;
+}
+
+function strField(value: string | undefined | null): string {
+  return String(value ?? '').trim();
+}
+
+/**
+ * Wrap control number for 58mm: prefer breaks after `- _ . /` or space near line end
+ * so digits/letters are not split awkwardly; otherwise hard-wrap at maxChars.
+ */
+function wrapControlNumberLines(text: string | undefined | null, maxChars: number): string[] {
+  const t = strField(text) || '—';
+  if (maxChars < 8) return [t];
+  if (t.length <= maxChars) return [t];
+
+  const lines: string[] = [];
+  let rest = t;
+  const delimRe = /[-_.\s/]/;
+
+  while (rest.length > maxChars) {
+    const head = rest.slice(0, maxChars);
+    let cut = maxChars;
+    const searchFrom = Math.max(4, maxChars - 10);
+    for (let i = maxChars - 1; i >= searchFrom; i--) {
+      if (delimRe.test(head[i])) {
+        cut = i + 1;
+        break;
+      }
+    }
+    lines.push(rest.slice(0, cut).trimEnd());
+    rest = rest.slice(cut).trimStart();
+    if (!rest) break;
+  }
+  if (rest.length > 0) {
+    lines.push(rest);
+  }
+  return lines.length > 0 ? lines : ['—'];
 }
 
 /**
@@ -99,12 +148,16 @@ export interface VisitorThermalTicketPayload {
  */
 export async function printVisitorThermalTicket(
   deviceAddress: string,
-  payload: VisitorThermalTicketPayload,
+  payload: VisitorThermalTicketPayload | null | undefined,
 ): Promise<void> {
+  if (payload == null || typeof payload !== 'object') {
+    throw new Error('Invalid ticket payload for printing.');
+  }
   const RN = getPosPrinter();
-  const name = payload.fullName.trim() || '—';
-  const destination = payload.destination.trim() || '—';
-  const qr = payload.qrData.trim();
+  const name = strField(payload.fullName) || '—';
+  const destination = strField(payload.destination) || '—';
+  const controlNo = strField(payload.controlNumber) || '—';
+  const qr = strField(payload.qrData);
   if (!qr) {
     throw new Error('Missing QR data for printing.');
   }
@@ -128,32 +181,56 @@ export async function printVisitorThermalTicket(
 
   try {
     await printer.sendRawCommand(ESC_SET_LINE_SPACING(HEADER_LINE_SPACING_DOTS));
-    await printer.printText('VISITOR QR\n', headerOpts);
-    await RN.newLine(1);
-    await printer.printText('PASS\n', headerOpts);
+    await printer.printText('VISITOR QR PASS\n', headerOpts);
     await RN.newLine(1);
     await printer.sendRawCommand(ESC_DEFAULT_LINE_SPACING);
 
     await printer.printText(`${dashedLine()}\n`, { align: 'CENTER' });
-    await RN.newLine(1);
 
     await printer.printText('NAME:\n', { bold: true });
-    await printer.printText(`${name}\n\n`);
+    await printer.printText(`${name}\n`);
 
     await printer.printText('DESTINATION:\n', { bold: true });
-    await printer.printText(`${destination}\n\n`);
+    await printer.printText(`${destination}\n`);
 
     await printer.printQRCode(qr, {
       align: 'CENTER',
       size: QR_MODULE_SIZE,
       errorLevel: 'M',
     });
-    await RN.newLine(3);
+    /*
+     * After QR: restore default, then use *taller* per-line spacing for the control block.
+     * Default/narrow spacing here often clips the bottom of characters (descenders / next line overlap).
+     */
+    await printer.sendRawCommand(ESC_DEFAULT_LINE_SPACING);
+    await printer.sendRawCommand(ESC_SET_LINE_SPACING(CONTROL_BLOCK_LINE_SPACING_DOTS));
 
-    await printer.printText('Please present this ticket.\n', {
+    await printer.printText('CONTROL NO.\n', {
       align: 'CENTER',
+      bold: true,
+      size: SIZE_CONTROL_TEXT,
+      fontType: 'A',
     });
-    await RN.newLine(3);
+    await RN.newLine(1);
+
+    const controlValueOpts = {
+      align: 'CENTER' as const,
+      size: SIZE_CONTROL_TEXT,
+      fontType: 'B' as const,
+      bold: false,
+    };
+    for (const segment of wrapControlNumberLines(controlNo, CONTROL_NO_WRAP_WIDTH)) {
+      await printer.printText(`${segment}\n`, controlValueOpts);
+    }
+    await RN.newLine(1);
+
+    await printer.printText('Please present ticket.\n', {
+      align: 'CENTER',
+      size: SIZE_FOOTER_NOTE,
+      fontType: 'B',
+    });
+    await printer.sendRawCommand(ESC_DEFAULT_LINE_SPACING);
+    await RN.newLine(FOOTER_FEED_LINES_BEFORE_CUT);
 
     try {
       await printer.cutPaper();

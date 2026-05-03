@@ -7,10 +7,11 @@ import { officeExitApiService } from '@/services/office-exit-api';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useRouter } from 'expo-router';
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
+  InteractionManager,
   Platform,
   ScrollView,
   StatusBar,
@@ -132,7 +133,15 @@ export default function ExitScanScreen() {
   const [permission, requestPermission] = useCameraPermissions();
   const [scanState, setScanState] = useState<GuardScanState>({ type: 'idle' });
   const [scannedInfo, setScannedInfo] = useState<ScannedInfo | null>(null);
+  /** Unmount CameraView before mounting the result tree — avoids Fabric addViewAt crashes on Android. */
+  const [exitCameraSuppressed, setExitCameraSuppressed] = useState(false);
   const isProcessingRef = useRef(false);
+
+  useEffect(() => {
+    if (!scannedInfo) {
+      setExitCameraSuppressed(false);
+    }
+  }, [scannedInfo]);
 
   const handleBack = () => {
     if (scannedInfo) {
@@ -178,7 +187,7 @@ export default function ExitScanScreen() {
         return;
       }
 
-      setScannedInfo({
+      const info: ScannedInfo = {
         name: result.data.visitorName,
         destinationOffice: result.data.destinationOffice,
         destinationText: result.data.destinationText ?? null,
@@ -194,8 +203,26 @@ export default function ExitScanScreen() {
         controlNumber: result.data.controlNumber || undefined,
         message: result.message || 'Visitor exit processed successfully.',
         pictureUrl: result.data.visitorPhotoUrl ?? null,
+      };
+
+      const showResult = () => {
+        setScannedInfo(info);
+        setScanState({ type: 'idle' });
+        setExitCameraSuppressed(false);
+      };
+
+      setExitCameraSuppressed(true);
+      InteractionManager.runAfterInteractions(() => {
+        if (Platform.OS === 'android') {
+          requestAnimationFrame(() => {
+            setTimeout(showResult, 450);
+          });
+        } else {
+          requestAnimationFrame(() => {
+            requestAnimationFrame(showResult);
+          });
+        }
       });
-      setScanState({ type: 'idle' });
     } catch (err) {
       console.error('❌ Error scanning QR:', err);
       setScanState({
@@ -208,6 +235,7 @@ export default function ExitScanScreen() {
   };
 
   const resetScanner = () => {
+    setExitCameraSuppressed(false);
     setScanState({ type: 'idle' });
   };
 
@@ -257,6 +285,7 @@ export default function ExitScanScreen() {
           style={styles.gh_container}
           contentContainerStyle={styles.gh_scroll_content}
           showsVerticalScrollIndicator={false}
+          removeClippedSubviews={false}
         >
           <View style={styles.gh_main_wrapper}>
             <View style={styles.gh_success_card}>
@@ -423,20 +452,27 @@ export default function ExitScanScreen() {
         <View style={styles.exitHeaderRightSpace} />
       </View>
 
-      <ScrollView
-        style={styles.exitContainer}
-        contentContainerStyle={styles.exitScrollContent}
-        showsVerticalScrollIndicator={false}
-      >
+      {/*
+        CameraView must NOT be inside ScrollView on Android Fabric — causes
+        "child already has a parent" / ReactClippingViewManager when swapping UI after scan.
+      */}
+      <View style={styles.exitMainColumn}>
         <View style={styles.exitScannerCard}>
-          <View style={styles.exitCameraBox}>
-            {hasCameraPermission ? (
+          <View style={styles.exitCameraBox} collapsable={false}>
+            {hasCameraPermission && !exitCameraSuppressed ? (
               <CameraView
                 style={StyleSheet.absoluteFillObject}
                 facing="back"
                 barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
                 onBarcodeScanned={scanState.type === 'idle' ? (event) => void onQRCodeScanned(event.data) : undefined}
               />
+            ) : hasCameraPermission && exitCameraSuppressed ? (
+              <View
+                style={[StyleSheet.absoluteFillObject, styles.exitCameraPlaceholder]}
+                pointerEvents="none"
+              >
+                <ActivityIndicator size="large" color="#FFFFFF" />
+              </View>
             ) : (
               <View style={styles.exitPermissionBox}>
                 <MaterialIcons name="camera-alt" size={56} color="#FFFFFF" />
@@ -492,34 +528,42 @@ export default function ExitScanScreen() {
           </View>
         </View>
 
-        {scanned && (
-          <TouchableOpacity style={styles.exitRescanButton} activeOpacity={0.85} onPress={resetScanner}>
-            <MaterialIcons name="refresh" size={22} color="#064AA5" />
-            <Text style={styles.exitRescanText}>Scan Again</Text>
-          </TouchableOpacity>
-        )}
+        <ScrollView
+          style={styles.exitTipsScroll}
+          contentContainerStyle={styles.exitScrollContent}
+          showsVerticalScrollIndicator={false}
+          removeClippedSubviews={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          {scanned && (
+            <TouchableOpacity style={styles.exitRescanButton} activeOpacity={0.85} onPress={resetScanner}>
+              <MaterialIcons name="refresh" size={22} color="#064AA5" />
+              <Text style={styles.exitRescanText}>Scan Again</Text>
+            </TouchableOpacity>
+          )}
 
-        <View style={styles.exitTipsCard}>
-          <View style={styles.exitTipsHeader}>
-            <View style={styles.exitTipsHeaderIcon}>
-              <MaterialIcons name="lightbulb-outline" size={24} color="#064AA5" />
+          <View style={styles.exitTipsCard}>
+            <View style={styles.exitTipsHeader}>
+              <View style={styles.exitTipsHeaderIcon}>
+                <MaterialIcons name="lightbulb-outline" size={24} color="#064AA5" />
+              </View>
+              <Text style={styles.exitTipsTitle}>How to scan:</Text>
             </View>
-            <Text style={styles.exitTipsTitle}>How to scan:</Text>
-          </View>
-          <TipItem icon="smartphone" text="Hold phone steady and level" />
-          <TipItem icon="qr-code-scanner" text="Position QR code within the frame" />
-          <TipItem icon="access-time" text="Wait for automatic detection" last />
+            <TipItem icon="smartphone" text="Hold phone steady and level" />
+            <TipItem icon="qr-code-scanner" text="Position QR code within the frame" />
+            <TipItem icon="access-time" text="Wait for automatic detection" last />
 
-          <View style={styles.exitNoteBox}>
-            <View style={styles.exitNoteIcon}>
-              <MaterialIcons name="info" size={24} color="#FFFFFF" />
+            <View style={styles.exitNoteBox}>
+              <View style={styles.exitNoteIcon}>
+                <MaterialIcons name="info" size={24} color="#FFFFFF" />
+              </View>
+              <Text style={styles.exitNoteText}>
+                Point the camera at the visitor ticket; exit is recorded when the code is read successfully.
+              </Text>
             </View>
-            <Text style={styles.exitNoteText}>
-              Point the camera at the visitor ticket; exit is recorded when the code is read successfully.
-            </Text>
           </View>
-        </View>
-      </ScrollView>
+        </ScrollView>
+      </View>
     </SafeAreaView>
   );
 }
@@ -841,7 +885,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     borderBottomLeftRadius: 24,
     borderBottomRightRadius: 24,
-    overflow: 'hidden',
+    overflow: 'visible',
     position: 'relative',
   },
   gh_header_bg_icon_left: {
@@ -1127,9 +1171,12 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#F4F7FB',
   },
-  exitContainer: {
+  exitMainColumn: {
     flex: 1,
     backgroundColor: '#F4F7FB',
+  },
+  exitTipsScroll: {
+    flex: 1,
   },
   exitScrollContent: {
     paddingBottom: 24,
@@ -1187,6 +1234,11 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     backgroundColor: '#000000',
     position: 'relative',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  exitCameraPlaceholder: {
+    backgroundColor: '#000000',
     justifyContent: 'center',
     alignItems: 'center',
   },
