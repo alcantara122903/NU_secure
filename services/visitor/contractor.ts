@@ -3,6 +3,7 @@
  * Handles contractor registration with ID verification and QR ticket generation
  */
 
+import { toSupabaseTimestampPh } from '@/lib/supabase-timestamp-ph';
 import type { VisitorRegistrationData } from '@/types/visitor';
 import { addressService, type AddressData } from '../address';
 import { supabase } from '../database/supabase';
@@ -173,7 +174,7 @@ export const contractorService = {
               birthday: contractorData.birthday?.trim() || null,
               address_id: addressId || null,
               visitor_photo_with_id_url: photoUrl || null,
-              created_at: new Date().toISOString(),
+              created_at: toSupabaseTimestampPh(),
             }])
             .select('visitor_id');
 
@@ -243,7 +244,7 @@ export const contractorService = {
             qr_token: qrToken,
             guard_user_id: guardUserId,
             purpose_reason: contractorData.reasonForVisit || null,
-            entry_time: new Date().toISOString(),
+            entry_time: toSupabaseTimestampPh(),
           }])
           .select('visit_id');
 
@@ -344,7 +345,7 @@ export const contractorService = {
           office_id: contractorData.destinationOfficeId,
           expected_order: 1,
           expectation_status_id: 1,
-          created_at: new Date().toISOString(),
+          created_at: toSupabaseTimestampPh(),
         }]);
 
       if (expectationResult.error) {

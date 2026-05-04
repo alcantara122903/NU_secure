@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { toSupabaseTimestampPh } from './manila-timestamp.ts';
 
 type IncomingBody = {
   qrToken?: string;
@@ -582,7 +583,7 @@ Deno.serve(async (req) => {
       : null;
 
     const exitTime = new Date();
-    const entry = new Date(visit.entry_time || exitTime.toISOString());
+    const entry = new Date(visit.entry_time || exitTime);
     const durationMinutes = Math.max(0, Math.floor((exitTime.getTime() - entry.getTime()) / 60000));
 
     const exitStatusId = await resolveStatusId(
@@ -606,7 +607,7 @@ Deno.serve(async (req) => {
     const { error: visitUpdateError } = await supabase
       .from('visit')
       .update({
-        exit_time: exitTime.toISOString(),
+        exit_time: toSupabaseTimestampPh(exitTime),
         duration_minutes: durationMinutes,
         exit_status_id: exitStatusId,
       })
@@ -631,7 +632,7 @@ Deno.serve(async (req) => {
         visit_id: visit.visit_id,
         office_id: officeStaff.office_id,
         scanned_by_user_id: scannedByUserId,
-        scan_time: exitTime.toISOString(),
+        scan_time: toSupabaseTimestampPh(exitTime),
         validation_status_id: validationStatusId,
         remarks: isCorrectDestination
           ? 'Office scan validated: correct destination'
@@ -663,7 +664,7 @@ Deno.serve(async (req) => {
         registeredBy,
         isCorrectDestination,
         destinationStatusLabel,
-        exitTime: exitTime.toISOString(),
+        exitTime: toSupabaseTimestampPh(exitTime),
         durationMinutes,
         exitStatusId,
         officeScanInserted,

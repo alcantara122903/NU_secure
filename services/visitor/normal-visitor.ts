@@ -3,6 +3,7 @@
  * Handles QR ticket generation, database operations, and office scanning validation
  */
 
+import { toSupabaseTimestampPh } from '@/lib/supabase-timestamp-ph';
 import type { VisitorRegistrationData } from '@/types/visitor';
 import { addressService, type AddressData } from '../address';
 import { supabase } from '../database/supabase';
@@ -162,7 +163,7 @@ export const normalVisitorService = {
               birthday: visitorData.birthday?.trim() || null,
               address_id: addressId || null,
               visitor_photo_with_id_url: visitorPhotoUrl || null,
-              created_at: new Date().toISOString(),
+              created_at: toSupabaseTimestampPh(),
             }])
             .select('visitor_id');
 
@@ -239,7 +240,7 @@ export const normalVisitorService = {
             qr_token: qrToken,
             guard_user_id: guardUserId,
             purpose_reason: visitorData.reasonForVisit || null,
-            entry_time: new Date().toISOString(),
+            entry_time: toSupabaseTimestampPh(),
           }])
           .select('visit_id');
 
@@ -296,7 +297,7 @@ export const normalVisitorService = {
         office_id: officeId,
         expected_order: index + 1,
         expectation_status_id: 1,
-        created_at: new Date().toISOString(),
+        created_at: toSupabaseTimestampPh(),
       }));
 
       // Attempt insert with retry logic

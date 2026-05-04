@@ -3,6 +3,7 @@
  * Handles enrollee registration, ID extraction, and status tracking
  */
 
+import { toSupabaseTimestampPh } from '@/lib/supabase-timestamp-ph';
 import type { IDExtractionData, VisitorRegistrationData } from '@/types/visitor';
 import { addressService, type AddressData } from '../address';
 import { supabase } from '../database/supabase';
@@ -312,7 +313,7 @@ export const enrolleeService = {
           control_number: enrolleeData.controlNumber,
           birthday: enrolleeData.birthday?.trim() || null,
           address_id: addressId || null,
-          created_at: new Date().toISOString(),
+          created_at: toSupabaseTimestampPh(),
         };
         
         console.log('   Payload:', JSON.stringify(visitorPayload, null, 2));
@@ -378,7 +379,7 @@ export const enrolleeService = {
         
         const enrolleePayload = {
           visitor_id: visitorData.visitor_id,
-          updated_at: new Date().toISOString(),
+          updated_at: toSupabaseTimestampPh(),
         };
         
         console.log('   Payload:', JSON.stringify(enrolleePayload));
@@ -416,7 +417,7 @@ export const enrolleeService = {
         visit_type_id: 1, // Enrollee visit type
         qr_token: enrolleeData.qrToken,
         guard_user_id: guardUserId,
-        entry_time: new Date().toISOString(),
+        entry_time: toSupabaseTimestampPh(),
       };
       
       console.log('   Payload:', JSON.stringify(visitPayload));
@@ -523,7 +524,7 @@ export const enrolleeService = {
             office_id: oid,
             expected_order: row.step?.step_order ?? index + 1,
             expectation_status_id: 1,
-            created_at: new Date().toISOString(),
+            created_at: toSupabaseTimestampPh(),
           };
         })
         .filter(Boolean) as Record<string, unknown>[];
@@ -930,7 +931,7 @@ export const enrolleeService = {
     try {
       const { error } = await supabase
         .from('visit')
-        .update({ status, updated_at: new Date().toISOString() })
+        .update({ status, updated_at: toSupabaseTimestampPh() })
         .eq('visit_id', visitId);
 
       if (error) {
@@ -1052,7 +1053,7 @@ export const enrolleeService = {
       const { error } = await supabase
         .from('enrollee_progress')
         .update({
-          completed_at: new Date().toISOString(),
+          completed_at: toSupabaseTimestampPh(),
         })
         .eq('progress_id', progressId);
 

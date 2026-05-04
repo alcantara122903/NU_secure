@@ -1,4 +1,5 @@
 import { parseQrTicketRaw } from '@/lib/qr-ticket-payload';
+import { toSupabaseTimestampPh } from '@/lib/supabase-timestamp-ph';
 import { supabase } from '@/services/database/supabase';
 import { resolveValidationStatusId } from '@/services/office-flow/db-status-lookups';
 
@@ -320,7 +321,7 @@ const resolveScanByDatabase = async (payload: ExitScanRequest): Promise<ExitScan
     : null;
 
   const exitTime = new Date();
-  const entryTime = new Date(visit.entry_time || exitTime.toISOString());
+  const entryTime = new Date(visit.entry_time || exitTime);
   const durationMinutes = Math.max(0, Math.floor((exitTime.getTime() - entryTime.getTime()) / 60000));
 
   const { data: exitStatusRows } = await supabase
@@ -341,7 +342,7 @@ const resolveScanByDatabase = async (payload: ExitScanRequest): Promise<ExitScan
   const { error: visitUpdateError } = await supabase
     .from('visit')
     .update({
-      exit_time: exitTime.toISOString(),
+      exit_time: toSupabaseTimestampPh(exitTime),
       duration_minutes: durationMinutes,
       exit_status_id: exitStatusId,
     })
@@ -375,7 +376,7 @@ const resolveScanByDatabase = async (payload: ExitScanRequest): Promise<ExitScan
     visit_id: visit.visit_id,
     office_id: scanOfficeId,
     scanned_by_user_id: payload.scannedByUserId,
-    scan_time: new Date().toISOString(),
+    scan_time: toSupabaseTimestampPh(),
     validation_status_id: validationStatusId,
     remarks: scanRemarks,
   });
@@ -403,7 +404,7 @@ const resolveScanByDatabase = async (payload: ExitScanRequest): Promise<ExitScan
       registeredBy,
       isCorrectDestination,
       destinationStatusLabel,
-      exitTime: exitTime.toISOString(),
+      exitTime: toSupabaseTimestampPh(exitTime),
       durationMinutes,
       exitStatusId,
       exitStatusName: exitStatusName || null,

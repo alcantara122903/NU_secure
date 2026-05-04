@@ -1,3 +1,4 @@
+import { toSupabaseTimestampPh } from '@/lib/supabase-timestamp-ph';
 import { supabase } from '@/services/database/supabase';
 import { resolveActiveVisitFromScanInput } from './active-visit-resolve';
 import { VISIT_TYPE } from './constants';
@@ -225,7 +226,7 @@ export async function processOfficeCheckInScan(req: OfficeCheckInScanRequest): P
   const enrolleeStep = visit.visit_type_id === VISIT_TYPE.ENROLLEE ? await loadEnrolleeStepLabel(visit.visitor_id) : null;
   const purposeReason = visit.visit_type_id === VISIT_TYPE.ENROLLEE ? enrolleeStep || 'Step' : visit.purpose_reason || '(not provided)';
   const validationStatusId = await resolveValidationStatusId({ favorable: authorized });
-  const scanTime = new Date().toISOString();
+  const scanTime = toSupabaseTimestampPh();
   const remarks = authorized
     ? 'Office check-in: authorized (correct destination)'
     : 'Office check-in: unauthorized (wrong destination)';
