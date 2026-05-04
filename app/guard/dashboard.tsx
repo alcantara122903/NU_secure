@@ -1,5 +1,6 @@
 import { authSessionService } from '@/services/auth-session';
 import { supabase } from '@/services/database';
+import { fetchReadyToExitVisitors } from '@/services/guard-alerts-dashboard';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useFocusEffect } from '@react-navigation/native';
 import { useRouter } from 'expo-router';
@@ -90,7 +91,7 @@ export default function DashboardScreen() {
 
   const [guardName, setGuardName] = useState('Guard Demo');
   const [activeVisitors, setActiveVisitors] = useState<number | null>(null);
-  const [activeAlerts] = useState(1);
+  const [readyToExitCount, setReadyToExitCount] = useState(0);
   const [currentTime, setCurrentTime] = useState('');
   const [insidePage, setInsidePage] = useState(1);
   const [insideTypeFilter, setInsideTypeFilter] = useState<InsideType>('all');
@@ -122,11 +123,20 @@ export default function DashboardScreen() {
 
   const loadCurrentlyInside = useCallback(async () => {
     try {
-      const { data: openVisits, error: visitErr } = await supabase
-        .from('visit')
-        .select('visit_id, visitor_id, visit_type_id, entry_time, purpose_reason, destination_text, primary_office_id')
-        .is('exit_time', null)
-        .order('entry_time', { ascending: false });
+      const [{ data: openVisits, error: visitErr }, readyRows] = await Promise.all([
+        supabase
+          .from('visit')
+          .select('visit_id, visitor_id, visit_type_id, entry_time, purpose_reason, destination_text, primary_office_id')
+          .is('exit_time', null)
+          .order('entry_time', { ascending: false }),
+        fetchReadyToExitVisitors().catch((e) => {
+          console.error('Dashboard ready-to-exit:', e);
+          return [] as Awaited<ReturnType<typeof fetchReadyToExitVisitors>>;
+        }),
+      ]);
+
+      const readyVisitIds = new Set(readyRows.map((r) => r.visitId));
+      setReadyToExitCount(readyRows.length);
 
       if (visitErr) {
         console.error('Dashboard currently-inside visits:', visitErr);
@@ -207,7 +217,7 @@ export default function DashboardScreen() {
         const type: Exclude<InsideType, 'all'> =
           visitTypeId === 1 ? 'enrollee' : visitTypeId === 2 ? 'contractor' : 'normal';
         const typeLabel = type === 'enrollee' ? 'Enrollee' : type === 'contractor' ? 'Contractor' : 'Visitor';
-        const status: InsideVisitor['status'] = visitTypeId === 2 ? 'Ready to Exit' : 'Arrived';
+        const status: InsideVisitor['status'] = readyVisitIds.has(Number(v.visit_id)) ? 'Ready to Exit' : 'Arrived';
 
         return {
           id: Number(v.visit_id),
@@ -221,6 +231,9 @@ export default function DashboardScreen() {
       });
 
       setInsideVisitors(formatted);
+    } catch (e) {
+      console.error('Dashboard loadCurrentlyInside', e);
+      setReadyToExitCount(0);
     } finally {
       setIsLoadingInside(false);
     }
@@ -348,11 +361,15 @@ export default function DashboardScreen() {
           >
             <View style={[styles.actionIconBox, styles.actionIconBoxAlert]}>
               <MaterialIcons name="notifications" size={24} color="#0648A8" />
-              {activeAlerts > 0 ? <View style={styles.alertDot} /> : null}
+              {readyToExitCount > 0 ? <View style={styles.alertDot} /> : null}
             </View>
             <View style={styles.actionTextWrapper}>
               <Text style={styles.actionTitle}>Active Alerts</Text>
-              <Text style={styles.actionSubtitle}>{activeAlerts} ready to exit</Text>
+              <Text style={styles.actionSubtitle}>
+                {readyToExitCount === 0
+                  ? 'No visitors ready to exit'
+                  : `${readyToExitCount} ${readyToExitCount === 1 ? 'visitor' : 'visitors'} ready to exit`}
+              </Text>
             </View>
             <View style={styles.chevronCircle}>
               <MaterialIcons name="chevron-right" size={24} color="#FFFFFF" />
