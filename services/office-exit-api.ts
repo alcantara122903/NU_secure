@@ -362,6 +362,20 @@ const resolveScanByDatabase = async (payload: ExitScanRequest): Promise<ExitScan
     };
   }
 
+  // Visitor is exiting; any remaining un-arrived office expectations are skipped.
+  const { error: expectationSkipError } = await supabase
+    .from('office_expectation')
+    .update({ expectation_status_id: 3 })
+    .eq('visit_id', visit.visit_id)
+    .is('arrived_at', null);
+
+  if (expectationSkipError) {
+    console.warn(
+      '[office-exit] failed to mark pending expectations as skipped:',
+      expectationSkipError.message,
+    );
+  }
+
   let officeScanInserted = false;
   const validationStatusId = await resolveValidationStatusId({ favorable: isCorrectDestination });
 

@@ -625,6 +625,20 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Visitor is exiting; any remaining un-arrived office expectations are skipped.
+    const { error: expectationSkipError } = await supabase
+      .from('office_expectation')
+      .update({ expectation_status_id: 3 })
+      .eq('visit_id', visit.visit_id)
+      .is('arrived_at', null);
+
+    if (expectationSkipError) {
+      console.warn('[office-exit-scan] office_expectation skip update failed', {
+        visit_id: visit.visit_id,
+        error: expectationSkipError.message,
+      });
+    }
+
     let officeScanInserted = false;
     const { error: officeScanError } = await supabase
       .from('office_scan')
