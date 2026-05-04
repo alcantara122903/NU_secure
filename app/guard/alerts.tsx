@@ -162,7 +162,7 @@ export default function MonitorVisitorActivitiesScreen() {
               <Text style={styles.summaryTitle}>Wrong destination</Text>
             </View>
             <Text style={styles.redNumber}>{loading ? '—' : wrongDestinationVisitCount}</Text>
-            <Text style={styles.summaryDescription}>Unresolved wrong-office scans</Text>
+            <Text style={styles.summaryDescription}>All unresolved alerts</Text>
           </View>
 
           <View style={styles.summaryCard}>
@@ -183,12 +183,12 @@ export default function MonitorVisitorActivitiesScreen() {
           </View>
           <View style={styles.sectionTextBox}>
             <Text style={styles.sectionTitle}>All Alerts (Unresolved)</Text>
-            <Text style={styles.sectionSubtitle}>Every unresolved wrong-destination scan for active visits</Text>
+            <Text style={styles.sectionSubtitle}>Every unresolved wrong-office or unauthorized scan</Text>
           </View>
         </View>
 
         {!loading && alertRows.length === 0 ? (
-          <Text style={styles.emptyText}>No unresolved wrong-destination alerts right now.</Text>
+          <Text style={styles.emptyText}>No unresolved alerts right now.</Text>
         ) : (
           pagedAlerts.map((item) => (
             <AlertCard
@@ -216,14 +216,15 @@ export default function MonitorVisitorActivitiesScreen() {
           <View style={styles.sectionTextBox}>
             <Text style={styles.sectionTitle}>Completed Visitors</Text>
             <Text style={styles.sectionSubtitle}>
-              Visitors who have completed their business and are ready to exit
+              Active visits with every office expectation completed or skipped — no pending stops
             </Text>
           </View>
         </View>
 
         {!loading && completedRows.length === 0 ? (
           <Text style={styles.emptyText}>
-            No visitors are ready to exit yet. They appear here after every office on their route has checked them in.
+            No visitors yet. They appear here when every expected office is completed or skipped in office expectations,
+            with no pending stops.
           </Text>
         ) : (
           pagedCompleted.map((item) => <CompletedVisitorCard key={item.id} item={item} onReadyToExit={() => router.push('/guard/exit-scan')} />)

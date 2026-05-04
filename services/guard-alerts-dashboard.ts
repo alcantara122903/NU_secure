@@ -24,57 +24,32 @@ export type UnresolvedWrongDestinationAlert = {
 
 const WRONG_DESTINATION_ALERT_TYPES = ['Wrong Office', 'Unauthorized'] as const;
 
+/** Terminal `office_expectation.expectation_status_id` values (no pending offices). */
+const EXPECTATION_SKIPPED = 3;
+const EXPECTATION_COMPLETED = 4;
+
 /**
- * Unresolved wrong-destination alerts for ACTIVE visits only.
- * Counts each alert record so every wrong office scan is reflected in the dashboard.
+ * All unresolved wrong-destination / unauthorized alerts (every alert row).
+ * Not limited to active visits so the summary matches the full alerts list.
  */
 export async function fetchUnresolvedWrongDestinationVisitCount(): Promise<number> {
-  const { data, error } = await supabase
+  const { count, error } = await supabase
     .from('alerts')
-    .select('alert_id, visit_id')
+    .select('alert_id', { count: 'exact', head: true })
     .eq('status', 'Unresolved')
     .in('alert_type', [...WRONG_DESTINATION_ALERT_TYPES]);
 
   if (error) {
-    console.error('guard-alerts-dashboard: wrong-destination visits', error);
+    console.error('guard-alerts-dashboard: wrong-destination alert count', error);
     return 0;
   }
 
-  const alertRows =
-    (data ?? []).filter(
-      (r): r is { alert_id: number; visit_id: number } =>
-        typeof r.alert_id === 'number' && Number.isFinite(r.alert_id) &&
-        typeof r.visit_id === 'number' && Number.isFinite(r.visit_id),
-    );
-
-  if (alertRows.length === 0) {
-    return 0;
-  }
-
-  const visitIds = [...new Set(alertRows.map((r) => r.visit_id))];
-  const { data: openVisits, error: openErr } = await supabase
-    .from('visit')
-    .select('visit_id')
-    .in('visit_id', visitIds)
-    .is('exit_time', null);
-
-  if (openErr) {
-    console.error('guard-alerts-dashboard: open visits for wrong-destination', openErr);
-    return 0;
-  }
-
-  const openVisitSet = new Set(
-    (openVisits ?? [])
-      .map((v) => v.visit_id)
-      .filter((id): id is number => typeof id === 'number' && Number.isFinite(id)),
-  );
-
-  return alertRows.filter((r) => openVisitSet.has(r.visit_id)).length;
+  return typeof count === 'number' && Number.isFinite(count) ? count : 0;
 }
 
 /**
- * Visits still open (`exit_time` null) where every `office_expectation` row has `arrived_at`
- * (route finished; guard can process exit at the gate).
+ * Visits still open (`exit_time` null) where every `office_expectation` row is terminal:
+ * completed at destination (`expectation_status_id` 4) or skipped (`3`) — no pending offices.
  */
 export async function fetchReadyToExitVisitors(): Promise<ReadyToExitVisitor[]> {
   const { data: openVisits, error: openErr } = await supabase
@@ -94,7 +69,7 @@ export async function fetchReadyToExitVisitors(): Promise<ReadyToExitVisitor[]> 
 
   const { data: expectations, error: expErr } = await supabase
     .from('office_expectation')
-    .select('visit_id, arrived_at')
+    .select('visit_id, arrived_at, expectation_status_id, created_at')
     .in('visit_id', openVisitIds);
 
   if (expErr) {
@@ -102,14 +77,36 @@ export async function fetchReadyToExitVisitors(): Promise<ReadyToExitVisitor[]> 
     return [];
   }
 
-  const byVisit = new Map<number, { arrived_at: string | null }[]>();
+  type ExpectationRow = {
+    arrived_at: string | null;
+    expectation_status_id: number | null;
+    created_at: string | null;
+  };
+
+  const byVisit = new Map<number, ExpectationRow[]>();
   for (const row of expectations ?? []) {
     const vid = row.visit_id as number;
     if (!Number.isFinite(vid)) continue;
     const list = byVisit.get(vid) ?? [];
-    list.push({ arrived_at: row.arrived_at as string | null });
+    list.push({
+      arrived_at: row.arrived_at as string | null,
+      expectation_status_id:
+        typeof row.expectation_status_id === 'number' && Number.isFinite(row.expectation_status_id)
+          ? row.expectation_status_id
+          : null,
+      created_at: row.created_at as string | null,
+    });
     byVisit.set(vid, list);
   }
+
+  const rowTerminal = (r: ExpectationRow): boolean =>
+    r.expectation_status_id === EXPECTATION_COMPLETED || r.expectation_status_id === EXPECTATION_SKIPPED;
+
+  const rowSortTime = (r: ExpectationRow): string | null => {
+    const a = r.arrived_at != null && String(r.arrived_at).trim() !== '' ? String(r.arrived_at).trim() : null;
+    const c = r.created_at != null && String(r.created_at).trim() !== '' ? String(r.created_at).trim() : null;
+    return a ?? c;
+  };
 
   const readyVisitIds: number[] = [];
   for (const visitId of openVisitIds) {
@@ -117,7 +114,7 @@ export async function fetchReadyToExitVisitors(): Promise<ReadyToExitVisitor[]> 
     if (!rows?.length) {
       continue;
     }
-    if (rows.every((r) => r.arrived_at != null && String(r.arrived_at).trim() !== '')) {
+    if (rows.every(rowTerminal)) {
       readyVisitIds.push(visitId);
     }
   }
@@ -127,14 +124,19 @@ export async function fetchReadyToExitVisitors(): Promise<ReadyToExitVisitor[]> 
   }
 
   const lastArrivedByVisit = new Map<number, string>();
-  for (const row of expectations ?? []) {
-    const vid = row.visit_id as number;
-    if (!readyVisitIds.includes(vid)) continue;
-    const at = row.arrived_at as string | null;
-    if (!at) continue;
-    const prev = lastArrivedByVisit.get(vid);
-    if (!prev || new Date(at).getTime() > new Date(prev).getTime()) {
-      lastArrivedByVisit.set(vid, at);
+  for (const visitId of readyVisitIds) {
+    const rows = byVisit.get(visitId);
+    if (!rows?.length) continue;
+    let best: string | null = null;
+    for (const r of rows) {
+      const t = rowSortTime(r);
+      if (!t) continue;
+      if (!best || new Date(t).getTime() > new Date(best).getTime()) {
+        best = t;
+      }
+    }
+    if (best) {
+      lastArrivedByVisit.set(visitId, best);
     }
   }
 
@@ -231,7 +233,7 @@ export async function fetchUnresolvedWrongDestinationAlerts(): Promise<Unresolve
     .eq('status', 'Unresolved')
     .in('alert_type', [...WRONG_DESTINATION_ALERT_TYPES])
     .order('created_at', { ascending: false })
-    .limit(50);
+    .limit(100);
 
   if (error) {
     console.error('guard-alerts-dashboard: unresolved wrong-destination alerts', error);
@@ -258,24 +260,7 @@ export async function fetchUnresolvedWrongDestinationAlerts(): Promise<Unresolve
 
   if (alertRows.length === 0) return [];
 
-  const visitIds = [...new Set(alertRows.map((r) => r.visit_id))];
-  const { data: openVisits, error: openErr } = await supabase
-    .from('visit')
-    .select('visit_id')
-    .in('visit_id', visitIds)
-    .is('exit_time', null);
-  if (openErr) {
-    console.error('guard-alerts-dashboard: open visits for unresolved alerts', openErr);
-    return [];
-  }
-
-  const openVisitSet = new Set(
-    (openVisits ?? [])
-      .map((v) => v.visit_id)
-      .filter((id): id is number => typeof id === 'number' && Number.isFinite(id)),
-  );
-  const openAlerts = alertRows.filter((r) => openVisitSet.has(r.visit_id));
-  if (openAlerts.length === 0) return [];
+  const openAlerts = alertRows;
 
   const visitorIds = [...new Set(openAlerts.map((r) => r.visitor_id))];
   const { data: visitors } = await supabase
