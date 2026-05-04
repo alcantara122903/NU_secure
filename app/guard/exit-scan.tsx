@@ -17,6 +17,7 @@ import {
   StatusBar,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -133,6 +134,8 @@ export default function ExitScanScreen() {
   const [permission, requestPermission] = useCameraPermissions();
   const [scanState, setScanState] = useState<GuardScanState>({ type: 'idle' });
   const [scannedInfo, setScannedInfo] = useState<ScannedInfo | null>(null);
+  const [showManualEntry, setShowManualEntry] = useState(false);
+  const [manualRaw, setManualRaw] = useState('');
   /** Unmount CameraView before mounting the result tree — avoids Fabric addViewAt crashes on Android. */
   const [exitCameraSuppressed, setExitCameraSuppressed] = useState(false);
   const isProcessingRef = useRef(false);
@@ -152,7 +155,7 @@ export default function ExitScanScreen() {
     }
   };
 
-  const onQRCodeScanned = async (rawValue: string) => {
+  const processExitFromRawValue = async (rawValue: string) => {
     if (!rawValue || isProcessingRef.current || scannedInfo) {
       return;
     }
@@ -209,6 +212,8 @@ export default function ExitScanScreen() {
         setScannedInfo(info);
         setScanState({ type: 'idle' });
         setExitCameraSuppressed(false);
+        setShowManualEntry(false);
+        setManualRaw('');
       };
 
       setExitCameraSuppressed(true);
@@ -234,9 +239,23 @@ export default function ExitScanScreen() {
     }
   };
 
+  const onQRCodeScanned = async (rawValue: string) => {
+    await processExitFromRawValue(rawValue);
+  };
+
+  const handleManualSubmit = () => {
+    const value = manualRaw.trim();
+    if (!value || scanState.type === 'processing') {
+      return;
+    }
+    void processExitFromRawValue(value);
+  };
+
   const resetScanner = () => {
     setExitCameraSuppressed(false);
     setScanState({ type: 'idle' });
+    setManualRaw('');
+    setShowManualEntry(false);
   };
 
   const handleCompleteExit = () => {
@@ -526,6 +545,55 @@ export default function ExitScanScreen() {
             <Text style={styles.exitScannerTitle}>Position QR Code in frame</Text>
             <Text style={styles.exitScannerSubtitle}>Hold steady for scanning</Text>
           </View>
+        </View>
+
+        <View style={styles.exitManualSection}>
+          {!showManualEntry ? (
+            <TouchableOpacity
+              style={styles.exitManualButton}
+              activeOpacity={0.85}
+              onPress={() => setShowManualEntry(true)}
+            >
+              <View style={styles.exitManualIconBox}>
+                <MaterialIcons name="dialpad" size={22} color="#064AA5" />
+              </View>
+              <Text style={styles.exitManualButtonText}>Enter code manually</Text>
+            </TouchableOpacity>
+          ) : (
+            <View style={styles.exitManualEntryCard}>
+              <Text style={styles.exitManualEntryTitle}>Raw QR contents</Text>
+              <TextInput
+                style={styles.exitManualInput}
+                placeholder="Paste JSON, QR token, pass number, or control number"
+                placeholderTextColor="#6B7280"
+                value={manualRaw}
+                onChangeText={setManualRaw}
+                multiline
+                editable={scanState.type !== 'processing'}
+              />
+              <TouchableOpacity
+                style={[
+                  styles.exitManualSubmitButton,
+                  { opacity: scanState.type === 'processing' ? 0.6 : 1 },
+                ]}
+                activeOpacity={0.85}
+                onPress={handleManualSubmit}
+                disabled={scanState.type === 'processing'}
+              >
+                <Text style={styles.exitManualSubmitButtonText}>Process Exit</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.exitManualCancelButton}
+                activeOpacity={0.85}
+                onPress={() => {
+                  setShowManualEntry(false);
+                  setManualRaw('');
+                }}
+              >
+                <Text style={styles.exitManualCancelText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
 
         <ScrollView
@@ -1503,5 +1571,85 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     lineHeight: 19,
+  },
+  /** Manual entry sits below scanner card subtitle, not inside the subtitle block. */
+  exitManualSection: {
+    marginHorizontal: 14,
+    marginTop: 10,
+    marginBottom: 4,
+  },
+  exitManualButton: {
+    minHeight: 52,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#064AA5',
+    backgroundColor: '#FFFFFF',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#0B2E5E',
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 3,
+  },
+  exitManualIconBox: {
+    width: 32,
+    height: 32,
+    borderRadius: 9,
+    backgroundColor: '#EAF1FF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
+  },
+  exitManualButtonText: {
+    fontSize: 14,
+    color: '#064AA5',
+    fontWeight: '800',
+  },
+  exitManualEntryCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#DBE4F0',
+    padding: 12,
+  },
+  exitManualEntryTitle: {
+    color: '#111827',
+    fontWeight: '700',
+    fontSize: 13,
+    marginBottom: 8,
+  },
+  exitManualInput: {
+    borderWidth: 1,
+    borderColor: '#DBE4F0',
+    borderRadius: 10,
+    padding: 10,
+    minHeight: 80,
+    textAlignVertical: 'top',
+    color: '#111827',
+  },
+  exitManualSubmitButton: {
+    marginTop: 14,
+    backgroundColor: '#064AA5',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  exitManualSubmitButtonText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  exitManualCancelButton: {
+    marginTop: 10,
+    alignItems: 'center',
+    paddingVertical: 6,
+  },
+  exitManualCancelText: {
+    color: '#6B7280',
+    fontSize: 12,
+    fontWeight: '600',
   },
 });
