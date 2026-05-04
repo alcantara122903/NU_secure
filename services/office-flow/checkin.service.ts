@@ -293,7 +293,18 @@ export async function processOfficeCheckInScan(req: OfficeCheckInScanRequest): P
   }
 
   if (pending?.expectation_id != null) {
-    await supabase.from('office_expectation').update({ arrived_at: scanTime }).eq('expectation_id', pending.expectation_id);
+    await supabase
+      .from('office_expectation')
+      .update({ arrived_at: scanTime, expectation_status_id: 4 })
+      .eq('expectation_id', pending.expectation_id);
+  } else {
+    // Fallback: when pending expectation_id is unavailable, mark the current office row as completed.
+    await supabase
+      .from('office_expectation')
+      .update({ arrived_at: scanTime, expectation_status_id: 4 })
+      .eq('visit_id', visit.visit_id)
+      .eq('office_id', scanningOfficeId)
+      .is('arrived_at', null);
   }
 
   if (visit.visit_type_id === VISIT_TYPE.ENROLLEE) {
