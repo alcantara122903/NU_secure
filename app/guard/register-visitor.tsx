@@ -30,16 +30,16 @@ import {
 } from "lucide-react-native";
 import React, { useEffect, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Image,
-  Platform,
-  ScrollView,
+    ActivityIndicator,
+    Alert,
+    Image,
+    Platform,
+    ScrollView,
     StatusBar,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Circle, Path } from "react-native-svg";
@@ -170,7 +170,7 @@ export default function RegisterVisitorScreen() {
   const [phoneNumber, setPhoneNumber] = useState("");
   const [reasonForVisit, setReasonForVisit] = useState("");
   const [showOfficeModal, setShowOfficeModal] = useState(false);
-  
+
   // Normal Visitor Step 1 Fields
   const [normalVisitorFirstName, setNormalVisitorFirstName] = useState("");
   const [normalVisitorLastName, setNormalVisitorLastName] = useState("");
@@ -187,7 +187,7 @@ export default function RegisterVisitorScreen() {
     useState("");
   const [normalVisitorReasonForVisit, setNormalVisitorReasonForVisit] =
     useState("");
-  
+
   // Contractor Step 1 Fields
   const [contractorFirstName, setContractorFirstName] = useState("");
   const [contractorLastName, setContractorLastName] = useState("");
@@ -199,25 +199,25 @@ export default function RegisterVisitorScreen() {
   const [contractorRegion, setContractorRegion] = useState("");
   const [contractorContactNo, setContractorContactNo] = useState("");
   const [contractorBirthday, setContractorBirthday] = useState("");
-  const [contractorDestinationOffice, setContractorDestinationOffice] =
-    useState("");
+  const [contractorSelectedDestinationOffices, setContractorSelectedDestinationOffices] =
+    useState<string[]>([]);
   const [contractorContactPerson, setContractorContactPerson] = useState("");
   const [contractorPassNumber, setContractorPassNumber] = useState("");
   const [contractorControlNumber, setContractorControlNumber] = useState("");
   const [contractorReasonForVisit, setContractorReasonForVisit] = useState("");
-  
+
   // Step 3: Face Photo
   const [capturedFacePhoto, setCapturedFacePhoto] = useState<string | null>(
     null,
   );
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [isCapturingPhoto, setIsCapturingPhoto] = useState(false);
-  
+
   // Step 1: ID Document Capture
   const [capturedIdPhoto, setCapturedIdPhoto] = useState<string | null>(null);
   const [idPhotoPreview, setIdPhotoPreview] = useState<string | null>(null);
   const [isCapturingIdPhoto, setIsCapturingIdPhoto] = useState(false);
-  
+
   // Step 2: Enrollee Info (extracted from ID)
   const [extractedFirstName, setExtractedFirstName] = useState("");
   const [extractedLastName, setExtractedLastName] = useState("");
@@ -280,6 +280,14 @@ export default function RegisterVisitorScreen() {
   // Handle destination office checkbox toggle
   const toggleDestinationOffice = (office: string) => {
     setSelectedDestinationOffices((prev) =>
+      prev.includes(office)
+        ? prev.filter((o) => o !== office)
+        : [...prev, office],
+    );
+  };
+
+  const toggleContractorDestinationOffice = (office: string) => {
+    setContractorSelectedDestinationOffices((prev) =>
       prev.includes(office)
         ? prev.filter((o) => o !== office)
         : [...prev, office],
@@ -365,27 +373,28 @@ export default function RegisterVisitorScreen() {
     }
 
     console.log("✅ Face photo confirmed, saving registration...");
-    
+
     try {
       setIsCreatingEnrollee(true);
 
       if (visitorType === "enrollee") {
         handleCreateEnrollee();
       } else if (visitorType === "contractor") {
-        const resolvedOffice = await officeService.resolveOfficeFromUserInput(
-          contractorDestinationOffice,
+        const selectedOfficeIds = await officeService.getOfficeIds(
+          contractorSelectedDestinationOffices,
         );
 
-        if (!resolvedOffice) {
+        if (selectedOfficeIds.length === 0) {
           Alert.alert(
-            "Office not found",
-            `We could not match "${contractorDestinationOffice.trim()}" to a single campus office. Type the office name as listed (e.g., ${offices.slice(0, 3).join(", ")}).`,
+            "Error",
+            "Could not find selected offices. Please try again.",
           );
           setIsCreatingEnrollee(false);
           return;
         }
 
-        const primaryOfficeId = resolvedOffice.office_id;
+        const primaryOfficeId = selectedOfficeIds[0];
+        const primaryOfficeName = contractorSelectedDestinationOffices[0];
 
         // Register contractor and generate QR pass
         const result = await contractorService.registerAndGenerateQRPass({
@@ -409,13 +418,11 @@ export default function RegisterVisitorScreen() {
         });
 
         if (result) {
-          const route = [
-            {
-              order: 1,
-              office_id: resolvedOffice.office_id,
-              office_name: resolvedOffice.office_name,
-            },
-          ];
+          const route = contractorSelectedDestinationOffices.map((name, index) => ({
+            order: index + 1,
+            office_id: selectedOfficeIds[index] ?? index,
+            office_name: name,
+          }));
           const qrPayload = buildQRTicketPayloadV1({
             kind: "contractor",
             qr_token: result.qrToken,
@@ -440,12 +447,10 @@ export default function RegisterVisitorScreen() {
             address: `${contractorHouseNo} ${contractorStreet}, ${contractorBarangay}, ${contractorCity}, ${contractorProvince}`,
             purpose: contractorReasonForVisit,
             facePhotoUri: photoPreview ?? undefined,
-            offices: [
-              {
-                id: resolvedOffice.office_id,
-                name: resolvedOffice.office_name,
-              },
-            ],
+            offices: contractorSelectedDestinationOffices.map((name, index) => ({
+              id: selectedOfficeIds[index] || index,
+              name,
+            })),
           };
 
           router.replace({
@@ -608,7 +613,7 @@ export default function RegisterVisitorScreen() {
   const extractDataFromIdImage = async (idPhotoBase64: string) => {
     try {
       console.log("🔍 Starting ID text extraction...");
-      
+
       // Show processing alert
       let processingAlert: any = null;
       processingAlert = Alert.alert(
@@ -621,7 +626,7 @@ export default function RegisterVisitorScreen() {
       // Try OCR extraction with intelligent parsing
       const extractedData =
         await enrolleeService.extractDataFromID(idPhotoBase64);
-      
+
       // Close processing alert
       if (processingAlert) {
         processingAlert?.dismiss?.();
@@ -634,7 +639,7 @@ export default function RegisterVisitorScreen() {
         setExtractedLastName(extractedData.lastName || "");
         setEnrolleeBirthday(extractedData.birthday || "");
         setExtractedAddress(extractedData.address || "");
-        
+
         // Set address components for Enrollee
         setAddressHouseNo(extractedData.addressHouseNo || "");
         setAddressStreet(extractedData.addressStreet || "");
@@ -642,7 +647,7 @@ export default function RegisterVisitorScreen() {
         setAddressMunicipality(extractedData.addressCityMunicipality || "");
         setAddressProvince(extractedData.addressProvince || "");
         setAddressRegion(extractedData.addressRegion || "");
-        
+
         // Also populate Normal Visitor fields with extracted data
         setNormalVisitorFirstName(extractedData.firstName || "");
         setNormalVisitorLastName(extractedData.lastName || "");
@@ -653,7 +658,7 @@ export default function RegisterVisitorScreen() {
         setNormalVisitorCity(extractedData.addressCityMunicipality || "");
         setNormalVisitorProvince(extractedData.addressProvince || "");
         setNormalVisitorRegion(extractedData.addressRegion || "");
-        
+
         // Also populate Contractor fields with extracted data
         setContractorFirstName(extractedData.firstName || "");
         setContractorLastName(extractedData.lastName || "");
@@ -664,10 +669,10 @@ export default function RegisterVisitorScreen() {
         setContractorCity(extractedData.addressCityMunicipality || "");
         setContractorProvince(extractedData.addressProvince || "");
         setContractorRegion(extractedData.addressRegion || "");
-        
+
         setExtractionConfidence(extractedData.confidence || null);
         setOcrExtractionFailed(false);
-        
+
         const extractedFields: string[] = [];
         if (extractedData.firstName) extractedFields.push("First Name");
         if (extractedData.lastName) extractedFields.push("Last Name");
@@ -677,7 +682,7 @@ export default function RegisterVisitorScreen() {
         console.log(
           `✅ Data extracted successfully (${extractedData.confidence} confidence) - Fields: ${extractedFields.join(", ")}`,
         );
-        
+
         // Show confidence-based message
         let confidenceMessage = "";
         let actionMessage =
@@ -704,7 +709,7 @@ export default function RegisterVisitorScreen() {
           warningNote =
             "\n\n💡 Your ID may have holograms, security stickers, or glare that affected extraction. You will be able to manually correct any fields on the next screen.";
         }
-        
+
         Alert.alert(
           "ID Data Extracted",
           `${confidenceMessage}\nFirst Name: ${extractedData.firstName || "(not extracted)"}\nLast Name: ${extractedData.lastName || "(not extracted)"}\nBirthday: ${extractedData.birthday || "(not extracted)"}\nAddress: ${extractedData.address || "(not extracted)"}\n\n${actionMessage}${warningNote}${missingFieldsNote}`,
@@ -717,7 +722,7 @@ export default function RegisterVisitorScreen() {
         );
         setExtractionConfidence("low");
         setOcrExtractionFailed(true);
-        
+
         Alert.alert(
           "⚠️ Unable to Extract ID Details",
           "We could not automatically read your ID due to image quality, lighting, or obscured text.\n\n✏️ No problem! You can enter your information manually on the next screen.\n\nRequired fields:\n  • First Name\n  • Last Name\n  • Address\n\nYou can also edit the phone number if needed.",
@@ -729,9 +734,9 @@ export default function RegisterVisitorScreen() {
       const errorMessage =
         error instanceof Error ? error.message : "Unknown error";
       console.error("Details:", errorMessage);
-      
+
       setOcrExtractionFailed(true);
-      
+
       Alert.alert(
         "Extraction Failed",
         "Could not automatically extract information from the ID. Please enter the details manually.\n\nYou will be able to enter your information in the next step.",
@@ -747,10 +752,10 @@ export default function RegisterVisitorScreen() {
     }
 
     console.log("📋 ID photo confirmed, extracting data...");
-    
+
     // Extract data from ID image
     await extractDataFromIdImage(capturedIdPhoto);
-    
+
     // Proceed to Step 2
     setStep(2);
   };
@@ -945,12 +950,12 @@ export default function RegisterVisitorScreen() {
             type: "enrollee",
             qrToken,
             qrPayload,
-        passNumber: pass,
-        controlNumber: control,
+            passNumber: pass,
+            controlNumber: control,
             visitorId: enrolleeResult.visitor_id,
             visitId: enrolleeResult.visit_id,
-        firstName: extractedFirstName,
-        lastName: extractedLastName,
+            firstName: extractedFirstName,
+            lastName: extractedLastName,
             contactNo: contactNumber || "",
             facePhotoUri: photoPreview ?? undefined,
             offices: ticketOffices,
@@ -977,126 +982,126 @@ export default function RegisterVisitorScreen() {
     const enrolleeInformationTopSlot =
       visitorType === "enrollee" ? (
         <View style={{ marginBottom: 4 }}>
-                      {extractionConfidence && !ocrExtractionFailed && (
-                        <View
-                          style={[
-                            styles.confidenceAlert,
-                            {
-                              backgroundColor:
+          {extractionConfidence && !ocrExtractionFailed && (
+            <View
+              style={[
+                styles.confidenceAlert,
+                {
+                  backgroundColor:
                     extractionConfidence === "high"
                       ? "#E8F5E9"
                       : extractionConfidence === "medium"
                         ? "#FFF3E0"
                         : "#FFEBEE",
-                              borderLeftColor:
+                  borderLeftColor:
                     extractionConfidence === "high"
                       ? "#4CAF50"
                       : extractionConfidence === "medium"
                         ? "#FF9800"
                         : "#F44336",
-                            },
-                          ]}
-                        >
-                          <MaterialIcons
-                            name={
+                },
+              ]}
+            >
+              <MaterialIcons
+                name={
                   extractionConfidence === "high" ? "check-circle" : "warning"
-                            }
-                            size={18}
-                            color={
+                }
+                size={18}
+                color={
                   extractionConfidence === "high"
                     ? "#4CAF50"
                     : extractionConfidence === "medium"
                       ? "#FF9800"
                       : "#F44336"
-                            }
-                          />
-                          <Text
-                            style={[
-                              styles.confidenceText,
-                              {
-                                color:
+                }
+              />
+              <Text
+                style={[
+                  styles.confidenceText,
+                  {
+                    color:
                       extractionConfidence === "high"
                         ? "#2E7D32"
                         : extractionConfidence === "medium"
                           ? "#E65100"
                           : "#C62828",
-                                marginLeft: 8,
-                              },
-                            ]}
-                          >
+                    marginLeft: 8,
+                  },
+                ]}
+              >
                 {extractionConfidence === "high"
                   ? "High Confidence - Data extracted accurately"
                   : extractionConfidence === "medium"
                     ? "Medium Confidence - Please verify the fields"
                     : "Low Confidence - Please review and correct"}
-                          </Text>
-                        </View>
-                      )}
+              </Text>
+            </View>
+          )}
 
-                      {ocrExtractionFailed && (
-                        <View
-                          style={[
-                            styles.confidenceAlert,
-                            {
+          {ocrExtractionFailed && (
+            <View
+              style={[
+                styles.confidenceAlert,
+                {
                   backgroundColor: "#FFEBEE",
                   borderLeftColor: "#F44336",
-                            },
-                          ]}
-                        >
-                          <MaterialIcons name="error" size={18} color="#F44336" />
-                          <Text
-                            style={[
-                              styles.confidenceText,
+                },
+              ]}
+            >
+              <MaterialIcons name="error" size={18} color="#F44336" />
+              <Text
+                style={[
+                  styles.confidenceText,
                   { color: "#C62828", marginLeft: 8 },
-                            ]}
-                          >
-                            Manual Entry Required - Please fill in the details below
-                          </Text>
-                        </View>
-                      )}
+                ]}
+              >
+                Manual Entry Required - Please fill in the details below
+              </Text>
+            </View>
+          )}
 
           {extractionConfidence &&
             extractionConfidence !== "high" &&
             !ocrExtractionFailed && (
-                        <View
-                          style={[
-                            styles.confidenceAlert,
-                            {
+              <View
+                style={[
+                  styles.confidenceAlert,
+                  {
                     backgroundColor: "#FFF3E0",
                     borderLeftColor: "#FF9800",
-                            },
-                          ]}
-                        >
-                          <MaterialIcons name="info" size={18} color="#FF9800" />
-                          <Text
-                            style={[
-                              styles.confidenceText,
+                  },
+                ]}
+              >
+                <MaterialIcons name="info" size={18} color="#FF9800" />
+                <Text
+                  style={[
+                    styles.confidenceText,
                     { color: "#E65100", marginLeft: 8 },
-                            ]}
-                          >
+                  ]}
+                >
                   Some ID details could not be extracted clearly. Please verify
                   and edit the fields if needed.
-                          </Text>
-                        </View>
-                      )}
+                </Text>
+              </View>
+            )}
 
-                      <Text
-                        style={[
-                          styles.editableNote,
-                          { 
+          <Text
+            style={[
+              styles.editableNote,
+              {
                 color: ocrExtractionFailed ? "#C62828" : colors.textSecondary,
-                            marginBottom: 12, 
+                marginBottom: 12,
                 marginTop: 8,
-                            fontSize: ocrExtractionFailed ? 13 : 12,
+                fontSize: ocrExtractionFailed ? 13 : 12,
                 fontWeight: ocrExtractionFailed ? "600" : "400",
-                          },
-                        ]}
-                      >
-                        {ocrExtractionFailed 
+              },
+            ]}
+          >
+            {ocrExtractionFailed
               ? "✏️ Please enter your information below. All three fields are required: First Name, Last Name, and Address."
               : "✎ All fields are editable. Please correct any inaccurate information."}
-                      </Text>
-                      </View>
+          </Text>
+        </View>
       ) : null;
 
     if (visitorType === "enrollee") {
@@ -1178,16 +1183,14 @@ export default function RegisterVisitorScreen() {
         <VisitorInformationStepScreen
           badgeIconLetter="C"
           badgeLabel="Contractor"
+          showControlNumber={false}
           showDestinationOffice
-          destinationOfficeFreeText
-          destinationOfficeTypedValue={contractorDestinationOffice}
-          onChangeDestinationOfficeTyped={setContractorDestinationOffice}
           contactPerson={contractorContactPerson}
           onChangeContactPerson={setContractorContactPerson}
           showReasonForVisit
-          offices={[]}
-          selectedOffices={[]}
-          onToggleOffice={() => {}}
+          offices={offices}
+          selectedOffices={contractorSelectedDestinationOffices}
+          onToggleOffice={toggleContractorDestinationOffice}
           onBack={handleBack}
           onContinue={() => {
             const missingFields: string[] = [];
@@ -1196,16 +1199,15 @@ export default function RegisterVisitorScreen() {
             if (!contractorBirthday?.trim()) missingFields.push("Birthday");
             if (!contractorPassNumber?.trim())
               missingFields.push("ID Pass Number");
-            if (!contractorDestinationOffice?.trim()) {
+            if (contractorSelectedDestinationOffices.length === 0) {
               missingFields.push("Destination Office");
             }
             if (!contractorContactPerson?.trim()) {
               missingFields.push("Contact Person");
             }
             if (!contractorReasonForVisit?.trim())
-              missingFields.push("Reason For Visit");
-            if (!contractorContactNo?.trim())
-              missingFields.push("Contact No.");
+              missingFields.push("Purpose");
+            if (!contractorContactNo?.trim()) missingFields.push("Contact No.");
             if (missingFields.length > 0) {
               Alert.alert(
                 "⚠️ Missing Required Information",
@@ -1265,6 +1267,7 @@ export default function RegisterVisitorScreen() {
       <VisitorInformationStepScreen
         badgeIconLetter="V"
         badgeLabel="Normal Visitor"
+        showControlNumber={false}
         showDestinationOffice
         showReasonForVisit
         offices={offices}
@@ -1272,7 +1275,7 @@ export default function RegisterVisitorScreen() {
         onToggleOffice={toggleDestinationOffice}
         onBack={handleBack}
         onContinue={() => {
-                        const missingFields: string[] = [];
+          const missingFields: string[] = [];
           if (!normalVisitorFirstName?.trim()) missingFields.push("First Name");
           if (!normalVisitorLastName?.trim()) missingFields.push("Last Name");
           if (!normalVisitorBirthday?.trim()) missingFields.push("Birthday");
@@ -1282,15 +1285,15 @@ export default function RegisterVisitorScreen() {
           if (selectedDestinationOffices.length === 0)
             missingFields.push("Destination Office");
           if (!normalVisitorReasonForVisit?.trim())
-            missingFields.push("Reason For Visit");
-                        if (missingFields.length > 0) {
-                          Alert.alert(
+            missingFields.push("Purpose");
+          if (missingFields.length > 0) {
+            Alert.alert(
               "⚠️ Missing Required Information",
               `Please fill in the following fields before proceeding:\n\n• ${missingFields.join("\n• ")}`,
               [{ text: "OK" }],
-                          );
-                          return;
-                        }
+            );
+            return;
+          }
           if (!isBirthdayValid(normalVisitorBirthday)) {
             Alert.alert(
               "Invalid Birthday",
@@ -1306,8 +1309,8 @@ export default function RegisterVisitorScreen() {
             );
             return;
           }
-                        setStep(3);
-                      }}
+          setStep(3);
+        }}
         firstName={normalVisitorFirstName}
         onChangeFirstName={setNormalVisitorFirstName}
         lastName={normalVisitorLastName}
@@ -1339,7 +1342,7 @@ export default function RegisterVisitorScreen() {
   }
 
   if (step === 3) {
-                            return (
+    return (
       <FaceCaptureStepScreen
         badgeIconLetter={visitorTypeInfo.icon}
         badgeLabel={visitorTypeInfo.label}
@@ -1368,15 +1371,15 @@ export default function RegisterVisitorScreen() {
             <CaptureIdHeaderPattern />
 
             <View style={captureStepStyles.headerTop}>
-                      <TouchableOpacity
+              <TouchableOpacity
                 style={captureStepStyles.captureBackButton}
                 onPress={handleBack}
-                      >
+              >
                 <ArrowLeft size={20} color="#FFFFFF" strokeWidth={2.8} />
                 <Text style={captureStepStyles.backText}>Back</Text>
-                      </TouchableOpacity>
+              </TouchableOpacity>
               <View style={captureStepStyles.headerTopSpacer} />
-                    </View>
+            </View>
 
             <View style={captureStepStyles.visitorBadgeWrapper}>
               <View style={captureStepStyles.visitorBadge}>
@@ -1384,12 +1387,12 @@ export default function RegisterVisitorScreen() {
                   <Text style={captureStepStyles.badgeIconText}>
                     {visitorTypeInfo.icon}
                   </Text>
-                  </View>
+                </View>
                 <Text style={captureStepStyles.visitorBadgeText}>
                   {visitorTypeInfo.label}
-                    </Text>
-                  </View>
-                  </View>
+                </Text>
+              </View>
+            </View>
 
             <Text style={captureStepStyles.stepTitle}>Step 1 of 3</Text>
 
@@ -1402,8 +1405,8 @@ export default function RegisterVisitorScreen() {
               />
               <View style={captureStepStyles.progressBar} />
               <View style={captureStepStyles.progressBar} />
-                  </View>
-                  </View>
+            </View>
+          </View>
 
           <View style={captureStepStyles.contentPanel}>
             {!idPhotoPreview ? (
@@ -1412,7 +1415,7 @@ export default function RegisterVisitorScreen() {
                   <View style={captureStepStyles.scanGraphic}>
                     <View style={captureStepStyles.scanCircle}>
                       <FileText size={68} color="#0648A8" fill="#0648A8" />
-                  </View>
+                    </View>
 
                     <View
                       style={[
@@ -1421,19 +1424,19 @@ export default function RegisterVisitorScreen() {
                       ]}
                     />
                     <View
-                        style={[
+                      style={[
                         captureStepStyles.corner,
                         captureStepStyles.cornerTopRight,
                       ]}
                     />
-                        <View
-                          style={[
+                    <View
+                      style={[
                         captureStepStyles.corner,
                         captureStepStyles.cornerBottomLeft,
                       ]}
                     />
                     <View
-                          style={[
+                      style={[
                         captureStepStyles.corner,
                         captureStepStyles.cornerBottomRight,
                       ]}
@@ -1444,12 +1447,12 @@ export default function RegisterVisitorScreen() {
 
                   <Text style={captureStepStyles.scanTitle}>
                     Position ID in frame
-                    </Text>
+                  </Text>
                   <Text style={captureStepStyles.scanSubtitle}>
                     Capture or upload a clear photo of the visitor&apos;s ID
                     document
-                      </Text>
-                  </View>
+                  </Text>
+                </View>
 
                 <CaptureIdActionButton
                   title="Capture ID"
@@ -1504,8 +1507,8 @@ export default function RegisterVisitorScreen() {
                     icon={<Ban size={24} color="#0648A8" />}
                     text="No expired IDs"
                     isLast
-                    />
-                  </View>
+                  />
+                </View>
               </>
             ) : (
               <>
@@ -1521,7 +1524,7 @@ export default function RegisterVisitorScreen() {
                   <Text style={captureStepStyles.scanSubtitle}>
                     Review the image, then confirm to extract details or retake
                   </Text>
-                  </View>
+                </View>
 
                 <CaptureIdActionButton
                   title="Confirm ID"
@@ -1544,14 +1547,14 @@ export default function RegisterVisitorScreen() {
                 <View style={captureStepStyles.requirementsCard}>
                   <View style={captureStepStyles.requirementsHeader}>
                     <ShieldCheck size={26} color="#22C55E" fill="#22C55E" />
-                        <Text
-                          style={[
+                    <Text
+                      style={[
                         captureStepStyles.requirementsTitle,
                         { color: "#15803D" },
                       ]}
                     >
                       ID captured
-                        </Text>
+                    </Text>
                   </View>
                   <Text style={captureStepStyles.previewHintText}>
                     ID document captured. Confirm to run OCR and continue to
@@ -1561,9 +1564,9 @@ export default function RegisterVisitorScreen() {
               </>
             )}
           </View>
-      </ScrollView>
-    </SafeAreaView>
-  );
+        </ScrollView>
+      </SafeAreaView>
+    );
   }
 
   return null;
