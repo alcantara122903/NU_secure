@@ -45,7 +45,7 @@ interface VisitorQRTicketData {
   firstName: string;
   lastName: string;
   contactNo: string;
-  offices: { id: number; name: string }[];
+  offices: { id: number; name: string; stepName?: string }[];
   /** Face capture preview URI (`file://` / `content://`) shown on ticket */
   facePhotoUri?: string;
   /** Normal visitor — shown as Purpose on ticket */
@@ -459,7 +459,11 @@ export default function QRTicketScreen() {
   const destinationText =
     ticketData.offices?.length > 0 ? ticketData.offices.map((o) => o.name).join(', ') : '—';
 
-  const visitRoute = (ticketData.offices ?? []).map((o) => ({ id: o.id, name: o.name }));
+  const visitRoute = (ticketData.offices ?? []).map((o) => ({
+    id: o.id,
+    name: o.name,
+    stepName: o.stepName,
+  }));
 
   return (
     <>

@@ -31,7 +31,10 @@ import Svg, { Circle, Path } from 'react-native-svg';
 
 export type EnhancedQrRouteOffice = {
   id: number;
+  /** Office / destination name shown as primary line */
   name: string;
+  /** Enrollee step description shown under the office name */
+  stepName?: string;
 };
 
 export type EnhancedQrTicketViewProps = {
@@ -271,7 +274,14 @@ export function EnhancedQrTicketView({
                 <View style={styles.routeNumberCircle}>
                   <Text style={styles.routeNumberText}>{index + 1}</Text>
                 </View>
-                <Text style={styles.routeOfficeText}>{office.name}</Text>
+                <View style={styles.routeTextWrapper}>
+                  <Text style={styles.routeOfficeText}>{office.name}</Text>
+                  {office.stepName ? (
+                    <Text style={styles.routeStepText} numberOfLines={3}>
+                      {office.stepName}
+                    </Text>
+                  ) : null}
+                </View>
                 <ChevronRight size={16} color="#4B5563" strokeWidth={2.2} />
               </View>
             ))}
@@ -699,11 +709,22 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '800',
   },
-  routeOfficeText: {
+  routeTextWrapper: {
     flex: 1,
-    color: '#111827',
-    fontSize: 12,
-    fontWeight: '700',
+    paddingVertical: 8,
+    paddingRight: 4,
+  },
+  routeOfficeText: {
+    color: '#0648A8',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  routeStepText: {
+    color: '#4B5563',
+    fontSize: 11,
+    fontWeight: '500',
+    lineHeight: 15,
+    marginTop: 2,
   },
   noticeBox: {
     borderRadius: 12,

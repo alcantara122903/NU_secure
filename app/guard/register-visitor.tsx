@@ -1,3 +1,4 @@
+import { DataPrivacyNoticeModal } from "@/components/guard/data-privacy-notice-modal";
 import { FaceCaptureStepScreen } from "@/components/guard/face-capture-step";
 import { VisitorInformationStepScreen } from "@/components/guard/visitor-information-step";
 import { Colors } from "@/constants/colors";
@@ -43,6 +44,8 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Circle, Path } from "react-native-svg";
+
+type PrivacyPendingAction = "captureId" | "uploadId" | "captureFace" | null;
 
 function CaptureIdHeaderPattern() {
   return (
@@ -170,6 +173,10 @@ export default function RegisterVisitorScreen() {
   const [phoneNumber, setPhoneNumber] = useState("");
   const [reasonForVisit, setReasonForVisit] = useState("");
   const [showOfficeModal, setShowOfficeModal] = useState(false);
+  const [showPrivacyModal, setShowPrivacyModal] = useState(false);
+  const [privacyConsentGiven, setPrivacyConsentGiven] = useState(false);
+  const [privacyPendingAction, setPrivacyPendingAction] =
+    useState<PrivacyPendingAction>(null);
 
   // Normal Visitor Step 1 Fields
   const [normalVisitorFirstName, setNormalVisitorFirstName] = useState("");
@@ -217,6 +224,7 @@ export default function RegisterVisitorScreen() {
   const [capturedIdPhoto, setCapturedIdPhoto] = useState<string | null>(null);
   const [idPhotoPreview, setIdPhotoPreview] = useState<string | null>(null);
   const [isCapturingIdPhoto, setIsCapturingIdPhoto] = useState(false);
+  const [isUploadingIdPhoto, setIsUploadingIdPhoto] = useState(false);
 
   // Step 2: Enrollee Info (extracted from ID)
   const [extractedFirstName, setExtractedFirstName] = useState("");
@@ -350,20 +358,78 @@ export default function RegisterVisitorScreen() {
       const result = await cameraService.capturePhoto();
 
       if (!result.success) {
-        Alert.alert("Camera Error", result.error || "Failed to capture photo");
-        setIsCapturingPhoto(false);
+        if (result.error !== "Camera capture cancelled") {
+          Alert.alert(
+            "Camera Error",
+            result.error || "Failed to capture photo",
+          );
+        }
         return;
       }
 
       console.log("✅ Photo captured successfully");
       setCapturedFacePhoto(result.base64 || null);
       setPhotoPreview(result.uri || null);
-      setIsCapturingPhoto(false);
     } catch (error) {
       console.error("❌ Error capturing photo:", error);
       Alert.alert("Error", "Failed to capture photo. Please try again.");
+    } finally {
       setIsCapturingPhoto(false);
     }
+  };
+
+  const requestPrivacyThen = (action: Exclude<PrivacyPendingAction, null>) => {
+    // Clear any stuck spinner from a previous hung camera/gallery open.
+    setIsCapturingIdPhoto(false);
+    setIsUploadingIdPhoto(false);
+    setIsCapturingPhoto(false);
+
+    if (privacyConsentGiven) {
+      runPendingPrivacyAction(action);
+      return;
+    }
+
+    setPrivacyPendingAction(action);
+    setShowPrivacyModal(true);
+  };
+
+  const handlePrivacyDecline = () => {
+    setShowPrivacyModal(false);
+    setPrivacyPendingAction(null);
+    setIsCapturingIdPhoto(false);
+    setIsUploadingIdPhoto(false);
+    setIsCapturingPhoto(false);
+  };
+
+  const runPendingPrivacyAction = (
+    action: Exclude<PrivacyPendingAction, null>,
+  ) => {
+    if (action === "captureId") {
+      void handleCaptureIdPhoto();
+    } else if (action === "uploadId") {
+      void handleUploadIdPhoto();
+    } else {
+      void handleCaptureFace();
+    }
+  };
+
+  const handlePrivacyAgree = () => {
+    const action = privacyPendingAction;
+    setPrivacyConsentGiven(true);
+    setShowPrivacyModal(false);
+    setPrivacyPendingAction(null);
+    setIsCapturingIdPhoto(false);
+    setIsUploadingIdPhoto(false);
+    setIsCapturingPhoto(false);
+
+    if (!action) {
+      return;
+    }
+
+    // Overlay is already gone (not RN Modal), so camera can open right away.
+    requestAnimationFrame(() => {
+      runPendingPrivacyAction(action);
+    });
   };
 
   const handleConfirmPhoto = async () => {
@@ -558,54 +624,58 @@ export default function RegisterVisitorScreen() {
   const handleCaptureIdPhoto = async () => {
     try {
       setIsCapturingIdPhoto(true);
+      setIsUploadingIdPhoto(false);
       console.log("📸 Opening camera for ID capture");
 
       const result = await cameraService.capturePhoto();
 
       if (!result.success) {
-        Alert.alert(
-          "Camera Error",
-          result.error || "Failed to capture ID photo",
-        );
-        setIsCapturingIdPhoto(false);
+        if (result.error !== "Camera capture cancelled") {
+          Alert.alert(
+            "Camera Error",
+            result.error || "Failed to capture ID photo",
+          );
+        }
         return;
       }
 
       console.log("✅ ID photo captured successfully");
       setCapturedIdPhoto(result.base64 || null);
       setIdPhotoPreview(result.uri || null);
-      setIsCapturingIdPhoto(false);
     } catch (error) {
       console.error("❌ Error capturing ID photo:", error);
       Alert.alert("Error", "Failed to capture ID photo. Please try again.");
+    } finally {
       setIsCapturingIdPhoto(false);
     }
   };
 
   const handleUploadIdPhoto = async () => {
     try {
-      setIsCapturingIdPhoto(true);
+      setIsUploadingIdPhoto(true);
+      setIsCapturingIdPhoto(false);
       console.log("📱 Opening photo library for ID upload");
 
       const result = await cameraService.pickPhoto();
 
       if (!result.success) {
-        Alert.alert(
-          "Upload Error",
-          result.error || "Failed to upload ID photo",
-        );
-        setIsCapturingIdPhoto(false);
+        if (result.error !== "Photo selection cancelled") {
+          Alert.alert(
+            "Upload Error",
+            result.error || "Failed to upload ID photo",
+          );
+        }
         return;
       }
 
       console.log("✅ ID photo uploaded successfully");
       setCapturedIdPhoto(result.base64 || null);
       setIdPhotoPreview(result.uri || null);
-      setIsCapturingIdPhoto(false);
     } catch (error) {
       console.error("❌ Error uploading ID photo:", error);
       Alert.alert("Error", "Failed to upload ID photo. Please try again.");
-      setIsCapturingIdPhoto(false);
+    } finally {
+      setIsUploadingIdPhoto(false);
     }
   };
 
@@ -889,25 +959,26 @@ export default function RegisterVisitorScreen() {
         (await enrolleeService.getEnrolleeSteps(enrolleeResult.enrollee_id)) ??
         [];
 
+      const officeIds = [
+        ...new Set(
+          steps
+            .map((s: { office_id?: number }) => s.office_id)
+            .filter((id): id is number => id != null),
+        ),
+      ];
+      const { data: officeRows } =
+        officeIds.length > 0
+          ? await supabase
+              .from("office")
+              .select("office_id, office_name")
+              .in("office_id", officeIds)
+          : { data: [] as { office_id: number; office_name: string }[] };
+      const nameMap = new Map(
+        (officeRows || []).map((o) => [o.office_id, o.office_name]),
+      );
+
       let qrPayload: string | undefined;
       if (enrolleeResult.visit_id && steps && steps.length > 0) {
-        const officeIds = [
-          ...new Set(
-            steps
-              .map((s: { office_id?: number }) => s.office_id)
-              .filter((id): id is number => id != null),
-          ),
-        ];
-        const { data: officeRows } =
-          officeIds.length > 0
-            ? await supabase
-                .from("office")
-                .select("office_id, office_name")
-                .in("office_id", officeIds)
-            : { data: [] as { office_id: number; office_name: string }[] };
-        const nameMap = new Map(
-          (officeRows || []).map((o) => [o.office_id, o.office_name]),
-        );
         const route = steps.map(
           (
             s: { office_id: number; step_order?: number; step_name?: string },
@@ -937,10 +1008,16 @@ export default function RegisterVisitorScreen() {
             office_id: number;
             step_name?: string;
             step_order?: number;
-          }) => ({
-            id: s.office_id,
-            name: s.step_name || `Step ${s.step_order ?? ""}`,
-          }),
+          }) => {
+            const officeName =
+              (nameMap.get(s.office_id) as string) ||
+              `Office ${s.office_id ?? ""}`;
+            return {
+              id: s.office_id,
+              name: officeName,
+              stepName: s.step_name || `Step ${s.step_order ?? ""}`,
+            };
+          },
         ) ?? [];
 
       router.replace({
@@ -1109,6 +1186,7 @@ export default function RegisterVisitorScreen() {
         <VisitorInformationStepScreen
           badgeIconLetter="E"
           badgeLabel="Enrollee"
+          showControlNumber={false}
           showDestinationOffice={false}
           showReasonForVisit={false}
           offices={offices}
@@ -1343,24 +1421,32 @@ export default function RegisterVisitorScreen() {
 
   if (step === 3) {
     return (
-      <FaceCaptureStepScreen
-        badgeIconLetter={visitorTypeInfo.icon}
-        badgeLabel={visitorTypeInfo.label}
-        onBack={handleBack}
-        photoPreview={photoPreview}
-        isCapturingPhoto={isCapturingPhoto}
-        isCreatingEnrollee={isCreatingEnrollee}
-        onCaptureFace={handleCaptureFace}
-        onConfirmPhoto={handleConfirmPhoto}
-        onRetakePhoto={handleRetakePhoto}
-      />
+      <View style={{ flex: 1 }}>
+        <FaceCaptureStepScreen
+          badgeIconLetter={visitorTypeInfo.icon}
+          badgeLabel={visitorTypeInfo.label}
+          onBack={handleBack}
+          photoPreview={photoPreview}
+          isCapturingPhoto={isCapturingPhoto}
+          isCreatingEnrollee={isCreatingEnrollee}
+          onCaptureFace={() => requestPrivacyThen("captureFace")}
+          onConfirmPhoto={handleConfirmPhoto}
+          onRetakePhoto={handleRetakePhoto}
+        />
+        <DataPrivacyNoticeModal
+          visible={showPrivacyModal}
+          onAgree={handlePrivacyAgree}
+          onDecline={handlePrivacyDecline}
+        />
+      </View>
     );
   }
 
   if (step === 1) {
     return (
-      <SafeAreaView style={captureStepStyles.safeArea}>
-        <StatusBar barStyle="light-content" backgroundColor="#0648A8" />
+      <View style={{ flex: 1 }}>
+        <SafeAreaView style={captureStepStyles.safeArea}>
+          <StatusBar barStyle="light-content" backgroundColor="#0648A8" />
 
         <ScrollView
           style={captureStepStyles.captureScroll}
@@ -1459,8 +1545,8 @@ export default function RegisterVisitorScreen() {
                   subtitle="Use camera to take a photo"
                   icon={<Camera size={24} color="#FFFFFF" fill="#FFFFFF" />}
                   color="#0648A8"
-                  onPress={handleCaptureIdPhoto}
-                  disabled={isCapturingIdPhoto}
+                  onPress={() => requestPrivacyThen("captureId")}
+                  disabled={isCapturingIdPhoto || isUploadingIdPhoto}
                   loading={isCapturingIdPhoto}
                 />
 
@@ -1469,9 +1555,9 @@ export default function RegisterVisitorScreen() {
                   subtitle="Choose from gallery"
                   icon={<UploadCloud size={24} color="#FFFFFF" />}
                   color="#279EED"
-                  onPress={handleUploadIdPhoto}
-                  disabled={isCapturingIdPhoto}
-                  loading={isCapturingIdPhoto}
+                  onPress={() => requestPrivacyThen("uploadId")}
+                  disabled={isCapturingIdPhoto || isUploadingIdPhoto}
+                  loading={isUploadingIdPhoto}
                 />
 
                 <CaptureIdActionButton
@@ -1480,7 +1566,7 @@ export default function RegisterVisitorScreen() {
                   icon={<Wrench size={24} color="#FFFFFF" fill="#FFFFFF" />}
                   color="#FF9500"
                   onPress={handleRunOCRDiagnostics}
-                  disabled={isCapturingIdPhoto}
+                  disabled={isCapturingIdPhoto || isUploadingIdPhoto}
                 />
 
                 <View style={captureStepStyles.requirementsCard}>
@@ -1566,6 +1652,12 @@ export default function RegisterVisitorScreen() {
           </View>
         </ScrollView>
       </SafeAreaView>
+        <DataPrivacyNoticeModal
+          visible={showPrivacyModal}
+          onAgree={handlePrivacyAgree}
+          onDecline={handlePrivacyDecline}
+        />
+      </View>
     );
   }
 
