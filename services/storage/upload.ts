@@ -6,7 +6,7 @@
  * - visitor-files/Face_ID_picture/ → face and ID capture photos
  */
 
-import * as FileSystem from 'expo-file-system/legacy';
+import { File } from 'expo-file-system';
 import { supabase } from '../database/supabase';
 
 /**
@@ -80,12 +80,11 @@ export async function uploadImage(
       }
       base64Data = parts[1];
       console.log(`✓ Base64 extracted: ${(base64Data.length / 1024).toFixed(2)} KB`);
-    } else if (imageUri.startsWith('file://')) {
+    } else if (imageUri.startsWith('file://') || imageUri.startsWith('content://')) {
       console.log('📂 Reading file from URI...');
       try {
-        base64Data = await FileSystem.readAsStringAsync(imageUri, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
+        const file = new File(imageUri);
+        base64Data = await file.base64();
         console.log(`✓ File read: ${(base64Data.length / 1024).toFixed(2)} KB`);
       } catch (fileError: any) {
         console.error('❌ File read failed:', fileError.message);

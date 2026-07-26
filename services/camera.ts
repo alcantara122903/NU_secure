@@ -12,6 +12,16 @@ export interface PhotoCaptureResult {
   error?: string;
 }
 
+export type PhotoCaptureOptions = {
+  /** JPEG quality 0–1. ID OCR: ~0.55; face photo can stay higher. */
+  quality?: number;
+};
+
+/** Default for ID scan / upload — smaller file → faster OCR */
+export const ID_PHOTO_QUALITY = 0.55;
+/** Default for face capture — keep a bit sharper */
+export const FACE_PHOTO_QUALITY = 0.8;
+
 class CameraService {
   /**
    * Request camera permissions
@@ -37,7 +47,10 @@ class CameraService {
   /**
    * Capture photo from camera
    */
-  async capturePhoto(): Promise<PhotoCaptureResult> {
+  async capturePhoto(
+    options: PhotoCaptureOptions = {},
+  ): Promise<PhotoCaptureResult> {
+    const quality = options.quality ?? FACE_PHOTO_QUALITY;
     try {
       console.log("📸 Opening camera");
 
@@ -55,7 +68,7 @@ class CameraService {
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: [4, 3],
-        quality: 0.8,
+        quality,
         base64: true,
       });
 
@@ -82,9 +95,8 @@ class CameraService {
 
       console.log("✅ Photo captured successfully");
       console.log(`   URI: ${photo.uri}`);
+      console.log(`   Quality: ${quality}`);
       console.log(`   Base64 length: ${photo.base64.length} chars`);
-      console.log(`   Data URL length: ${dataUrl.length} chars`);
-      console.log(`   Data URL prefix: ${dataUrl.substring(0, 50)}...`);
 
       return {
         success: true,
@@ -102,9 +114,12 @@ class CameraService {
   }
 
   /**
-   * Pick photo from library
+   * Pick photo from library (PNG / JPEG / iPhone gallery, etc.)
    */
-  async pickPhoto(): Promise<PhotoCaptureResult> {
+  async pickPhoto(
+    options: PhotoCaptureOptions = {},
+  ): Promise<PhotoCaptureResult> {
+    const quality = options.quality ?? ID_PHOTO_QUALITY;
     try {
       console.log("📱 Opening photo library");
 
@@ -112,7 +127,7 @@ class CameraService {
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: [4, 3],
-        quality: 0.8,
+        quality,
         base64: true,
       });
 
@@ -139,9 +154,8 @@ class CameraService {
 
       console.log("✅ Photo selected successfully");
       console.log(`   URI: ${photo.uri}`);
+      console.log(`   Quality: ${quality}`);
       console.log(`   Base64 length: ${photo.base64.length} chars`);
-      console.log(`   Data URL length: ${dataUrl.length} chars`);
-      console.log(`   Data URL prefix: ${dataUrl.substring(0, 50)}...`);
 
       return {
         success: true,

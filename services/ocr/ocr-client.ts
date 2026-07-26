@@ -67,11 +67,18 @@ const parseBase64Image = (base64: string): { cleanBase64: string; mimeType: stri
 
 /**
  * Extract text from ID image using OCR.Space API
+ * @param imageUri Optional local file URI (camera/gallery) for faster native compression
  */
-export const extractTextFromImageViaOCR = async (base64Image: string): Promise<string | null> => {
+export const extractTextFromImageViaOCR = async (
+  base64Image: string,
+  imageUri?: string | null,
+): Promise<string | null> => {
   try {
-    // Validate and prepare image
-    const { base64: preparedBase64, sizeKB, warnings } = await validateAndPrepareImageForOCR(base64Image);
+    // Prefer URI when available — avoids base64 temp-file write on iOS
+    const { base64: preparedBase64, sizeKB, warnings } = await validateAndPrepareImageForOCR(
+      base64Image,
+      { imageUri },
+    );
     
     if (warnings.length > 0) logWarn('⚠️ Image warnings:', warnings);
     

@@ -4,7 +4,7 @@ import { VisitorInformationStepScreen } from "@/components/guard/visitor-informa
 import { Colors } from "@/constants/colors";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { buildQRTicketPayloadV1 } from "@/lib/qr-ticket-payload";
-import { cameraService } from "@/services/camera";
+import { cameraService, FACE_PHOTO_QUALITY, ID_PHOTO_QUALITY } from "@/services/camera";
 import { supabase } from "@/services/database";
 import { officeService } from "@/services/office";
 import {
@@ -355,7 +355,9 @@ export default function RegisterVisitorScreen() {
       setIsCapturingPhoto(true);
       console.log("📸 Opening camera for face capture");
 
-      const result = await cameraService.capturePhoto();
+      const result = await cameraService.capturePhoto({
+        quality: FACE_PHOTO_QUALITY,
+      });
 
       if (!result.success) {
         if (result.error !== "Camera capture cancelled") {
@@ -627,7 +629,9 @@ export default function RegisterVisitorScreen() {
       setIsUploadingIdPhoto(false);
       console.log("📸 Opening camera for ID capture");
 
-      const result = await cameraService.capturePhoto();
+      const result = await cameraService.capturePhoto({
+        quality: ID_PHOTO_QUALITY,
+      });
 
       if (!result.success) {
         if (result.error !== "Camera capture cancelled") {
@@ -656,7 +660,9 @@ export default function RegisterVisitorScreen() {
       setIsCapturingIdPhoto(false);
       console.log("📱 Opening photo library for ID upload");
 
-      const result = await cameraService.pickPhoto();
+      const result = await cameraService.pickPhoto({
+        quality: ID_PHOTO_QUALITY,
+      });
 
       if (!result.success) {
         if (result.error !== "Photo selection cancelled") {
@@ -680,7 +686,10 @@ export default function RegisterVisitorScreen() {
   };
 
   // Extract data from ID image using OCR with intelligent parsing
-  const extractDataFromIdImage = async (idPhotoBase64: string) => {
+  const extractDataFromIdImage = async (
+    idPhotoBase64: string,
+    imageUri?: string | null,
+  ) => {
     try {
       console.log("🔍 Starting ID text extraction...");
 
@@ -693,9 +702,11 @@ export default function RegisterVisitorScreen() {
         { cancelable: false },
       );
 
-      // Try OCR extraction with intelligent parsing
-      const extractedData =
-        await enrolleeService.extractDataFromID(idPhotoBase64);
+      // Prefer local URI for compression (avoids iOS File.write encoding bug)
+      const extractedData = await enrolleeService.extractDataFromID(
+        idPhotoBase64,
+        imageUri ?? idPhotoPreview,
+      );
 
       // Close processing alert
       if (processingAlert) {
@@ -824,7 +835,7 @@ export default function RegisterVisitorScreen() {
     console.log("📋 ID photo confirmed, extracting data...");
 
     // Extract data from ID image
-    await extractDataFromIdImage(capturedIdPhoto);
+    await extractDataFromIdImage(capturedIdPhoto, idPhotoPreview);
 
     // Proceed to Step 2
     setStep(2);

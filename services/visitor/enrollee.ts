@@ -41,7 +41,10 @@ export const enrolleeService = {
    * 
    * Supports 17 different Philippine ID types
    */
-  async extractDataFromID(base64Image: string): Promise<IDExtractionData | null> {
+  async extractDataFromID(
+    base64Image: string,
+    imageUri?: string | null,
+  ): Promise<IDExtractionData | null> {
     try {
       console.log('\n\n========== ID EXTRACTION PROCESS STARTED ==========\n');
 
@@ -60,7 +63,7 @@ export const enrolleeService = {
       console.log('📊 STEP 1: Calling OCR.Space API');
       console.log('   Status: Sending image to OCR.Space...');
       
-      const ocrRawText = await extractDataFromIDViaBackend(base64Image);
+      const ocrRawText = await extractDataFromIDViaBackend(base64Image, imageUri);
       
       if (!ocrRawText) {
         console.warn('\n⚠️ STEP 1 FAILED: OCR.Space did not return text');
