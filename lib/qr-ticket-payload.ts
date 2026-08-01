@@ -1,6 +1,9 @@
+import { extractQrTokenFromAnyScan } from '@/lib/enrollee-progress-url';
+
 /**
  * Structured QR payload (v1) encoded on visitor tickets.
  * Scanners parse JSON for visit linkage, route display, and backward-compatible qr_token lookup.
+ * Enrollee tickets also encode a public progress URL (see buildEnrolleeProgressUrl).
  */
 
 export type VisitorTicketKind = 'enrollee' | 'normal_visitor' | 'contractor';
@@ -51,7 +54,7 @@ const parsePositiveInt = (value: unknown): number | null => {
 
 /**
  * Lenient scan parse (aligned with `office-exit-scan` parseRawQr): JSON keys in camelCase or snake_case,
- * pipe-delimited segments, URL query params, then plain token fallback — without requiring full v1 `route`.
+ * pipe-delimited segments, URL query params / progress path, then plain token fallback.
  */
 export function extractLooseQrScanFields(raw: string): {
   qr_token: string | null;
@@ -103,7 +106,7 @@ export function extractLooseQrScanFields(raw: string): {
     if (typeof parsed === 'string') {
       const t = parsed.trim();
       if (t) {
-        qr_token = t;
+        qr_token = extractQrTokenFromAnyScan(t) || t;
       }
     } else if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       parsedAsJsonObject = true;
@@ -122,6 +125,7 @@ export function extractLooseQrScanFields(raw: string): {
     try {
       const url = new URL(trimmed);
       qr_token =
+        extractQrTokenFromAnyScan(trimmed) ||
         normalizeScanText(url.searchParams.get('qrToken')) ||
         normalizeScanText(url.searchParams.get('qr_token')) ||
         normalizeScanText(url.searchParams.get('token')) ||
@@ -143,7 +147,7 @@ export function extractLooseQrScanFields(raw: string): {
   }
 
   if (!qr_token && !parsedAsJsonObject) {
-    qr_token = trimmed;
+    qr_token = extractQrTokenFromAnyScan(trimmed) || trimmed;
   }
 
   return { qr_token, visit_id, visitor_id, control_number, pass_number, qr_parts };
@@ -160,7 +164,7 @@ export function parseQrTicketRaw(raw: string): {
   try {
     const obj = JSON.parse(trimmed) as unknown;
     if (!obj || typeof obj !== 'object') {
-      return { payload: null, qr_token: trimmed };
+      return { payload: null, qr_token: extractQrTokenFromAnyScan(trimmed) || trimmed };
     }
     const o = obj as Record<string, unknown>;
     if (
@@ -182,7 +186,10 @@ export function parseQrTicketRaw(raw: string): {
       qr_token: loose.qr_token || null,
     };
   } catch {
-    // Plain token or legacy format
+    // Plain token, progress URL, or legacy format
   }
-  return { payload: null, qr_token: trimmed };
+  return {
+    payload: null,
+    qr_token: extractQrTokenFromAnyScan(trimmed) || trimmed,
+  };
 }

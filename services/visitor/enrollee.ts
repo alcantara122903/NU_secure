@@ -5,6 +5,10 @@
 
 import { toSupabaseTimestampPh } from '@/lib/supabase-timestamp-ph';
 import type { IDExtractionData, VisitorRegistrationData } from '@/types/visitor';
+import {
+  resolveCompletedExpectationStatusId,
+  resolvePendingExpectationStatusId,
+} from '@/services/office-flow/db-status-lookups';
 import { addressService, type AddressData } from '../address';
 import { supabase } from '../database/supabase';
 import { extractTextFromImageViaOCR as extractDataFromIDViaBackend } from '../ocr/ocr-client';
@@ -407,24 +411,85 @@ export const enrolleeService = {
         console.log(`✅ New enrollee created with ID: ${enrolleeRecData.enrollee_id}`);
       }
 
+      // Resume or initialize progress BEFORE creating today's visit
+      // so unfinished steps carry over and the new QR points at the next office.
+      console.log('\n📊 PROGRESS HANDLING: Resume or Initialize (before visit)');
+      try {
+        const progressRecords = await this.resumeOrInitializeProgress(enrolleeRecData.enrollee_id);
+        if (progressRecords && progressRecords.length > 0) {
+          console.log(`✅ Progress handled for ${progressRecords.length} enrollment steps`);
+        } else if (progressRecords === null) {
+          console.warn('⚠️ Progress records is NULL - check logs above for details');
+        } else {
+          console.warn('⚠️ Progress records returned empty array');
+        }
+      } catch (progressError) {
+        console.error('❌ ERROR handling progress:');
+        console.error('   Error:', progressError);
+      }
+
       // Create visit record
       console.log('\n🎫 Creating visit record...');
+
+      // Close any previous open visits for this visitor (incomplete day / forgot exit)
+      try {
+        const { data: openVisits } = await supabase
+          .from('visit')
+          .select('visit_id')
+          .eq('visitor_id', visitorData.visitor_id)
+          .is('exit_time', null);
+        if (openVisits?.length) {
+          const nowIso = toSupabaseTimestampPh();
+          await supabase
+            .from('visit')
+            .update({ exit_time: nowIso, duration_minutes: 0 })
+            .eq('visitor_id', visitorData.visitor_id)
+            .is('exit_time', null);
+          console.log(`   Closed ${openVisits.length} previous open visit(s) before new entry`);
+        }
+      } catch (closeErr) {
+        console.warn('   Could not auto-close previous open visits:', closeErr);
+      }
       
-      // Prefer first active enrollee step office for primary_office_id on insert
+      // Prefer next unfinished enrollee step office (resume mid-route)
       let firstOfficeId: number | null = null;
       try {
-        const { data: firstStep } = await supabase
-          .from('enrollee_step')
-          .select('office_id')
-          .eq('is_active', true)
-          .order('step_order', { ascending: true })
-          .limit(1)
-          .maybeSingle();
-        if (firstStep?.office_id != null) {
-          firstOfficeId = Number(firstStep.office_id);
+        const { data: progressForNext } = await supabase
+          .from('enrollee_progress')
+          .select('completed_at, step:enrollee_step(office_id, step_order)')
+          .eq('enrollee_id', enrolleeRecData.enrollee_id);
+        const incomplete = (progressForNext || [])
+          .map((row: any) => {
+            const step = Array.isArray(row.step) ? row.step[0] : row.step;
+            return {
+              completed_at: row.completed_at,
+              office_id: step?.office_id != null ? Number(step.office_id) : null,
+              step_order: Number(step?.step_order) || 0,
+            };
+          })
+          .filter((r) => !r.completed_at && r.office_id != null)
+          .sort((a, b) => a.step_order - b.step_order);
+        if (incomplete[0]?.office_id != null) {
+          firstOfficeId = incomplete[0].office_id;
         }
       } catch {
         // non-blocking
+      }
+      if (firstOfficeId == null) {
+        try {
+          const { data: firstStep } = await supabase
+            .from('enrollee_step')
+            .select('office_id')
+            .eq('is_active', true)
+            .order('step_order', { ascending: true })
+            .limit(1)
+            .maybeSingle();
+          if (firstStep?.office_id != null) {
+            firstOfficeId = Number(firstStep.office_id);
+          }
+        } catch {
+          // non-blocking
+        }
       }
 
       const visitPayload = {
@@ -446,40 +511,25 @@ export const enrolleeService = {
         .select()
         .single();
 
-      if (visitError) {
-        console.warn('\n⚠️ Visit record creation error (non-critical)');
-        console.warn('   Error:', visitError.message);
-        console.warn('   Continuing anyway as visit record is not blocking...');
-      } else if (visitData && visitData.visit_id) {
-        console.log(`✅ Visit record created with ID: ${visitData.visit_id}`);
+      if (visitError || !visitData?.visit_id) {
+        console.error('\n❌ VISIT CREATION FAILED (required for QR progress URL)');
+        console.error('   Error:', visitError?.message);
+        throw new Error(
+          visitError?.message ||
+            'Failed to create visit record. QR progress page will not work without a visit.',
+        );
       }
 
-      // Handle progress: Resume if exists, or initialize if new enrollee
-      console.log('\n📊 PROGRESS HANDLING: Resume or Initialize');
-      try {
-        const progressRecords = await this.resumeOrInitializeProgress(enrolleeRecData.enrollee_id);
-        if (progressRecords && progressRecords.length > 0) {
-          console.log(`✅ Progress handled for ${progressRecords.length} enrollment steps`);
-        } else if (progressRecords === null) {
-          console.warn('⚠️ Progress records is NULL - check logs above for details');
-        } else {
-          console.warn('⚠️ Progress records returned empty array');
-        }
-      } catch (progressError) {
-        console.error('❌ ERROR handling progress:');
-        console.error('   Error:', progressError);
-      }
+      console.log(`✅ Visit record created with ID: ${visitData.visit_id}`);
 
-      if (visitData?.visit_id) {
-        await this.syncOfficeExpectationsForEnrolleeVisit(visitData.visit_id, enrolleeRecData.enrollee_id);
-      }
+      await this.syncOfficeExpectationsForEnrolleeVisit(visitData.visit_id, enrolleeRecData.enrollee_id);
 
       console.log('\n✅ === ENROLLEE CREATION COMPLETED SUCCESSFULLY ===\n');
 
       return {
         enrollee_id: enrolleeRecData.enrollee_id,
         visitor_id: visitorData.visitor_id,
-        visit_id: visitData?.visit_id,
+        visit_id: visitData.visit_id,
       };
     } catch (error: any) {
       console.error('\n❌ === ENROLLEE CREATION FAILED ===\n');
@@ -502,21 +552,12 @@ export const enrolleeService = {
    */
   async syncOfficeExpectationsForEnrolleeVisit(visitId: number, enrolleeId: number): Promise<void> {
     try {
-      const { data: existing } = await supabase
-        .from('office_expectation')
-        .select('expectation_id')
-        .eq('visit_id', visitId)
-        .limit(1);
-
-      if (existing && existing.length > 0) {
-        return;
-      }
-
       const { data: progressList, error } = await supabase
         .from('enrollee_progress')
         .select(
           `
           progress_id,
+          completed_at,
           step:enrollee_step(step_id, step_order, office_id)
         `,
         )
@@ -527,36 +568,70 @@ export const enrolleeService = {
         return;
       }
 
+      const pickStep = (row: any) => (Array.isArray(row?.step) ? row.step[0] : row?.step);
+
       const sorted = [...progressList].sort((a: any, b: any) => {
-        const aStep = Array.isArray(a.step) ? a.step[0] : a.step;
-        const bStep = Array.isArray(b.step) ? b.step[0] : b.step;
-        return (aStep?.step_order ?? 0) - (bStep?.step_order ?? 0);
+        return (pickStep(a)?.step_order ?? 0) - (pickStep(b)?.step_order ?? 0);
       });
 
-      // Unique by office_id — enrollee route can visit the same office twice
-      // (e.g. Admissions at step 1 and step 9), but office_expectation is unique per visit+office.
-      const seenOfficeIds = new Set<number>();
-      const rows: Record<string, unknown>[] = [];
+      const now = toSupabaseTimestampPh();
 
-      sorted.forEach((row: any, index: number) => {
-        const step = Array.isArray(row.step) ? row.step[0] : row.step;
-        const oid = step?.office_id;
-        if (oid == null) return;
-        const officeId = Number(oid);
-        if (!Number.isFinite(officeId) || seenOfficeIds.has(officeId)) return;
-        seenOfficeIds.add(officeId);
-        rows.push({
+      // One expectation per office (Admissions appears at step 1 and 9).
+      // Sort key = earliest incomplete step_order at that office (else earliest any).
+      type OfficeAgg = {
+        officeId: number;
+        sortKey: number;
+        stillIncomplete: boolean;
+      };
+      const byOffice = new Map<number, OfficeAgg>();
+
+      for (const row of sorted) {
+        const step = pickStep(row);
+        const officeId = step?.office_id != null ? Number(step.office_id) : null;
+        const stepOrder = Number(step?.step_order) || 0;
+        if (officeId == null || !Number.isFinite(officeId) || stepOrder <= 0) continue;
+
+        const incomplete = !row.completed_at;
+        const existing = byOffice.get(officeId);
+        if (!existing) {
+          byOffice.set(officeId, { officeId, sortKey: stepOrder, stillIncomplete: incomplete });
+          continue;
+        }
+        if (incomplete) {
+          if (!existing.stillIncomplete) {
+            existing.stillIncomplete = true;
+            existing.sortKey = stepOrder;
+          } else {
+            existing.sortKey = Math.min(existing.sortKey, stepOrder);
+          }
+        } else if (!existing.stillIncomplete) {
+          existing.sortKey = Math.min(existing.sortKey, stepOrder);
+        }
+      }
+
+      // Sequential expected_order 1..n (matches normal/contractor tickets)
+      const [pendingStatusId, completedStatusId] = await Promise.all([
+        resolvePendingExpectationStatusId(),
+        resolveCompletedExpectationStatusId(),
+      ]);
+
+      const rows = [...byOffice.values()]
+        .sort((a, b) => a.sortKey - b.sortKey)
+        .map((agg, index) => ({
           visit_id: visitId,
-          office_id: officeId,
-          expected_order: step?.step_order ?? index + 1,
-          expectation_status_id: 1,
-          created_at: toSupabaseTimestampPh(),
-        });
-      });
+          office_id: agg.officeId,
+          expected_order: index + 1,
+          expectation_status_id: agg.stillIncomplete ? pendingStatusId : completedStatusId,
+          created_at: now,
+          arrived_at: agg.stillIncomplete ? null : now,
+        }));
 
       if (!rows.length) {
         return;
       }
+
+      // Replace so resume / mid-route progress stays aligned with enrollee_progress
+      await supabase.from('office_expectation').delete().eq('visit_id', visitId);
 
       const { error: insErr } = await supabase.from('office_expectation').insert(rows);
       if (insErr) {
@@ -564,10 +639,12 @@ export const enrolleeService = {
         return;
       }
 
-      const firstStep = Array.isArray(sorted[0]?.step) ? sorted[0]?.step[0] : sorted[0]?.step;
-      const firstOfficeId = firstStep?.office_id;
-      if (firstOfficeId) {
-        await supabase.from('visit').update({ primary_office_id: firstOfficeId }).eq('visit_id', visitId);
+      const nextIncomplete = sorted.find((row: any) => !row.completed_at);
+      const nextStep = pickStep(nextIncomplete) || pickStep(sorted[sorted.length - 1]);
+      const nextOfficeId =
+        nextStep?.office_id != null ? Number(nextStep.office_id) : null;
+      if (nextOfficeId != null && Number.isFinite(nextOfficeId)) {
+        await supabase.from('visit').update({ primary_office_id: nextOfficeId }).eq('visit_id', visitId);
       }
     } catch (e) {
       console.warn('[syncOfficeExpectationsForEnrolleeVisit] unexpected', e);
@@ -626,9 +703,60 @@ export const enrolleeService = {
         return null;
       }
 
-      // STEP 2: If progress exists, return it (RESUME)
+      // STEP 2: If progress exists, sync any NEW active steps (e.g. Step 9 added later), then RESUME
       if (existingProgress && existingProgress.length > 0) {
         console.log(`\n✅ RESUME MODE: Found ${existingProgress.length} existing progress records`);
+
+        // Sync missing steps from enrollee_step (keeps Visit Route at 1..N when steps are added)
+        try {
+          const { data: allSteps } = await supabase
+            .from('enrollee_step')
+            .select('step_id, step_name, step_order')
+            .eq('is_active', true)
+            .order('step_order', { ascending: true });
+
+          const have = new Set((existingProgress || []).map((p: any) => Number(p.step_id)));
+          const missing = (allSteps || []).filter((s: any) => !have.has(Number(s.step_id)));
+
+          if (missing.length > 0) {
+            let pendingStatusId: number | null = null;
+            const { data: allStatuses } = await supabase
+              .from('step_status')
+              .select('step_status_id, step_status_name');
+            if (allStatuses?.length) {
+              const pending =
+                allStatuses.find(
+                  (s: any) =>
+                    String(s.step_status_name || '')
+                      .toLowerCase()
+                      .includes('pending') ||
+                    String(s.step_status_name || '')
+                      .toLowerCase()
+                      .includes('not started'),
+                ) || allStatuses[0];
+              pendingStatusId = pending?.step_status_id ?? null;
+            }
+
+            const payloads = missing.map((step: any) => ({
+              enrollee_id: enrolleeId,
+              step_id: step.step_id,
+              completed_at: null,
+              ...(pendingStatusId != null ? { step_status_id: pendingStatusId } : {}),
+            }));
+
+            const { error: syncErr } = await supabase.from('enrollee_progress').insert(payloads);
+            if (syncErr) {
+              console.warn('⚠️ Could not sync missing enrollee steps:', syncErr.message);
+            } else {
+              console.log(
+                `✅ Synced ${missing.length} missing step(s):`,
+                missing.map((s: any) => s.step_order).join(', '),
+              );
+            }
+          }
+        } catch (syncError) {
+          console.warn('⚠️ sync missing steps failed (non-blocking):', syncError);
+        }
         
         // Fetch full progress data with step details for resuming
         const { data: fullProgress, error: fetchError } = await supabase
@@ -931,8 +1059,11 @@ export const enrolleeService = {
         .from('visit')
         .select(`
           visit_id,
-          status,
           qr_token,
+          exit_status_id,
+          entry_time,
+          exit_time,
+          primary_office_id,
           visitor:visitor(*)
         `)
         .eq('qr_token', qrToken)
@@ -951,17 +1082,17 @@ export const enrolleeService = {
   },
 
   /**
-   * Update visit status
+   * Update visit exit status (schema uses exit_status_id, not a free-text status column)
    */
-  async updateVisitStatus(visitId: number, status: string): Promise<boolean> {
+  async updateVisitStatus(visitId: number, exitStatusId: number): Promise<boolean> {
     try {
       const { error } = await supabase
         .from('visit')
-        .update({ status, updated_at: toSupabaseTimestampPh() })
+        .update({ exit_status_id: exitStatusId })
         .eq('visit_id', visitId);
 
       if (error) {
-        console.error('❌ Error updating visit status:', error);
+        console.error('❌ Error updating visit exit status:', error);
         return false;
       }
 
@@ -974,7 +1105,7 @@ export const enrolleeService = {
 
   /**
    * Get next incomplete step for an enrollee
-   * Returns the first step that is not completed (completed_at is null)
+   * Returns the first step that is not completed (completed_at is null), ordered by step_order
    */
   async getNextIncompleteStep(enrolleeId: number): Promise<any | null> {
     try {
@@ -992,24 +1123,26 @@ export const enrolleeService = {
           )
         `)
         .eq('enrollee_id', enrolleeId)
-        .is('completed_at', null)
-        .order('step_id', { ascending: true })
-        .limit(1)
-        .single();
+        .is('completed_at', null);
 
       if (error) {
-        if (error.code === 'PGRST116') {
-          // No rows found - all steps are complete
-          console.log(`✅ All steps completed for enrollee ${enrolleeId}`);
-          return null;
-        }
         console.error('❌ Error fetching next incomplete step:', error);
         return null;
       }
 
-      const stepData = data?.step as any;
+      if (!data?.length) {
+        console.log(`✅ All steps completed for enrollee ${enrolleeId}`);
+        return null;
+      }
+
+      const pickStep = (row: any) => (Array.isArray(row?.step) ? row.step[0] : row?.step);
+      const sorted = [...data].sort(
+        (a, b) => (pickStep(a)?.step_order ?? 0) - (pickStep(b)?.step_order ?? 0),
+      );
+      const next = sorted[0];
+      const stepData = pickStep(next);
       console.log(`📍 Next incomplete step: ${stepData?.step_name} (Order: ${stepData?.step_order})`);
-      return data;
+      return next;
     } catch (error) {
       console.error('❌ Error in getNextIncompleteStep:', error);
       return null;

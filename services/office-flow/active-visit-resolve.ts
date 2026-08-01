@@ -1,3 +1,4 @@
+import { extractQrTokenFromAnyScan } from '@/lib/enrollee-progress-url';
 import { extractLooseQrScanFields, parseQrTicketRaw } from '@/lib/qr-ticket-payload';
 import { supabase } from '@/services/database/supabase';
 
@@ -33,7 +34,7 @@ function uniqueNonEmptyStrings(values: (string | null | undefined)[]): string[] 
 /**
  * Resolves the single active visit (exit_time is null) from a QR scan string:
  * v1 ticket JSON, loose web JSON (qr_token / visit_id / control_number / pass_number / visitor_id),
- * pipe-delimited or URL-encoded payloads, then plain qr_token — aligned with exit scan resolution.
+ * pipe-delimited or progress URL payloads, then plain qr_token — aligned with exit scan resolution.
  */
 export async function resolveActiveVisitFromScanInput(rawQrValue: string): Promise<ActiveVisitRow | null> {
   const trimmed = rawQrValue.trim();
@@ -44,8 +45,17 @@ export async function resolveActiveVisitFromScanInput(rawQrValue: string): Promi
   const parsed = parseQrTicketRaw(trimmed);
   const loose = extractLooseQrScanFields(trimmed);
 
+  // Never look up the full https URL as qr_token — only the embedded QR-… token.
+  const extractedFromUrl =
+    trimmed.startsWith('http://') || trimmed.startsWith('https://')
+      ? extractQrTokenFromAnyScan(trimmed)
+      : extractQrTokenFromAnyScan(trimmed);
+
   const visitIdForCompound = parsed.payload?.visit_id ?? loose.visit_id ?? null;
-  const qrTokenForCompound = parsed.payload != null ? parsed.qr_token : loose.qr_token;
+  const qrTokenForCompound =
+    (parsed.payload != null ? parsed.qr_token : null) ||
+    loose.qr_token ||
+    extractedFromUrl;
 
   let visit: ActiveVisitRow | null = null;
 
@@ -87,14 +97,18 @@ export async function resolveActiveVisitFromScanInput(rawQrValue: string): Promi
     parsed.payload == null &&
     (!loose.qr_token?.trim() || loose.qr_token === trimmed);
 
+  const isHttp = /^https?:\/\//i.test(trimmed);
+
   const stringCandidates = uniqueNonEmptyStrings([
+    extractedFromUrl,
     parsed.payload ? parsed.qr_token : null,
     loose.qr_token,
     loose.control_number,
     loose.pass_number,
     ...loose.qr_parts,
-    !junkFullJsonAsToken ? parsed.qr_token : null,
-    !junkFullJsonAsToken ? trimmed : null,
+    !junkFullJsonAsToken && !isHttp ? parsed.qr_token : null,
+    // Only use raw trimmed when it looks like a token, never a full URL
+    !junkFullJsonAsToken && !isHttp ? trimmed : null,
   ]);
 
   for (const token of stringCandidates) {

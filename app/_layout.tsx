@@ -22,6 +22,7 @@ export default function RootLayout() {
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
             <Stack.Screen name="guard" options={{ headerShown: false }} />
             <Stack.Screen name="office" options={{ headerShown: false }} />
+            <Stack.Screen name="enrollee" options={{ headerShown: false }} />
           </Stack>
           <StatusBar style="auto" />
         </ThemeProvider>

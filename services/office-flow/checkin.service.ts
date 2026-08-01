@@ -3,8 +3,14 @@ import { supabase } from '@/services/database/supabase';
 import { resolveActiveVisitFromScanInput } from './active-visit-resolve';
 import { VISIT_TYPE } from './constants';
 import type { OfficeCheckInScanRequest, OfficeCheckInScanResult } from './checkin.types';
-import { resolveCompletedEnrolleeStatusId, resolveCompletedStepStatusId, resolveCompletedExpectationStatusId, resolveValidationStatusId } from './db-status-lookups';
-import { completeEnrolleeProgressAtOffice, nextOfficeIdFromEnrolleeProgress } from './enrollee-route';
+import {
+  resolveCompletedEnrolleeStatusId,
+  resolveCompletedStepStatusId,
+  resolveCompletedExpectationStatusId,
+  resolvePendingExpectationStatusId,
+  resolveValidationStatusId,
+} from './db-status-lookups';
+import { completeEnrolleeProgressAtOffice, nextOfficeIdFromEnrolleeProgress, officeStillHasIncompleteEnrolleeSteps } from './enrollee-route';
 import {
   expectationsAreFullyCheckedIn,
   firstPendingExpectation,
@@ -194,16 +200,36 @@ export async function processOfficeCheckInScan(req: OfficeCheckInScanRequest): P
   const registeredBy = await loadRegisteredByName(scannedByUserId);
 
   if (expectationsAreFullyCheckedIn(expectations)) {
-    return {
-      success: true,
-      authorized: false,
-      title: 'Route complete',
-      message:
-        'Every office on this ticket has already been checked in. Use exit processing when the visitor leaves.',
-      visitorName,
-      visitorPhotoUrl,
-      visitId: visit.visit_id,
-    };
+    // Enrollees can revisit the same office (e.g. Admissions step 1 then step 9).
+    // Do not block on office_expectation alone while enrollee_progress still has work.
+    if (visit.visit_type_id === VISIT_TYPE.ENROLLEE) {
+      const nextOffice = await nextOfficeIdFromEnrolleeProgress(visit.visitor_id);
+      if (nextOffice != null) {
+        // continue check-in using enrollee progress
+      } else {
+        return {
+          success: true,
+          authorized: false,
+          title: 'Route complete',
+          message:
+            'Every office on this ticket has already been checked in. Use exit processing when the visitor leaves.',
+          visitorName,
+          visitorPhotoUrl,
+          visitId: visit.visit_id,
+        };
+      }
+    } else {
+      return {
+        success: true,
+        authorized: false,
+        title: 'Route complete',
+        message:
+          'Every office on this ticket has already been checked in. Use exit processing when the visitor leaves.',
+        visitorName,
+        visitorPhotoUrl,
+        visitId: visit.visit_id,
+      };
+    }
   }
 
   const stop = await resolveExpectedStop(visit, expectations);
@@ -292,8 +318,25 @@ export async function processOfficeCheckInScan(req: OfficeCheckInScanRequest): P
     };
   }
 
-  const expectationCompletedStatusId = (await resolveCompletedExpectationStatusId()) ?? 4;
+  const expectationCompletedStatusId = await resolveCompletedExpectationStatusId();
+  const expectationPendingStatusId = await resolvePendingExpectationStatusId();
 
+  // Complete enrollee step FIRST so next office / completion status is accurate
+  let completedAllSteps = false;
+  if (visit.visit_type_id === VISIT_TYPE.ENROLLEE) {
+    const stepStatusId = await resolveCompletedStepStatusId();
+    const enrolleeCompletedStatusId = await resolveCompletedEnrolleeStatusId();
+    completedAllSteps = await completeEnrolleeProgressAtOffice(
+      visit.visitor_id,
+      scanningOfficeId,
+      scanTime,
+      stepStatusId,
+      enrolleeCompletedStatusId,
+    );
+  }
+
+  // Always mark this office stop arrived. Same office can be revisited later
+  // (Admissions step 1 then 9) via enrollee_progress — not by leaving expectation pending.
   if (pending?.expectation_id != null) {
     const { error: expErr } = await supabase
       .from('office_expectation')
@@ -303,8 +346,6 @@ export async function processOfficeCheckInScan(req: OfficeCheckInScanRequest): P
       console.warn('[OfficeCheckIn] expectation update failed:', expErr.message);
     }
   } else {
-    // Mark matching pending row, or create one if enrollee progress authorized this office
-    // without an office_expectation row yet.
     const { data: updatedRows, error: expErr } = await supabase
       .from('office_expectation')
       .update({ arrived_at: scanTime, expectation_status_id: expectationCompletedStatusId })
@@ -318,35 +359,32 @@ export async function processOfficeCheckInScan(req: OfficeCheckInScanRequest): P
     }
 
     if (!updatedRows?.length) {
-      const maxOrder = expectations.reduce(
-        (max, e) => Math.max(max, Number(e.expected_order) || 0),
-        0,
-      );
-      const { error: insExpErr } = await supabase.from('office_expectation').insert({
-        visit_id: visit.visit_id,
-        office_id: scanningOfficeId,
-        expected_order: maxOrder + 1,
-        expectation_status_id: expectationCompletedStatusId,
-        arrived_at: scanTime,
-        created_at: scanTime,
-      });
-      if (insExpErr) {
-        console.warn('[OfficeCheckIn] expectation insert failed:', insExpErr.message);
+      // Already arrived earlier (e.g. Admissions step 1) — refresh arrived_at for this revisit
+      const { data: existingExp } = await supabase
+        .from('office_expectation')
+        .update({ arrived_at: scanTime, expectation_status_id: expectationCompletedStatusId })
+        .eq('visit_id', visit.visit_id)
+        .eq('office_id', scanningOfficeId)
+        .select('expectation_id');
+
+      if (!existingExp?.length) {
+        const maxOrder = expectations.reduce(
+          (max, e) => Math.max(max, Number(e.expected_order) || 0),
+          0,
+        );
+        const { error: insExpErr } = await supabase.from('office_expectation').insert({
+          visit_id: visit.visit_id,
+          office_id: scanningOfficeId,
+          expected_order: maxOrder + 1,
+          expectation_status_id: expectationCompletedStatusId,
+          arrived_at: scanTime,
+          created_at: scanTime,
+        });
+        if (insExpErr) {
+          console.warn('[OfficeCheckIn] expectation insert failed:', insExpErr.message);
+        }
       }
     }
-  }
-
-  let completedAllSteps = false;
-  if (visit.visit_type_id === VISIT_TYPE.ENROLLEE) {
-    const stepStatusId = await resolveCompletedStepStatusId();
-    const enrolleeCompletedStatusId = await resolveCompletedEnrolleeStatusId();
-    completedAllSteps = await completeEnrolleeProgressAtOffice(
-      visit.visitor_id,
-      scanningOfficeId,
-      scanTime,
-      stepStatusId,
-      enrolleeCompletedStatusId,
-    );
   }
 
   // Advance primary_office_id AFTER marking this stop done so next office resolves correctly
@@ -376,6 +414,36 @@ export async function processOfficeCheckInScan(req: OfficeCheckInScanRequest): P
       console.warn('[OfficeCheckIn] primary_office_id update failed:', visitUpdErr.message);
     } else {
       console.log(`[OfficeCheckIn] primary_office_id → ${nextOfficeId}`);
+    }
+
+    // Reopen next office expectation when enrollee still needs that office again
+    // (e.g. Admissions after steps 2–8 for Welcome Kit / step 9)
+    if (
+      visit.visit_type_id === VISIT_TYPE.ENROLLEE &&
+      nextOfficeId !== scanningOfficeId &&
+      (await officeStillHasIncompleteEnrolleeSteps(visit.visitor_id, nextOfficeId))
+    ) {
+      const { data: reopened } = await supabase
+        .from('office_expectation')
+        .update({ arrived_at: null, expectation_status_id: expectationPendingStatusId })
+        .eq('visit_id', visit.visit_id)
+        .eq('office_id', nextOfficeId)
+        .select('expectation_id');
+      if (!reopened?.length) {
+        const refreshed = await loadExpectationsForVisit(visit.visit_id);
+        const maxOrder = refreshed.reduce(
+          (max, e) => Math.max(max, Number(e.expected_order) || 0),
+          0,
+        );
+        await supabase.from('office_expectation').insert({
+          visit_id: visit.visit_id,
+          office_id: nextOfficeId,
+          expected_order: maxOrder + 1,
+          expectation_status_id: expectationPendingStatusId,
+          arrived_at: null,
+          created_at: scanTime,
+        });
+      }
     }
   } catch (e) {
     console.warn('[OfficeCheckIn] failed advancing primary_office_id', e);

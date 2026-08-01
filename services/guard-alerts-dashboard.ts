@@ -99,8 +99,16 @@ export async function fetchReadyToExitVisitors(): Promise<ReadyToExitVisitor[]> 
     byVisit.set(vid, list);
   }
 
-  const rowTerminal = (r: ExpectationRow): boolean =>
-    r.expectation_status_id === EXPECTATION_COMPLETED || r.expectation_status_id === EXPECTATION_SKIPPED;
+  const rowTerminal = (r: ExpectationRow): boolean => {
+    // Prefer arrived_at (source of truth for check-in); status ids are secondary
+    if (r.arrived_at != null && String(r.arrived_at).trim() !== '') {
+      return true;
+    }
+    return (
+      r.expectation_status_id === EXPECTATION_COMPLETED ||
+      r.expectation_status_id === EXPECTATION_SKIPPED
+    );
+  };
 
   const rowSortTime = (r: ExpectationRow): string | null => {
     const a = r.arrived_at != null && String(r.arrived_at).trim() !== '' ? String(r.arrived_at).trim() : null;

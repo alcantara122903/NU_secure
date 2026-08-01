@@ -5,6 +5,7 @@
 
 import { toSupabaseTimestampPh } from '@/lib/supabase-timestamp-ph';
 import type { VisitorRegistrationData } from '@/types/visitor';
+import { resolvePendingExpectationStatusId } from '@/services/office-flow/db-status-lookups';
 import { addressService, type AddressData } from '../address';
 import { supabase } from '../database/supabase';
 import { uploadFacePhoto } from '../storage/upload';
@@ -334,13 +335,14 @@ export const contractorService = {
       // STEP 5: Create office expectation for destination office
       console.log('\n📝 STEP 5: Creating office expectation...');
 
+      const pendingExpectationStatusId = await resolvePendingExpectationStatusId();
       const expectationResult = await supabase
         .from('office_expectation')
         .insert([{
           visit_id: visitId,
           office_id: contractorData.destinationOfficeId,
           expected_order: 1,
-          expectation_status_id: 1,
+          expectation_status_id: pendingExpectationStatusId,
           created_at: toSupabaseTimestampPh(),
         }]);
 

@@ -78,6 +78,36 @@ export async function nextOfficeIdFromEnrolleeProgress(visitorId: number): Promi
   return id != null ? Number(id) : null;
 }
 
+/** True if enrollee still has an incomplete step at this office (e.g. Admissions step 9). */
+export async function officeStillHasIncompleteEnrolleeSteps(
+  visitorId: number,
+  officeId: number,
+): Promise<boolean> {
+  const { data: enrollee } = await supabase
+    .from('enrollee')
+    .select('enrollee_id')
+    .eq('visitor_id', visitorId)
+    .maybeSingle();
+
+  if (!enrollee?.enrollee_id) {
+    return false;
+  }
+
+  const { data } = await supabase
+    .from('enrollee_progress')
+    .select(
+      `
+      progress_id,
+      completed_at,
+      step:enrollee_step(office_id, step_order)
+    `,
+    )
+    .eq('enrollee_id', enrollee.enrollee_id);
+
+  const rows = sortIncompleteByStepOrder(mapQueryToProgressRows(data));
+  return rows.some((p) => Number(p.step?.office_id) === Number(officeId));
+}
+
 export async function completeEnrolleeProgressAtOffice(
   visitorId: number,
   scanningOfficeId: number,

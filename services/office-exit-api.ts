@@ -1,7 +1,11 @@
+import { extractQrTokenFromAnyScan } from '@/lib/enrollee-progress-url';
 import { parseQrTicketRaw } from '@/lib/qr-ticket-payload';
 import { toSupabaseTimestampPh } from '@/lib/supabase-timestamp-ph';
 import { supabase } from '@/services/database/supabase';
-import { resolveValidationStatusId } from '@/services/office-flow/db-status-lookups';
+import {
+  resolveSkippedExpectationStatusId,
+  resolveValidationStatusId,
+} from '@/services/office-flow/db-status-lookups';
 
 export interface ExitScanRequest {
   qrToken: string;
@@ -67,13 +71,30 @@ type LookupResult = {
 const normalize = (value: string | null | undefined): string => (value || '').trim();
 
 const buildCandidates = (payload: ExitScanRequest): string[] => {
-  const base = [normalize(payload.qrToken), normalize(payload.rawQrValue)].filter(Boolean);
-  const pipeParts = normalize(payload.rawQrValue)
+  const raw = normalize(payload.rawQrValue);
+  const tokenFromPayload = normalize(payload.qrToken);
+  const tokenFromRaw = extractQrTokenFromAnyScan(raw) || '';
+  const parsed = parseQrTicketRaw(raw);
+
+  const pipeParts = raw
     .split('|')
     .map((part) => part.trim())
     .filter(Boolean);
 
-  return Array.from(new Set([...base, ...pipeParts]));
+  const extractedFromParts = pipeParts
+    .map((part) => extractQrTokenFromAnyScan(part) || (/QR-/i.test(part) ? part : ''))
+    .filter(Boolean);
+
+  // Prefer QR-… tokens only — never look up a full https URL as visit.qr_token
+  const candidates = [
+    tokenFromPayload,
+    tokenFromRaw,
+    parsed.qr_token || '',
+    ...extractedFromParts,
+    ...pipeParts.filter((p) => !/^https?:\/\//i.test(p)),
+  ].filter((c) => c && !/^https?:\/\//i.test(c));
+
+  return Array.from(new Set(candidates));
 };
 
 const getResponseStatus = (context: unknown): number | undefined => {
@@ -293,9 +314,7 @@ const resolveScanByDatabase = async (payload: ExitScanRequest): Promise<ExitScan
       .order('expected_order', { ascending: true });
 
     const pendingExpectation =
-      expectations?.find((entry: any) => !entry.arrived_at) ||
-      expectations?.find((entry: any) => entry.expectation_status_id === 1) ||
-      null;
+      expectations?.find((entry: any) => !entry.arrived_at) || null;
 
     const expectedOfficeId = pendingExpectation?.office_id ?? visit.primary_office_id;
 
@@ -363,9 +382,10 @@ const resolveScanByDatabase = async (payload: ExitScanRequest): Promise<ExitScan
   }
 
   // Visitor is exiting; any remaining un-arrived office expectations are skipped.
+  const skippedExpectationStatusId = await resolveSkippedExpectationStatusId();
   const { error: expectationSkipError } = await supabase
     .from('office_expectation')
-    .update({ expectation_status_id: 3 })
+    .update({ expectation_status_id: skippedExpectationStatusId })
     .eq('visit_id', visit.visit_id)
     .is('arrived_at', null);
 
@@ -379,24 +399,52 @@ const resolveScanByDatabase = async (payload: ExitScanRequest): Promise<ExitScan
   let officeScanInserted = false;
   const validationStatusId = await resolveValidationStatusId({ favorable: isCorrectDestination });
 
-  const scanOfficeId = isGuard ? visit.primary_office_id : officeStaff?.office_id ?? null;
+  // office_scan.office_id is NOT NULL — guard exit uses primary / last arrived / any expectation office
+  let scanOfficeId: number | null = isGuard
+    ? visit.primary_office_id != null
+      ? Number(visit.primary_office_id)
+      : null
+    : officeStaff?.office_id != null
+      ? Number(officeStaff.office_id)
+      : null;
+
+  if (scanOfficeId == null || !Number.isFinite(scanOfficeId)) {
+    const { data: anyExp } = await supabase
+      .from('office_expectation')
+      .select('office_id, arrived_at, expected_order')
+      .eq('visit_id', visit.visit_id)
+      .order('expected_order', { ascending: false })
+      .limit(20);
+    const arrived = (anyExp ?? []).find((e) => e.arrived_at);
+    const fallback = arrived ?? anyExp?.[0];
+    if (fallback?.office_id != null) {
+      scanOfficeId = Number(fallback.office_id);
+    }
+  }
+
   const scanRemarks = isGuard
     ? 'Guard facility exit scan'
     : isCorrectDestination
       ? 'Office scan validated: correct destination'
       : 'Office scan validated: wrong destination';
 
-  const { error: officeScanError } = await supabase.from('office_scan').insert({
-    visit_id: visit.visit_id,
-    office_id: scanOfficeId,
-    scanned_by_user_id: payload.scannedByUserId,
-    scan_time: toSupabaseTimestampPh(),
-    validation_status_id: validationStatusId,
-    remarks: scanRemarks,
-  });
+  if (scanOfficeId == null || !Number.isFinite(scanOfficeId)) {
+    console.warn('[office-exit] skipping office_scan insert: no office_id available');
+  } else {
+    const { error: officeScanError } = await supabase.from('office_scan').insert({
+      visit_id: visit.visit_id,
+      office_id: scanOfficeId,
+      scanned_by_user_id: payload.scannedByUserId,
+      scan_time: toSupabaseTimestampPh(),
+      validation_status_id: validationStatusId,
+      remarks: scanRemarks,
+    });
 
-  if (!officeScanError) {
-    officeScanInserted = true;
+    if (!officeScanError) {
+      officeScanInserted = true;
+    } else {
+      console.warn('[office-exit] office_scan insert failed:', officeScanError.message);
+    }
   }
 
   const visitorName = `${visitor.first_name || ''} ${visitor.last_name || ''}`.trim() || '(unknown visitor)';

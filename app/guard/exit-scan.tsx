@@ -1,5 +1,6 @@
 import { Colors } from '@/constants/colors';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { extractQrTokenFromAnyScan } from '@/lib/enrollee-progress-url';
 import { parseQrTicketRaw } from '@/lib/qr-ticket-payload';
 import { authSessionService } from '@/services/auth-session';
 import { supabase } from '@/services/database';
@@ -94,6 +95,11 @@ const resolvePhotoUri = (raw: string | null | undefined): string => {
 
 const extractQrToken = (rawValue: string): string => {
   const trimmed = rawValue.trim();
+  const fromUrl = extractQrTokenFromAnyScan(trimmed);
+  if (fromUrl) {
+    return fromUrl;
+  }
+
   const v1 = parseQrTicketRaw(trimmed);
   if (v1.payload != null && v1.qr_token) {
     return v1.qr_token;
@@ -102,7 +108,7 @@ const extractQrToken = (rawValue: string): string => {
   try {
     const parsed = JSON.parse(trimmed);
     if (typeof parsed === 'string') {
-      return parsed;
+      return extractQrTokenFromAnyScan(parsed) || parsed;
     }
     if (parsed?.qrToken && typeof parsed.qrToken === 'string') {
       return parsed.qrToken;
@@ -112,20 +118,6 @@ const extractQrToken = (rawValue: string): string => {
     }
   } catch {
     // Not JSON; continue parsing below.
-  }
-
-  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-    try {
-      const url = new URL(trimmed);
-      return (
-        url.searchParams.get('token') ||
-        url.searchParams.get('qrToken') ||
-        url.searchParams.get('qr_token') ||
-        trimmed
-      );
-    } catch {
-      return trimmed;
-    }
   }
 
   return trimmed;

@@ -484,17 +484,21 @@ export const visitorLookupService = {
           )
         `,
         )
-        .eq('enrollee_id', enrolleeId)
-        .order('step_id', { ascending: true });
+        .eq('enrollee_id', enrolleeId);
 
       if (error || !steps || steps.length === 0) {
         return null;
       }
 
-      const completedSteps = steps.filter((s: any) => s.completed_at != null).length;
-      const totalSteps = steps.length;
-      const next = steps.find((s: any) => s.completed_at == null);
-      const nextStep = next?.step as any;
+      const pickStep = (row: any) => (Array.isArray(row?.step) ? row.step[0] : row?.step);
+      const sorted = [...steps].sort(
+        (a: any, b: any) => (pickStep(a)?.step_order ?? 0) - (pickStep(b)?.step_order ?? 0),
+      );
+
+      const completedSteps = sorted.filter((s: any) => s.completed_at != null).length;
+      const totalSteps = sorted.length;
+      const next = sorted.find((s: any) => s.completed_at == null);
+      const nextStep = pickStep(next);
 
       let nextOfficeName: string | null = null;
       if (nextStep?.office_id != null) {

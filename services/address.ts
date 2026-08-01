@@ -33,15 +33,23 @@ export const addressService = {
       console.log('🔍 Checking for existing address with same details...');
 
       // STEP 1: Check if address already exists (deduplication)
-      const { data: existingAddresses, error: queryError } = await supabase
-        .from('address')
-        .select('address_id')
-        .eq('house_no', addressData.houseNo || null)
-        .eq('street', addressData.street || null)
-        .eq('barangay', addressData.barangay || null)
-        .eq('city_municipality', addressData.cityMunicipality || null)
-        .eq('province', addressData.province || null)
-        .eq('region', addressData.region || null);
+      // PostgREST: use .is(col, null) for NULL — .eq(col, null) does not match IS NULL
+      let existingQuery = supabase.from('address').select('address_id');
+      const houseNo = addressData.houseNo?.trim() || null;
+      const street = addressData.street?.trim() || null;
+      const barangay = addressData.barangay?.trim() || null;
+      const city = addressData.cityMunicipality?.trim() || null;
+      const province = addressData.province?.trim() || null;
+      const region = addressData.region?.trim() || null;
+
+      existingQuery = houseNo == null ? existingQuery.is('house_no', null) : existingQuery.eq('house_no', houseNo);
+      existingQuery = street == null ? existingQuery.is('street', null) : existingQuery.eq('street', street);
+      existingQuery = barangay == null ? existingQuery.is('barangay', null) : existingQuery.eq('barangay', barangay);
+      existingQuery = city == null ? existingQuery.is('city_municipality', null) : existingQuery.eq('city_municipality', city);
+      existingQuery = province == null ? existingQuery.is('province', null) : existingQuery.eq('province', province);
+      existingQuery = region == null ? existingQuery.is('region', null) : existingQuery.eq('region', region);
+
+      const { data: existingAddresses, error: queryError } = await existingQuery;
 
       if (queryError) {
         console.error('❌ Error checking for existing address:', queryError);
@@ -153,15 +161,22 @@ export const addressService = {
 
       console.log('🔍 Searching for existing address...');
 
-      const { data: existingAddresses, error } = await supabase
-        .from('address')
-        .select('address_id')
-        .eq('house_no', addressData.houseNo || null)
-        .eq('street', addressData.street || null)
-        .eq('barangay', addressData.barangay || null)
-        .eq('city_municipality', addressData.cityMunicipality || null)
-        .eq('province', addressData.province || null)
-        .eq('region', addressData.region || null);
+      let searchQuery = supabase.from('address').select('address_id');
+      const houseNo = addressData.houseNo?.trim() || null;
+      const street = addressData.street?.trim() || null;
+      const barangay = addressData.barangay?.trim() || null;
+      const city = addressData.cityMunicipality?.trim() || null;
+      const province = addressData.province?.trim() || null;
+      const region = addressData.region?.trim() || null;
+
+      searchQuery = houseNo == null ? searchQuery.is('house_no', null) : searchQuery.eq('house_no', houseNo);
+      searchQuery = street == null ? searchQuery.is('street', null) : searchQuery.eq('street', street);
+      searchQuery = barangay == null ? searchQuery.is('barangay', null) : searchQuery.eq('barangay', barangay);
+      searchQuery = city == null ? searchQuery.is('city_municipality', null) : searchQuery.eq('city_municipality', city);
+      searchQuery = province == null ? searchQuery.is('province', null) : searchQuery.eq('province', province);
+      searchQuery = region == null ? searchQuery.is('region', null) : searchQuery.eq('region', region);
+
+      const { data: existingAddresses, error } = await searchQuery;
 
       if (error) {
         console.error('❌ Error searching for address:', error);

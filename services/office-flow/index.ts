@@ -5,7 +5,14 @@
 
 export { VISIT_TYPE } from './constants';
 export { resolveActiveVisitFromScanInput, type ActiveVisitRow } from './active-visit-resolve';
-export { resolveValidationStatusId, resolveCompletedStepStatusId, resolveCompletedEnrolleeStatusId } from './db-status-lookups';
+export {
+  resolveValidationStatusId,
+  resolveCompletedStepStatusId,
+  resolveCompletedEnrolleeStatusId,
+  resolvePendingExpectationStatusId,
+  resolveCompletedExpectationStatusId,
+  resolveSkippedExpectationStatusId,
+} from './db-status-lookups';
 export {
   loadExpectationsForVisit,
   expectationsAreFullyCheckedIn,

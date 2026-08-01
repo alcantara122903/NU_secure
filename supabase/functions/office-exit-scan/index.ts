@@ -128,10 +128,20 @@ const parseRawQr = (raw: string): Partial<IncomingBody> & { qrParts: string[] } 
   if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
     try {
       const url = new URL(trimmed);
+      const segments = url.pathname.split('/').filter(Boolean);
+      const progressIdx = segments.findIndex((s) => s.toLowerCase() === 'progress');
+      const pathToken =
+        progressIdx >= 0 && segments[progressIdx + 1]
+          ? decodeURIComponent(segments[progressIdx + 1])
+          : segments.length > 0 && /QR-/i.test(segments[segments.length - 1])
+            ? decodeURIComponent(segments[segments.length - 1])
+            : '';
+
       result.qrToken =
         normalizeText(url.searchParams.get('qrToken')) ||
         normalizeText(url.searchParams.get('qr_token')) ||
         normalizeText(url.searchParams.get('token')) ||
+        normalizeText(pathToken) ||
         result.qrToken;
 
       result.controlNumber =
@@ -403,9 +413,11 @@ const resolveStatusId = async (
   field: 'exit_status_id' | 'validation_status_id',
   names: string[],
 ): Promise<number | null> => {
+  // Column names differ: exit_status.exit_status_name vs validation_status.status_name
+  const nameColumn = table === 'exit_status' ? 'exit_status_name' : 'status_name';
   const { data, error } = await supabase
     .from(table)
-    .select(`${field}, status_name, exit_status_name`)
+    .select(`${field}, ${nameColumn}`)
     .limit(30);
 
   console.log(`[office-exit-scan] ${table} lookup`, { error, data });
@@ -415,7 +427,7 @@ const resolveStatusId = async (
   }
 
   const hit = data.find((row: Record<string, unknown>) => {
-    const name = String(row.status_name || row.exit_status_name || '').toLowerCase();
+    const name = String(row[nameColumn] || '').toLowerCase();
     return names.some((target) => name === target.toLowerCase());
   });
 
@@ -552,9 +564,7 @@ Deno.serve(async (req) => {
       .order('expected_order', { ascending: true });
 
     const pendingExpectation =
-      expectedRoute?.find((entry: any) => !entry.arrived_at) ||
-      expectedRoute?.find((entry: any) => entry.expectation_status_id === 1) ||
-      null;
+      expectedRoute?.find((entry: any) => !entry.arrived_at) || null;
 
     const expectedOfficeId = pendingExpectation?.office_id ?? visit.primary_office_id;
 
@@ -626,9 +636,19 @@ Deno.serve(async (req) => {
     }
 
     // Visitor is exiting; any remaining un-arrived office expectations are skipped.
+    const { data: expectationStatuses } = await supabase
+      .from('expectation_status')
+      .select('expectation_status_id, status_name')
+      .limit(20);
+    const skippedStatus =
+      (expectationStatuses || []).find((row: any) => {
+        const n = String(row.status_name || '').toLowerCase();
+        return n.includes('skip') || n.includes('cancel') || n.includes('abort');
+      })?.expectation_status_id ?? 3;
+
     const { error: expectationSkipError } = await supabase
       .from('office_expectation')
-      .update({ expectation_status_id: 3 })
+      .update({ expectation_status_id: skippedStatus })
       .eq('visit_id', visit.visit_id)
       .is('arrived_at', null);
 

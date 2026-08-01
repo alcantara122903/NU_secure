@@ -1107,6 +1107,16 @@ export default function RegisterVisitorScreen() {
         return;
       }
 
+      if (!enrolleeResult.visit_id) {
+        Alert.alert(
+          "Visit not saved",
+          "Enrollee was saved but the visit/QR was not created. The progress website will show Page not found. Please try again.",
+          [{ text: "OK" }],
+        );
+        setIsCreatingEnrollee(false);
+        return;
+      }
+
       console.log("✅ Enrollee created:", enrolleeResult.enrollee_id);
 
       const steps =
@@ -1156,12 +1166,20 @@ export default function RegisterVisitorScreen() {
         });
       }
 
-      const ticketOffices =
+      const ticketOffices: {
+        id: number;
+        name: string;
+        stepName: string;
+        stepOrder?: number;
+        status: "done" | "current" | "pending";
+      }[] =
         steps?.map(
           (s: {
             office_id: number;
             step_name?: string;
             step_order?: number;
+            status?: string;
+            completed_at?: string | null;
           }) => {
             const officeName =
               (nameMap.get(s.office_id) as string) ||
@@ -1170,9 +1188,19 @@ export default function RegisterVisitorScreen() {
               id: s.office_id,
               name: officeName,
               stepName: s.step_name || `Step ${s.step_order ?? ""}`,
+              stepOrder: s.step_order,
+              status: (s.status === "completed" || s.completed_at
+                ? "done"
+                : "pending") as "done" | "current" | "pending",
             };
           },
         ) ?? [];
+
+      // Mark first incomplete step as current
+      const firstPendingIdx = ticketOffices.findIndex((o) => o.status !== "done");
+      if (firstPendingIdx >= 0) {
+        ticketOffices[firstPendingIdx].status = "current";
+      }
 
       router.replace({
         pathname: "/guard/qr-ticket",

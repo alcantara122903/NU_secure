@@ -4,34 +4,35 @@
  * Route: app/guard/qr-ticket.tsx
  */
 
-import { EnhancedQrTicketView } from '@/components/guard/enhanced-qr-ticket-view';
-import { Colors } from '@/constants/colors';
-import { useColorScheme } from '@/hooks/use-color-scheme';
+import { EnhancedQrTicketView } from "@/components/guard/enhanced-qr-ticket-view";
+import { Colors } from "@/constants/colors";
+import { useColorScheme } from "@/hooks/use-color-scheme";
+import { buildEnrolleeProgressUrl } from "@/lib/enrollee-progress-url";
 import {
-  getBluetoothPrinterDevices,
-  isThermalPrinterNativeAvailable,
-  printVisitorThermalTicket,
-  requestThermalBluetoothPermissions,
-} from '@/services/thermal-visitor-ticket-print';
-import { MaterialIcons } from '@expo/vector-icons';
-import * as Print from 'expo-print';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import * as Sharing from 'expo-sharing';
-import { useEffect, useState } from 'react';
+    getBluetoothPrinterDevices,
+    isThermalPrinterNativeAvailable,
+    printVisitorThermalTicket,
+    requestThermalBluetoothPermissions,
+} from "@/services/thermal-visitor-ticket-print";
+import { MaterialIcons } from "@expo/vector-icons";
+import * as Print from "expo-print";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import * as Sharing from "expo-sharing";
+import { useEffect, useState } from "react";
 import {
-  Alert,
-  InteractionManager,
-  Modal,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+    Alert,
+    InteractionManager,
+    Modal,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
-type VisitorType = 'enrollee' | 'contractor' | 'normal_visitor' | 'normal';
+type VisitorType = "enrollee" | "contractor" | "normal_visitor" | "normal";
 
 interface VisitorQRTicketData {
   type: VisitorType;
@@ -63,18 +64,23 @@ interface VisitorQRTicketData {
 export default function QRTicketScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
-  const colorScheme = useColorScheme() ?? 'light';
+  const colorScheme = useColorScheme() ?? "light";
   const colors = Colors[colorScheme];
-  const [ticketData, setTicketData] = useState<VisitorQRTicketData | null>(null);
+  const [ticketData, setTicketData] = useState<VisitorQRTicketData | null>(
+    null,
+  );
   const [isGenerating, setIsGenerating] = useState(true);
   const [isPrinting, setIsPrinting] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [btPrinterModalVisible, setBtPrinterModalVisible] = useState(false);
-  const [btPrinterRows, setBtPrinterRows] = useState<{ name: string; address: string }[]>([]);
+  const [btPrinterRows, setBtPrinterRows] = useState<
+    { name: string; address: string }[]
+  >([]);
   /** Defer heavy native views (SVG QR) until after stack transition — avoids Fabric addViewAt crashes on Android. */
   const [nativeContentReady, setNativeContentReady] = useState(false);
 
-  const paramsDataKey = typeof params.data === 'string' ? params.data : params.data?.[0] ?? '';
+  const paramsDataKey =
+    typeof params.data === "string" ? params.data : (params.data?.[0] ?? "");
 
   useEffect(() => {
     if (!paramsDataKey) {
@@ -85,8 +91,8 @@ export default function QRTicketScreen() {
       const data = JSON.parse(paramsDataKey) as VisitorQRTicketData;
       setTicketData(data);
     } catch (error) {
-      console.error('Error parsing ticket data:', error);
-      Alert.alert('Error', 'Failed to load ticket data');
+      console.error("Error parsing ticket data:", error);
+      Alert.alert("Error", "Failed to load ticket data");
       router.back();
     } finally {
       setIsGenerating(false);
@@ -112,34 +118,34 @@ export default function QRTicketScreen() {
     const visitorName = `${ticketData.firstName} ${ticketData.lastName}`.trim();
     const destination =
       ticketData.offices?.length > 0
-        ? ticketData.offices.map((o) => o.name).join(', ')
-        : '—';
-    const qrData = ticketData.qrPayload ?? ticketData.qrToken;
+        ? ticketData.offices.map((o) => o.name).join(", ")
+        : "—";
+    const qrData = buildEnrolleeProgressUrl(ticketData.qrToken);
 
     await printVisitorThermalTicket(address, {
       fullName: visitorName,
       destination,
       qrData,
-      controlNumber: String(ticketData.controlNumber ?? '').trim() || '—',
+      controlNumber: String(ticketData.controlNumber ?? "").trim() || "—",
     });
-    Alert.alert('Success', 'Ticket sent to the thermal printer.');
+    Alert.alert("Success", "Ticket sent to the thermal printer.");
   };
 
   const handlePrintTicket = async () => {
     if (!ticketData) return;
 
-    if (Platform.OS !== 'android') {
+    if (Platform.OS !== "android") {
       Alert.alert(
-        'Thermal printer',
-        'Bluetooth ESC/POS printing runs on an Android development build with native modules (not Expo Go). Use Download on other platforms.',
+        "Thermal printer",
+        "Bluetooth ESC/POS printing runs on an Android development build with native modules (not Expo Go). Use Download on other platforms.",
       );
       return;
     }
 
     if (!isThermalPrinterNativeAvailable()) {
       Alert.alert(
-        'Thermal printer',
-        'Expo Go does not include the Bluetooth printer native module. Create a development build: npx expo prebuild, then npx expo run:android (or EAS Build). Until then, use Download for a PDF.',
+        "Thermal printer",
+        "Expo Go does not include the Bluetooth printer native module. Create a development build: npx expo prebuild, then npx expo run:android (or EAS Build). Until then, use Download for a PDF.",
       );
       return;
     }
@@ -149,8 +155,8 @@ export default function QRTicketScreen() {
       const granted = await requestThermalBluetoothPermissions();
       if (!granted) {
         Alert.alert(
-          'Permissions',
-          'Bluetooth and location permissions are required to find and connect to the printer.',
+          "Permissions",
+          "Bluetooth and location permissions are required to find and connect to the printer.",
         );
         return;
       }
@@ -158,14 +164,14 @@ export default function QRTicketScreen() {
       const devices = await getBluetoothPrinterDevices();
       if (devices.length === 0) {
         Alert.alert(
-          'No printer found',
-          'No Bluetooth printer was found. Pair your thermal printer in Android Settings → Bluetooth, then try again.',
+          "No printer found",
+          "No Bluetooth printer was found. Pair your thermal printer in Android Settings → Bluetooth, then try again.",
         );
         return;
       }
 
       const rows = devices.map((d) => ({
-        name: d.getName() || 'Printer',
+        name: d.getName() || "Printer",
         address: d.getAddress(),
       }));
 
@@ -177,10 +183,10 @@ export default function QRTicketScreen() {
       setBtPrinterRows(rows);
       setBtPrinterModalVisible(true);
     } catch (error) {
-      console.error('Error printing ticket:', error);
+      console.error("Error printing ticket:", error);
       const message =
-        error instanceof Error ? error.message : 'Could not print the ticket.';
-      Alert.alert('Print error', message);
+        error instanceof Error ? error.message : "Could not print the ticket.";
+      Alert.alert("Print error", message);
     } finally {
       setIsPrinting(false);
     }
@@ -192,10 +198,10 @@ export default function QRTicketScreen() {
       setIsPrinting(true);
       await runThermalPrintToAddress(address);
     } catch (error) {
-      console.error('Thermal print failed:', error);
+      console.error("Thermal print failed:", error);
       const message =
-        error instanceof Error ? error.message : 'Could not print the ticket.';
-      Alert.alert('Print error', message);
+        error instanceof Error ? error.message : "Could not print the ticket.";
+      Alert.alert("Print error", message);
     } finally {
       setIsPrinting(false);
     }
@@ -207,40 +213,50 @@ export default function QRTicketScreen() {
     try {
       setIsDownloading(true);
       const visitorName = `${ticketData.firstName} ${ticketData.lastName}`;
-      const officesList = ticketData.offices.map((o, i) => `${i + 1}. ${o.name}`).join('<br/>');
-      
+      const officesList = ticketData.offices
+        .map((o, i) => `${i + 1}. ${o.name}`)
+        .join("<br/>");
+
       // Build type-specific content
-      let typeSpecificHtml = '';
-      if (ticketData.type === 'contractor') {
+      let typeSpecificHtml = "";
+      if (ticketData.type === "contractor") {
         typeSpecificHtml = `
           <div class="section">
             <div class="section-title">Company Information</div>
             <div class="info-row">
               <div class="info-label">Company Name:</div>
-              <div class="info-value">${ticketData.companyName || 'N/A'}</div>
+              <div class="info-value">${ticketData.companyName || "N/A"}</div>
             </div>
             <div class="info-row">
               <div class="info-label">Purpose:</div>
-              <div class="info-value">${ticketData.purpose || 'N/A'}</div>
+              <div class="info-value">${ticketData.purpose || "N/A"}</div>
             </div>
-            ${ticketData.address ? `
+            ${
+              ticketData.address
+                ? `
             <div class="info-row">
               <div class="info-label">Address:</div>
               <div class="info-value">${ticketData.address}</div>
             </div>
-            ` : ''}
+            `
+                : ""
+            }
           </div>
         `;
-      } else if (ticketData.type === 'enrollee') {
+      } else if (ticketData.type === "enrollee") {
         typeSpecificHtml = `
           <div class="section">
             <div class="section-title">Enrollee Information</div>
-            ${ticketData.enrolleeStatus ? `
+            ${
+              ticketData.enrolleeStatus
+                ? `
             <div class="info-row">
               <div class="info-label">Status:</div>
               <div class="info-value">${ticketData.enrolleeStatus}</div>
             </div>
-            ` : ''}
+            `
+                : ""
+            }
           </div>
         `;
       }
@@ -358,7 +374,7 @@ export default function QRTicketScreen() {
             <div class="container">
               <div class="header">
                 <div class="header-title">QR PASS</div>
-                <div class="badge">${ticketData.type === 'contractor' ? 'CONTRACTOR' : ticketData.type === 'enrollee' ? 'ENROLLEE' : 'VISITOR'}</div>
+                <div class="badge">${ticketData.type === "contractor" ? "CONTRACTOR" : ticketData.type === "enrollee" ? "ENROLLEE" : "VISITOR"}</div>
                 <div class="header-subtitle">Visitor ID: ${ticketData.visitorId}</div>
               </div>
               
@@ -386,8 +402,8 @@ export default function QRTicketScreen() {
               
               <div class="qr-section">
                 <div class="qr-label">Scan this code at each office</div>
-                <img src="https://api.qrserver.com/v1/create-qr-code/?size=600x600&margin=30&data=${encodeURIComponent(ticketData.qrPayload ?? ticketData.qrToken)}" alt="QR Code" class="qr-image" />
-                <div style="font-size: 10px; color: #666; margin-top: 10px;">${ticketData.qrPayload ? 'Digital ticket (JSON)' : 'Token'}: ${(ticketData.qrPayload ?? ticketData.qrToken).substring(0, 200)}…</div>
+                <img src="https://api.qrserver.com/v1/create-qr-code/?size=600x600&margin=30&data=${encodeURIComponent(buildEnrolleeProgressUrl(ticketData.qrToken))}" alt="QR Code" class="qr-image" />
+                <div style="font-size: 10px; color: #666; margin-top: 10px; word-break: break-all;">${buildEnrolleeProgressUrl(ticketData.qrToken)}</div>
               </div>
               
               <div class="section">
@@ -412,17 +428,20 @@ export default function QRTicketScreen() {
       // Share/Download the PDF
       if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(uri, {
-          mimeType: 'application/pdf',
+          mimeType: "application/pdf",
           dialogTitle: `QR_Ticket_${ticketData.visitorId}.pdf`,
-          UTI: 'com.adobe.pdf',
+          UTI: "com.adobe.pdf",
         });
-        Alert.alert('Success', 'QR ticket downloaded successfully');
+        Alert.alert("Success", "QR ticket downloaded successfully");
       } else {
-        Alert.alert('Info', 'Download not available on this device');
+        Alert.alert("Info", "Download not available on this device");
       }
     } catch (error) {
-      console.error('Error downloading ticket:', error);
-      Alert.alert('Download Error', 'Failed to download ticket. Please try again.');
+      console.error("Error downloading ticket:", error);
+      Alert.alert(
+        "Download Error",
+        "Failed to download ticket. Please try again.",
+      );
     } finally {
       setIsDownloading(false);
     }
@@ -430,34 +449,41 @@ export default function QRTicketScreen() {
 
   if (isGenerating || !ticketData || !nativeContentReady) {
     return (
-      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+      <SafeAreaView
+        style={[styles.container, { backgroundColor: colors.background }]}
+      >
         <View style={styles.centerContent}>
           <MaterialIcons name="qr-code-2" size={80} color={colors.primary} />
-          <Text style={[styles.loadingText, { color: colors.text }]}>Generating QR Ticket...</Text>
+          <Text style={[styles.loadingText, { color: colors.text }]}>
+            Generating QR Ticket...
+          </Text>
         </View>
       </SafeAreaView>
     );
   }
 
   const visitorName = `${ticketData.firstName} ${ticketData.lastName}`.trim();
-  const qrEncoded = ticketData.qrPayload ?? ticketData.qrToken;
+  // QR image encodes the public enrollee progress URL (phone camera + office scan).
+  const qrEncoded = buildEnrolleeProgressUrl(ticketData.qrToken);
 
   const typeLabel =
-    ticketData.type === 'contractor'
-      ? 'Contractor'
-      : ticketData.type === 'enrollee'
-        ? 'Enrollee'
-        : 'Normal Visitor';
+    ticketData.type === "contractor"
+      ? "Contractor"
+      : ticketData.type === "enrollee"
+        ? "Enrollee"
+        : "Normal Visitor";
 
   const purposeText =
-    ticketData.type === 'contractor'
-      ? (ticketData.purpose?.trim() || '—')
-      : ticketData.type === 'enrollee'
-        ? 'Campus enrollment'
-        : (ticketData.reasonForVisit?.trim() || '—');
+    ticketData.type === "contractor"
+      ? ticketData.purpose?.trim() || "—"
+      : ticketData.type === "enrollee"
+        ? "Campus enrollment"
+        : ticketData.reasonForVisit?.trim() || "—";
 
   const destinationText =
-    ticketData.offices?.length > 0 ? ticketData.offices.map((o) => o.name).join(', ') : '—';
+    ticketData.offices?.length > 0
+      ? ticketData.offices.map((o) => o.name).join(", ")
+      : "—";
 
   const visitRoute = (ticketData.offices ?? []).map((o) => ({
     id: o.id,
@@ -480,7 +506,7 @@ export default function QRTicketScreen() {
         onBack={() => router.back()}
         onDownload={handleDownloadTicket}
         onPrint={handlePrintTicket}
-        onCompleteReturn={() => router.replace('/guard/dashboard')}
+        onCompleteReturn={() => router.replace("/guard/dashboard")}
         isDownloading={isDownloading}
         isPrinting={isPrinting}
       />
@@ -492,7 +518,9 @@ export default function QRTicketScreen() {
         onRequestClose={() => setBtPrinterModalVisible(false)}
       >
         <View style={styles.btModalBackdrop}>
-          <View style={[styles.btModalCard, { backgroundColor: colors.surface }]}>
+          <View
+            style={[styles.btModalCard, { backgroundColor: colors.surface }]}
+          >
             <Text style={[styles.btModalTitle, { color: colors.text }]}>
               Choose Bluetooth printer
             </Text>
@@ -506,16 +534,35 @@ export default function QRTicketScreen() {
                 <TouchableOpacity
                   key={item.address}
                   style={[styles.btPrinterRow, { borderColor: colors.border }]}
-                  onPress={() => void handleSelectBluetoothPrinter(item.address)}
+                  onPress={() =>
+                    void handleSelectBluetoothPrinter(item.address)
+                  }
                 >
-                  <MaterialIcons name="print" size={22} color={colors.primary} />
+                  <MaterialIcons
+                    name="print"
+                    size={22}
+                    color={colors.primary}
+                  />
                   <View style={styles.btPrinterRowText}>
-                    <Text style={[styles.btPrinterName, { color: colors.text }]}>{item.name}</Text>
-                    <Text style={[styles.btPrinterAddr, { color: colors.textSecondary }]}>
+                    <Text
+                      style={[styles.btPrinterName, { color: colors.text }]}
+                    >
+                      {item.name}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.btPrinterAddr,
+                        { color: colors.textSecondary },
+                      ]}
+                    >
                       {item.address}
                     </Text>
                   </View>
-                  <MaterialIcons name="chevron-right" size={22} color={colors.textSecondary} />
+                  <MaterialIcons
+                    name="chevron-right"
+                    size={22}
+                    color={colors.textSecondary}
+                  />
                 </TouchableOpacity>
               ))}
             </ScrollView>
@@ -523,7 +570,9 @@ export default function QRTicketScreen() {
               style={[styles.btModalCancel, { backgroundColor: colors.border }]}
               onPress={() => setBtPrinterModalVisible(false)}
             >
-              <Text style={[styles.btModalCancelText, { color: colors.text }]}>Cancel</Text>
+              <Text style={[styles.btModalCancelText, { color: colors.text }]}>
+                Cancel
+              </Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -538,18 +587,18 @@ const styles = StyleSheet.create({
   },
   centerContent: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
   },
   loadingText: {
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: "600",
     marginTop: 16,
   },
   btModalBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    justifyContent: 'flex-end',
+    backgroundColor: "rgba(0,0,0,0.45)",
+    justifyContent: "flex-end",
   },
   btModalCard: {
     borderTopLeftRadius: 16,
@@ -557,19 +606,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 20,
     paddingBottom: 28,
-    maxHeight: '55%',
+    maxHeight: "55%",
   },
   btModalTitle: {
     fontSize: 18,
-    fontWeight: '700',
+    fontWeight: "700",
     marginBottom: 12,
   },
   btPrinterScroll: {
     maxHeight: 280,
   },
   btPrinterRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     paddingVertical: 14,
     paddingHorizontal: 12,
     borderWidth: 1,
@@ -582,7 +631,7 @@ const styles = StyleSheet.create({
   },
   btPrinterName: {
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   btPrinterAddr: {
     fontSize: 12,
@@ -592,10 +641,10 @@ const styles = StyleSheet.create({
     marginTop: 8,
     paddingVertical: 14,
     borderRadius: 10,
-    alignItems: 'center',
+    alignItems: "center",
   },
   btModalCancelText: {
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: "600",
   },
 });
