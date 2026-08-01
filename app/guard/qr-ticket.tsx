@@ -8,12 +8,14 @@ import { EnhancedQrTicketView } from "@/components/guard/enhanced-qr-ticket-view
 import { Colors } from "@/constants/colors";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { buildEnrolleeProgressUrl } from "@/lib/enrollee-progress-url";
+import { supabase } from "@/services/database/supabase";
 import {
     getBluetoothPrinterDevices,
     isThermalPrinterNativeAvailable,
     printVisitorThermalTicket,
     requestThermalBluetoothPermissions,
 } from "@/services/thermal-visitor-ticket-print";
+import { enrolleeService } from "@/services/visitor/enrollee";
 import { MaterialIcons } from "@expo/vector-icons";
 import * as Print from "expo-print";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -46,7 +48,13 @@ interface VisitorQRTicketData {
   firstName: string;
   lastName: string;
   contactNo: string;
-  offices: { id: number; name: string; stepName?: string }[];
+  offices: {
+    id: number;
+    name: string;
+    stepName?: string;
+    stepOrder?: number;
+    status?: "done" | "current" | "pending";
+  }[];
   /** Face capture preview URI (`file://` / `content://`) shown on ticket */
   facePhotoUri?: string;
   /** Normal visitor — shown as Purpose on ticket */
@@ -87,16 +95,90 @@ export default function QRTicketScreen() {
       setIsGenerating(false);
       return;
     }
-    try {
-      const data = JSON.parse(paramsDataKey) as VisitorQRTicketData;
-      setTicketData(data);
-    } catch (error) {
-      console.error("Error parsing ticket data:", error);
-      Alert.alert("Error", "Failed to load ticket data");
-      router.back();
-    } finally {
-      setIsGenerating(false);
-    }
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const data = JSON.parse(paramsDataKey) as VisitorQRTicketData;
+
+        // Enrollee route must come from enrollee_progress (steps 1–9).
+        // Admissions appears at step 1 and step 9 — both must show.
+        if (data.type === "enrollee" && data.enrolleeId) {
+          const steps =
+            (await enrolleeService.getEnrolleeSteps(data.enrolleeId)) ?? [];
+          if (steps.length > 0) {
+            const officeIds = [
+              ...new Set(
+                steps
+                  .map((s: { office_id?: number }) => s.office_id)
+                  .filter((id): id is number => id != null),
+              ),
+            ];
+            const { data: officeRows } =
+              officeIds.length > 0
+                ? await supabase
+                    .from("office")
+                    .select("office_id, office_name")
+                    .in("office_id", officeIds)
+                : { data: [] as { office_id: number; office_name: string }[] };
+            const nameMap = new Map(
+              (officeRows || []).map((o) => [o.office_id, o.office_name]),
+            );
+
+            const ticketOffices = steps.map(
+              (s: {
+                office_id: number;
+                step_name?: string;
+                step_order?: number;
+                status?: string;
+                completed_at?: string | null;
+              }) => ({
+                id: s.office_id,
+                name:
+                  (nameMap.get(s.office_id) as string) ||
+                  `Office ${s.office_id ?? ""}`,
+                stepName: s.step_name || `Step ${s.step_order ?? ""}`,
+                stepOrder: s.step_order,
+                status: (s.status === "completed" || s.completed_at
+                  ? "done"
+                  : "pending") as "done" | "current" | "pending",
+              }),
+            );
+            const firstPendingIdx = ticketOffices.findIndex(
+              (o) => o.status !== "done",
+            );
+            if (firstPendingIdx >= 0) {
+              ticketOffices[firstPendingIdx].status = "current";
+            }
+            data.offices = ticketOffices;
+
+            if (data.visitId) {
+              await enrolleeService.syncOfficeExpectationsForEnrolleeVisit(
+                data.visitId,
+                data.enrolleeId,
+              );
+            }
+          }
+        }
+
+        if (!cancelled) {
+          setTicketData(data);
+        }
+      } catch (error) {
+        console.error("Error parsing ticket data:", error);
+        Alert.alert("Error", "Failed to load ticket data");
+        router.back();
+      } finally {
+        if (!cancelled) {
+          setIsGenerating(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [paramsDataKey, router]);
 
   useEffect(() => {
@@ -485,10 +567,13 @@ export default function QRTicketScreen() {
       ? ticketData.offices.map((o) => o.name).join(", ")
       : "—";
 
-  const visitRoute = (ticketData.offices ?? []).map((o) => ({
+  // Keep stepOrder/status so Admissions step 1 and step 9 both render distinctly.
+  const visitRoute = (ticketData.offices ?? []).map((o, index) => ({
     id: o.id,
     name: o.name,
     stepName: o.stepName,
+    stepOrder: o.stepOrder ?? index + 1,
+    status: o.status,
   }));
 
   return (

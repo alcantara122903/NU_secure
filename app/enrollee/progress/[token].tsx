@@ -11,7 +11,7 @@ import {
   type EnrolleeRouteStep,
 } from '@/services/enrollee-progress-tracker';
 import { useLocalSearchParams } from 'expo-router';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Platform,
@@ -84,6 +84,27 @@ export default function EnrolleeProgressScreen() {
     void load();
   };
 
+  // Hard guarantee: never render 1,1,2,2… even if API returns duplicates.
+  const routeSteps = useMemo(() => {
+    const seen = new Set<number>();
+    const out: EnrolleeRouteStep[] = [];
+    for (const step of data?.steps ?? []) {
+      const order = Number(step.stepOrder) || 0;
+      if (order <= 0 || seen.has(order)) continue;
+      seen.add(order);
+      out.push(step);
+    }
+    return out;
+  }, [data?.steps]);
+
+  const currentStep = routeSteps.find((s) => s.status === 'current');
+  const completedCount = routeSteps.filter((s) => s.status === 'done').length;
+  const totalCount = routeSteps.length;
+  const remainingCount = Math.max(0, totalCount - completedCount);
+  const percentComplete =
+    totalCount === 0 ? 0 : Math.round((completedCount / totalCount) * 100);
+  const isFullyComplete = totalCount > 0 && remainingCount === 0;
+
   if (loading) {
     return (
       <SafeAreaView style={styles.safe}>
@@ -106,8 +127,6 @@ export default function EnrolleeProgressScreen() {
       </SafeAreaView>
     );
   }
-
-  const currentStep = data.steps.find((s) => s.status === 'current');
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -142,22 +161,25 @@ export default function EnrolleeProgressScreen() {
             <Text style={styles.progressLabel}>
               Overall progress{' '}
               <Text style={styles.progressStrong}>
-                {data.completedCount} of {data.totalCount} completed
+                {completedCount} of {totalCount} completed
               </Text>
             </Text>
             <View style={styles.progressTrack}>
-              <View style={[styles.progressFill, { width: `${Math.min(100, Math.max(0, data.percentComplete))}%` }]} />
+              <View style={[styles.progressFill, { width: `${Math.min(100, Math.max(0, percentComplete))}%` }]} />
             </View>
             <View style={styles.metricsRow}>
-              <Metric value={`${data.percentComplete}%`} label="Completion" />
-              <Metric value={data.currentOfficeName || '—'} label="Current office" />
-              <Metric value={String(data.remainingCount)} label="Remaining steps" />
+              <Metric value={`${percentComplete}%`} label="Completion" />
+              <Metric
+                value={isFullyComplete ? 'Done' : currentStep?.officeName || '—'}
+                label="Current office"
+              />
+              <Metric value={String(remainingCount)} label="Remaining steps" />
             </View>
           </View>
 
           <View style={styles.card}>
             <Text style={styles.cardEyebrow}>Current Step</Text>
-            {data.isFullyComplete ? (
+            {isFullyComplete ? (
               <>
                 <View style={styles.doneCircle}>
                   <Text style={styles.doneCheck}>✓</Text>
@@ -217,12 +239,12 @@ export default function EnrolleeProgressScreen() {
             <Legend color="#9ca3af" label="Pending" />
           </View>
 
-          {data.steps.map((step) => (
-            <RouteRow key={`${step.stepId}-${step.stepOrder}`} step={step} />
+          {routeSteps.map((step) => (
+            <RouteRow key={`step-order-${step.stepOrder}`} step={step} />
           ))}
-          {data.totalCount < 9 ? (
+          {totalCount < 9 ? (
             <Text style={styles.missingStepsHint}>
-              Expected 9 enrolment steps. This pass currently has {data.totalCount}. Ask admin to sync
+              Expected 9 enrolment steps. This pass currently has {totalCount}. Ask admin to sync
               Step 9 in enrollee_progress.
             </Text>
           ) : null}

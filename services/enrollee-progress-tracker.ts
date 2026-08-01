@@ -4,6 +4,7 @@
 
 import { buildEnrolleeProgressUrl } from '@/lib/enrollee-progress-url';
 import { supabase } from '@/services/database/supabase';
+import { enrolleeService } from '@/services/visitor/enrollee';
 
 export type EnrolleeRouteStepStatus = 'done' | 'current' | 'pending';
 
@@ -75,6 +76,38 @@ export async function loadEnrolleeProgressByQrToken(
   let steps: EnrolleeRouteStep[] = [];
 
   if (enrollee?.enrollee_id) {
+    // Repair when expectation count is wrong (too few OR duplicated 1,1,2,2…).
+    try {
+      const [{ count: progressCount }, { data: expectationRows }] = await Promise.all([
+        supabase
+          .from('enrollee_progress')
+          .select('progress_id', { count: 'exact', head: true })
+          .eq('enrollee_id', enrollee.enrollee_id),
+        supabase
+          .from('office_expectation')
+          .select('expectation_id, expected_order')
+          .eq('visit_id', visit.visit_id),
+      ]);
+      const expectationCount = expectationRows?.length ?? 0;
+      const orderSet = new Set(
+        (expectationRows || []).map((e) => Number(e.expected_order)),
+      );
+      const hasDuplicateOrders =
+        expectationCount > 0 && orderSet.size < expectationCount;
+      if (
+        typeof progressCount === 'number' &&
+        progressCount > 0 &&
+        (expectationCount !== progressCount || hasDuplicateOrders)
+      ) {
+        await enrolleeService.syncOfficeExpectationsForEnrolleeVisit(
+          Number(visit.visit_id),
+          Number(enrollee.enrollee_id),
+        );
+      }
+    } catch (syncErr) {
+      console.warn('[EnrolleeProgress] expectation sync skipped:', syncErr);
+    }
+
     const { data: progressRows } = await supabase
       .from('enrollee_progress')
       .select(
@@ -134,8 +167,21 @@ export async function loadEnrolleeProgressByQrToken(
       .filter((s): s is NonNullable<typeof s> => s != null)
       .sort((a, b) => a.stepOrder - b.stepOrder);
 
+    // One row per step_id / step_order (guards against accidental duplicate progress).
+    const deduped: typeof mapped = [];
+    const seenStepIds = new Set<number>();
+    const seenOrders = new Set<number>();
+    for (const s of mapped) {
+      if (seenStepIds.has(s.stepId) || seenOrders.has(s.stepOrder)) {
+        continue;
+      }
+      seenStepIds.add(s.stepId);
+      seenOrders.add(s.stepOrder);
+      deduped.push(s);
+    }
+
     let currentAssigned = false;
-    steps = mapped.map((s) => {
+    steps = deduped.map((s) => {
       if (s.completedAt) {
         return { ...s, status: 'done' as const };
       }
@@ -163,23 +209,46 @@ export async function loadEnrolleeProgressByQrToken(
       .eq('visit_id', visit.visit_id)
       .order('expected_order', { ascending: true });
 
-    const mapped = (expectations ?? []).map((e) => {
+    const byOrder = new Map<
+      number,
+      {
+        stepId: number;
+        stepOrder: number;
+        stepName: string;
+        officeId: number;
+        officeName: string;
+        completedAt: string | null;
+        status: EnrolleeRouteStepStatus;
+      }
+    >();
+
+    for (const e of expectations ?? []) {
       const officeJoin = e.office as
         | { office_name?: string }
         | { office_name?: string }[]
         | null;
       const office = Array.isArray(officeJoin) ? officeJoin[0] : officeJoin;
       const officeName = office?.office_name?.trim() || `Office ${e.office_id}`;
-      return {
-        stepId: Number(e.expectation_id),
-        stepOrder: Number(e.expected_order) || 0,
+      const stepOrder = Number(e.expected_order) || 0;
+      if (stepOrder <= 0) continue;
+      // Keep newest expectation_id when duplicates exist (1,1,2,2…)
+      const prev = byOrder.get(stepOrder);
+      const expectationId = Number(e.expectation_id);
+      if (prev && prev.stepId > expectationId) {
+        continue;
+      }
+      byOrder.set(stepOrder, {
+        stepId: expectationId,
+        stepOrder,
         stepName: officeName,
         officeId: Number(e.office_id),
         officeName,
         completedAt: e.arrived_at ?? null,
         status: 'pending' as EnrolleeRouteStepStatus,
-      };
-    });
+      });
+    }
+
+    const mapped = [...byOrder.values()].sort((a, b) => a.stepOrder - b.stepOrder);
 
     let currentAssigned = false;
     steps = mapped.map((s) => {

@@ -416,33 +416,39 @@ export async function processOfficeCheckInScan(req: OfficeCheckInScanRequest): P
       console.log(`[OfficeCheckIn] primary_office_id → ${nextOfficeId}`);
     }
 
-    // Reopen next office expectation when enrollee still needs that office again
-    // (e.g. Admissions after steps 2–8 for Welcome Kit / step 9)
+    // If next office still has enrollee work but no pending expectation row yet
+    // (legacy 1-row-per-office sync), add/reopen one. Prefer existing pending
+    // rows when route already has step 1 + step 9 as separate expectations.
     if (
       visit.visit_type_id === VISIT_TYPE.ENROLLEE &&
       nextOfficeId !== scanningOfficeId &&
       (await officeStillHasIncompleteEnrolleeSteps(visit.visitor_id, nextOfficeId))
     ) {
-      const { data: reopened } = await supabase
-        .from('office_expectation')
-        .update({ arrived_at: null, expectation_status_id: expectationPendingStatusId })
-        .eq('visit_id', visit.visit_id)
-        .eq('office_id', nextOfficeId)
-        .select('expectation_id');
-      if (!reopened?.length) {
-        const refreshed = await loadExpectationsForVisit(visit.visit_id);
-        const maxOrder = refreshed.reduce(
-          (max, e) => Math.max(max, Number(e.expected_order) || 0),
-          0,
-        );
-        await supabase.from('office_expectation').insert({
-          visit_id: visit.visit_id,
-          office_id: nextOfficeId,
-          expected_order: maxOrder + 1,
-          expectation_status_id: expectationPendingStatusId,
-          arrived_at: null,
-          created_at: scanTime,
-        });
+      const refreshed = await loadExpectationsForVisit(visit.visit_id);
+      const alreadyPending = refreshed.some(
+        (e) => Number(e.office_id) === Number(nextOfficeId) && !e.arrived_at,
+      );
+      if (!alreadyPending) {
+        const { data: reopened } = await supabase
+          .from('office_expectation')
+          .update({ arrived_at: null, expectation_status_id: expectationPendingStatusId })
+          .eq('visit_id', visit.visit_id)
+          .eq('office_id', nextOfficeId)
+          .select('expectation_id');
+        if (!reopened?.length) {
+          const maxOrder = refreshed.reduce(
+            (max, e) => Math.max(max, Number(e.expected_order) || 0),
+            0,
+          );
+          await supabase.from('office_expectation').insert({
+            visit_id: visit.visit_id,
+            office_id: nextOfficeId,
+            expected_order: maxOrder + 1,
+            expectation_status_id: expectationPendingStatusId,
+            arrived_at: null,
+            created_at: scanTime,
+          });
+        }
       }
     }
   } catch (e) {

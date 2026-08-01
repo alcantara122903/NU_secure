@@ -549,6 +549,9 @@ export const enrolleeService = {
   /**
    * Mirror enrollee step offices into office_expectation so office scanners
    * use the same route model as normal visitors.
+   *
+   * Idempotent: one row per expected_order. Never blind delete+insert (RLS can
+   * make DELETE a no-op while INSERT still adds rows → 1,1,2,2 duplicates).
    */
   async syncOfficeExpectationsForEnrolleeVisit(visitId: number, enrolleeId: number): Promise<void> {
     try {
@@ -576,67 +579,123 @@ export const enrolleeService = {
 
       const now = toSupabaseTimestampPh();
 
-      // One expectation per office (Admissions appears at step 1 and 9).
-      // Sort key = earliest incomplete step_order at that office (else earliest any).
-      type OfficeAgg = {
-        officeId: number;
-        sortKey: number;
-        stillIncomplete: boolean;
-      };
-      const byOffice = new Map<number, OfficeAgg>();
-
-      for (const row of sorted) {
-        const step = pickStep(row);
-        const officeId = step?.office_id != null ? Number(step.office_id) : null;
-        const stepOrder = Number(step?.step_order) || 0;
-        if (officeId == null || !Number.isFinite(officeId) || stepOrder <= 0) continue;
-
-        const incomplete = !row.completed_at;
-        const existing = byOffice.get(officeId);
-        if (!existing) {
-          byOffice.set(officeId, { officeId, sortKey: stepOrder, stillIncomplete: incomplete });
-          continue;
-        }
-        if (incomplete) {
-          if (!existing.stillIncomplete) {
-            existing.stillIncomplete = true;
-            existing.sortKey = stepOrder;
-          } else {
-            existing.sortKey = Math.min(existing.sortKey, stepOrder);
-          }
-        } else if (!existing.stillIncomplete) {
-          existing.sortKey = Math.min(existing.sortKey, stepOrder);
-        }
-      }
-
-      // Sequential expected_order 1..n (matches normal/contractor tickets)
+      // One expectation PER enrollee step (Admissions = step 1 and step 9).
       const [pendingStatusId, completedStatusId] = await Promise.all([
         resolvePendingExpectationStatusId(),
         resolveCompletedExpectationStatusId(),
       ]);
 
-      const rows = [...byOffice.values()]
-        .sort((a, b) => a.sortKey - b.sortKey)
-        .map((agg, index) => ({
-          visit_id: visitId,
-          office_id: agg.officeId,
-          expected_order: index + 1,
-          expectation_status_id: agg.stillIncomplete ? pendingStatusId : completedStatusId,
-          created_at: now,
-          arrived_at: agg.stillIncomplete ? null : now,
-        }));
+      const desired = sorted
+        .map((row: any) => {
+          const step = pickStep(row);
+          const officeId = step?.office_id != null ? Number(step.office_id) : null;
+          const stepOrder = Number(step?.step_order) || 0;
+          if (officeId == null || !Number.isFinite(officeId) || stepOrder <= 0) {
+            return null;
+          }
+          const incomplete = !row.completed_at;
+          return {
+            visit_id: visitId,
+            office_id: officeId,
+            expected_order: stepOrder,
+            expectation_status_id: incomplete ? pendingStatusId : completedStatusId,
+            created_at: now,
+            arrived_at: incomplete ? null : now,
+          };
+        })
+        .filter((r): r is NonNullable<typeof r> => r != null);
 
-      if (!rows.length) {
+      if (!desired.length) {
         return;
       }
 
-      // Replace so resume / mid-route progress stays aligned with enrollee_progress
-      await supabase.from('office_expectation').delete().eq('visit_id', visitId);
+      const { data: existingRows, error: existingErr } = await supabase
+        .from('office_expectation')
+        .select('expectation_id, expected_order, office_id, arrived_at')
+        .eq('visit_id', visitId)
+        .order('expectation_id', { ascending: true });
 
-      const { error: insErr } = await supabase.from('office_expectation').insert(rows);
-      if (insErr) {
-        console.warn('[syncOfficeExpectationsForEnrolleeVisit] insert failed:', insErr.message);
+      if (existingErr) {
+        console.warn(
+          '[syncOfficeExpectationsForEnrolleeVisit] could not load existing:',
+          existingErr.message,
+        );
         return;
+      }
+
+      // Keep newest row per expected_order; collect older duplicates to remove.
+      const keepByOrder = new Map<number, number>();
+      const duplicateIds: number[] = [];
+      for (const row of existingRows || []) {
+        const ord = Number(row.expected_order);
+        const id = Number(row.expectation_id);
+        if (!Number.isFinite(ord) || !Number.isFinite(id) || ord <= 0) continue;
+        const prev = keepByOrder.get(ord);
+        if (prev == null) {
+          keepByOrder.set(ord, id);
+        } else {
+          // Prefer higher id (newer); mark the older one as duplicate
+          if (id > prev) {
+            duplicateIds.push(prev);
+            keepByOrder.set(ord, id);
+          } else {
+            duplicateIds.push(id);
+          }
+        }
+      }
+
+      if (duplicateIds.length > 0) {
+        const { error: dupDelErr } = await supabase
+          .from('office_expectation')
+          .delete()
+          .in('expectation_id', duplicateIds);
+        if (dupDelErr) {
+          console.warn(
+            '[syncOfficeExpectationsForEnrolleeVisit] duplicate delete failed:',
+            dupDelErr.message,
+          );
+        }
+      }
+
+      const desiredOrders = new Set(desired.map((r) => r.expected_order));
+
+      // Remove orders that are no longer in the enrollee route
+      for (const [ord, id] of [...keepByOrder.entries()]) {
+        if (!desiredOrders.has(ord)) {
+          await supabase.from('office_expectation').delete().eq('expectation_id', id);
+          keepByOrder.delete(ord);
+        }
+      }
+
+      const toInsert: typeof desired = [];
+      for (const row of desired) {
+        const existingId = keepByOrder.get(row.expected_order);
+        if (existingId != null) {
+          const { error: updErr } = await supabase
+            .from('office_expectation')
+            .update({
+              office_id: row.office_id,
+              expectation_status_id: row.expectation_status_id,
+              arrived_at: row.arrived_at,
+            })
+            .eq('expectation_id', existingId);
+          if (updErr) {
+            console.warn(
+              '[syncOfficeExpectationsForEnrolleeVisit] update failed:',
+              updErr.message,
+            );
+          }
+        } else {
+          toInsert.push(row);
+        }
+      }
+
+      if (toInsert.length > 0) {
+        const { error: insErr } = await supabase.from('office_expectation').insert(toInsert);
+        if (insErr) {
+          console.warn('[syncOfficeExpectationsForEnrolleeVisit] insert failed:', insErr.message);
+          return;
+        }
       }
 
       const nextIncomplete = sorted.find((row: any) => !row.completed_at);
