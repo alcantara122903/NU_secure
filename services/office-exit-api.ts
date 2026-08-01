@@ -6,6 +6,7 @@ import {
   resolveSkippedExpectationStatusId,
   resolveValidationStatusId,
 } from '@/services/office-flow/db-status-lookups';
+import { resolveVisitorPhotoDisplayUri } from '@/services/storage/upload';
 
 export interface ExitScanRequest {
   qrToken: string;
@@ -449,6 +450,13 @@ const resolveScanByDatabase = async (payload: ExitScanRequest): Promise<ExitScan
 
   const visitorName = `${visitor.first_name || ''} ${visitor.last_name || ''}`.trim() || '(unknown visitor)';
 
+  const rawPhoto =
+    typeof visitor.visitor_photo_with_id_url === 'string' &&
+    visitor.visitor_photo_with_id_url.trim().length > 0
+      ? visitor.visitor_photo_with_id_url.trim()
+      : null;
+  const visitorPhotoUrl = (await resolveVisitorPhotoDisplayUri(rawPhoto)) || rawPhoto;
+
   return {
     success: true,
     message: 'Visitor scan processed successfully.',
@@ -471,11 +479,7 @@ const resolveScanByDatabase = async (payload: ExitScanRequest): Promise<ExitScan
       exitStatusId,
       exitStatusName: exitStatusName || null,
       officeScanInserted,
-      visitorPhotoUrl:
-        typeof visitor.visitor_photo_with_id_url === 'string' &&
-        visitor.visitor_photo_with_id_url.trim().length > 0
-          ? visitor.visitor_photo_with_id_url.trim()
-          : null,
+      visitorPhotoUrl,
     },
     debug: {
       functionName: OFFICE_EXIT_SCAN_FUNCTION,

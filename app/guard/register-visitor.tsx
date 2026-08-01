@@ -494,8 +494,8 @@ export default function RegisterVisitorScreen() {
           const route = [
             {
               order: 1,
-              office_id: result.destinationOfficeId ?? 0,
-              office_name: officeToVisit,
+              office_id: 0,
+              office_name: officeToVisit, // display label only — not an office.office_id
             },
           ];
           const qrPayload = buildQRTicketPayloadV1({
@@ -521,10 +521,11 @@ export default function RegisterVisitorScreen() {
             contactNo: contractorContactNo,
             address: `${contractorHouseNo} ${contractorStreet}, ${contractorBarangay}, ${contractorCity}, ${contractorProvince}`,
             purpose: contractorReasonForVisit,
+            destinationText: officeToVisit,
             facePhotoUri: faceUriForTicket,
             offices: [
               {
-                id: result.destinationOfficeId ?? 0,
+                id: 0,
                 name: officeToVisit,
               },
             ],

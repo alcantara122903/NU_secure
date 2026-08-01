@@ -5,6 +5,7 @@ import { parseQrTicketRaw } from '@/lib/qr-ticket-payload';
 import { authSessionService } from '@/services/auth-session';
 import { supabase } from '@/services/database';
 import { officeExitApiService } from '@/services/office-exit-api';
+import { resolveVisitorPhotoDisplayUri } from '@/services/storage/upload';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useRouter } from 'expo-router';
@@ -72,27 +73,6 @@ const formatDurationMinutes = (m: number): string => {
   return min > 0 ? `${h} hr ${min} min` : `${h} hr`;
 };
 
-const resolvePhotoUri = (raw: string | null | undefined): string => {
-  const value = (raw || '').trim();
-  if (!value) {
-    return '';
-  }
-  if (value.startsWith('http://') || value.startsWith('https://')) {
-    return value;
-  }
-  const trimmed = value.replace(/^\/+/, '');
-  const storagePath = trimmed.startsWith('visitor-files/')
-    ? trimmed.slice('visitor-files/'.length)
-    : trimmed.startsWith('visitor-file/')
-      ? trimmed.slice('visitor-file/'.length)
-      : trimmed;
-  if (!storagePath) {
-    return '';
-  }
-  const { data } = supabase.storage.from('visitor-file').getPublicUrl(storagePath);
-  return data.publicUrl || '';
-};
-
 const extractQrToken = (rawValue: string): string => {
   const trimmed = rawValue.trim();
   const fromUrl = extractQrTokenFromAnyScan(trimmed);
@@ -134,12 +114,49 @@ export default function ExitScanScreen() {
   const [manualRaw, setManualRaw] = useState('');
   /** Unmount CameraView before mounting the result tree — avoids Fabric addViewAt crashes on Android. */
   const [exitCameraSuppressed, setExitCameraSuppressed] = useState(false);
+  const [profilePhotoUri, setProfilePhotoUri] = useState<string | null>(null);
+  const [photoLoadFailed, setPhotoLoadFailed] = useState(false);
   const isProcessingRef = useRef(false);
 
   useEffect(() => {
     if (!scannedInfo) {
       setExitCameraSuppressed(false);
+      setProfilePhotoUri(null);
+      setPhotoLoadFailed(false);
     }
+  }, [scannedInfo]);
+
+  useEffect(() => {
+    if (!scannedInfo) {
+      return undefined;
+    }
+    let cancelled = false;
+    setPhotoLoadFailed(false);
+
+    void (async () => {
+      let raw = scannedInfo.pictureUrl ?? null;
+      if (!raw && scannedInfo.visitorId != null) {
+        const { data } = await supabase
+          .from('visitor')
+          .select('visitor_photo_with_id_url')
+          .eq('visitor_id', scannedInfo.visitorId)
+          .maybeSingle();
+        raw =
+          typeof data?.visitor_photo_with_id_url === 'string'
+            ? data.visitor_photo_with_id_url
+            : null;
+      }
+      console.log('[ExitScan] resolving photo', { raw, visitorId: scannedInfo.visitorId });
+      const uri = await resolveVisitorPhotoDisplayUri(raw);
+      console.log('[ExitScan] resolved photo uri', uri ? `${uri.slice(0, 80)}…` : null);
+      if (!cancelled) {
+        setProfilePhotoUri(uri);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [scannedInfo]);
 
   const handleBack = () => {
@@ -265,15 +282,16 @@ export default function ExitScanScreen() {
       gh_full_name: scannedInfo.name || 'Visitor',
       gh_pass_number: scannedInfo.passNumber || '—',
       gh_control_number: scannedInfo.controlNumber || '—',
-      gh_destination: [scannedInfo.destinationOffice, scannedInfo.destinationText].filter(Boolean).join(' · ') || '—',
+      // Prefer typed destination_text (contractor); fall back to office name from primary_office_id
+      gh_destination:
+        (scannedInfo.destinationText || '').trim() ||
+        (scannedInfo.destinationOffice || '').trim() ||
+        '—',
       gh_purpose: scannedInfo.purposeReason || '—',
       gh_entry_time: scannedInfo.entryTimeFormatted || '—',
       gh_exit_time: scannedInfo.exitTimeFormatted || '—',
       gh_duration: scannedInfo.durationLabel || '—',
       gh_exit_status: scannedInfo.exitStatusName || 'Completed',
-      gh_picture:
-        resolvePhotoUri(scannedInfo.pictureUrl) ||
-        'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?q=80&w=800&auto=format&fit=crop',
     };
 
     return (
@@ -327,7 +345,21 @@ export default function ExitScanScreen() {
 
             <View style={styles.gh_profile_card}>
               <View style={styles.gh_profile_left}>
-                <Image source={{ uri: ghVisitor.gh_picture }} style={styles.gh_profile_image} resizeMode="cover" />
+                {profilePhotoUri && !photoLoadFailed ? (
+                  <Image
+                    source={{ uri: profilePhotoUri }}
+                    style={styles.gh_profile_image}
+                    resizeMode="cover"
+                    onError={(e) => {
+                      console.warn('[ExitScan] image load failed', e.nativeEvent?.error);
+                      setPhotoLoadFailed(true);
+                    }}
+                  />
+                ) : (
+                  <View style={[styles.gh_profile_image, styles.gh_profile_image_placeholder]}>
+                    <MaterialIcons name="person" size={40} color="#9CA3AF" />
+                  </View>
+                )}
 
                 <View style={styles.gh_profile_info_block}>
                   <View style={styles.gh_info_row}>
@@ -1065,6 +1097,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#DCE4F0',
     backgroundColor: '#E5E7EB',
+  },
+  gh_profile_image_placeholder: {
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   gh_profile_info_block: {
     flex: 1,

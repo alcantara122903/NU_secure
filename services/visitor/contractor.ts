@@ -5,7 +5,6 @@
 
 import { toSupabaseTimestampPh } from '@/lib/supabase-timestamp-ph';
 import type { VisitorRegistrationData } from '@/types/visitor';
-import { resolvePendingExpectationStatusId } from '@/services/office-flow/db-status-lookups';
 import { addressService, type AddressData } from '../address';
 import { supabase } from '../database/supabase';
 import { uploadFacePhoto } from '../storage/upload';
@@ -53,7 +52,8 @@ export const contractorService = {
     visitorId: number;
     contractorId: number;
     visitId: number;
-    destinationOfficeId: number | null;
+    /** Always null for contractors — destination is destination_text only. */
+    destinationOfficeId: null;
   } | null> {
     try {
       console.log('\n💾 === CONTRACTOR PASS GENERATION ===\n');
@@ -72,23 +72,9 @@ export const contractorService = {
         return null;
       }
 
-      // Optional: match typed text to a known office for primary_office_id / expectation
-      let destinationOfficeId: number | null = null;
-      const { data: officeRows } = await supabase
-        .from('office')
-        .select('office_id, office_name')
-        .eq('is_active', true);
-      const needle = officeToVisit.toLowerCase();
-      const matched = (officeRows || []).find((o) => {
-        const name = String(o.office_name || '').toLowerCase();
-        return name === needle || name.includes(needle) || needle.includes(name);
-      });
-      if (matched?.office_id != null) {
-        destinationOfficeId = Number(matched.office_id);
-        console.log(`   Matched office_id=${destinationOfficeId} for "${officeToVisit}"`);
-      } else {
-        console.log(`   No office match for "${officeToVisit}" — destination_text only`);
-      }
+      // Contractor destination is always plain text in visit.destination_text only.
+      // Never link to office table — primary_office_id is always null.
+      console.log(`   officeToVisit (plain text only): "${officeToVisit}"`);
 
       // STEP 1: Create address record if components provided
       let addressId: number | null = null;
@@ -262,11 +248,11 @@ export const contractorService = {
           .insert([{
             visitor_id: visitorId,
             visit_type_id: 2, // Contractor visit type
-            primary_office_id: destinationOfficeId,
+            primary_office_id: null, // never linked to office table
             qr_token: qrToken,
             guard_user_id: guardUserId,
             purpose_reason: contractorData.reasonForVisit?.trim() || null,
-            destination_text: officeToVisit,
+            destination_text: officeToVisit, // plain varchar only
             exit_status_id: entryExitStatusId,
             entry_time: toSupabaseTimestampPh(),
           }])
@@ -359,29 +345,8 @@ export const contractorService = {
 
       const contractorId = contractorData_db?.[0]?.contractor_id || 0;
 
-      // STEP 5: Create office expectation only when typed destination matches a known office
-      if (destinationOfficeId != null) {
-        console.log('\n📝 STEP 5: Creating office expectation...');
-
-        const pendingExpectationStatusId = await resolvePendingExpectationStatusId();
-        const expectationResult = await supabase
-          .from('office_expectation')
-          .insert([{
-            visit_id: visitId,
-            office_id: destinationOfficeId,
-            expected_order: 1,
-            expectation_status_id: pendingExpectationStatusId,
-            created_at: toSupabaseTimestampPh(),
-          }]);
-
-        if (expectationResult.error) {
-          console.warn('⚠️ Office expectation creation failed:', expectationResult.error.message);
-        } else {
-          console.log(`✅ Office expectation created for office_id=${destinationOfficeId}`);
-        }
-      } else {
-        console.log('\n📝 STEP 5: Skipping office_expectation (free-text destination only)');
-      }
+      // STEP 5: No office_expectation for contractors — destination is free text only
+      console.log('\n📝 STEP 5: Skipping office_expectation (contractor uses destination_text only)');
 
       console.log('\n✅ === CONTRACTOR PASS GENERATED SUCCESSFULLY ===\n');
 
@@ -392,7 +357,7 @@ export const contractorService = {
         visitorId,
         contractorId,
         visitId,
-        destinationOfficeId,
+        destinationOfficeId: null,
       };
     } catch (error) {
       console.error('❌ CONTRACTOR PASS GENERATION ERROR:', error);

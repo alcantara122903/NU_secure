@@ -336,6 +336,15 @@ export async function resolveVisitorPhotoDisplayUri(
     if (!error && signed?.signedUrl) {
       return signed.signedUrl;
     }
+    // Fallback: try alternate bucket name used in older docs
+    if (VISITOR_FILES_BUCKET !== 'visitor-files') {
+      const { data: altSigned, error: altErr } = await supabase.storage
+        .from('visitor-files')
+        .createSignedUrl(storagePath, 60 * 60);
+      if (!altErr && altSigned?.signedUrl) {
+        return altSigned.signedUrl;
+      }
+    }
   } catch (err) {
     console.warn('[resolveVisitorPhotoDisplayUri] signed URL failed:', err);
   }
