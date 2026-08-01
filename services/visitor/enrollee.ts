@@ -16,6 +16,10 @@ import {
 } from '../ocr/parsers/parser-registry';
 import { uploadFacePhoto } from '../storage/upload';
 import { visitorLookupService } from './visitor-lookup';
+import {
+  resolveDefaultEntryExitStatusId,
+  resolveLoggedInGuardUserId,
+} from './resolve-guard-user';
 
 type IdExtractionCacheEntry = {
   key: string;
@@ -239,28 +243,10 @@ export const enrolleeService = {
           console.warn(`   ⚠️ Face photo upload failed: ${uploadResult.error}`);
         }
       }
-      // Get current user from session
+      // Get current guard from app session (users.user_id) — not Supabase Auth / guard_user
       console.log('\n👤 Fetching current guard user...');
-      const { data: { user: authUser } } = await supabase.auth.getUser();
-      let guardUserId: number | null = null;
-      
-      if (authUser) {
-        // Query guard_user table to get user_id by email
-        const { data: guardUser, error: guardError } = await supabase
-          .from('guard_user')
-          .select('user_id')
-          .eq('email', authUser.email)
-          .single();
-        
-        if (guardUser) {
-          guardUserId = guardUser.user_id;
-          console.log(`✅ Guard user found: user_id=${guardUserId}`);
-        } else {
-          console.warn(`⚠️ Guard user not found for email: ${authUser.email}`);
-        }
-      } else {
-        console.warn('⚠️ No auth user session found');
-      }
+      const guardUserId = await resolveLoggedInGuardUserId();
+      const entryExitStatusId = await resolveDefaultEntryExitStatusId();
       
       // ======= VISITOR DEDUPLICATION LOGIC =======
       // Check if visitor already exists to prevent duplicate records
@@ -271,6 +257,7 @@ export const enrolleeService = {
         firstName: enrolleeData.firstName,
         lastName: enrolleeData.lastName,
         contactNo: enrolleeData.contactNo,
+        birthday: enrolleeData.birthday,
       });
 
       let visitorData: any;
@@ -291,13 +278,21 @@ export const enrolleeService = {
           pass_number: existingVisitor.pass_number,
           control_number: existingVisitor.control_number,
           address_id: existingVisitor.address_id,
-          visitor_photo_with_id_url: existingVisitor.visitor_id ? photoUrl : null, // Update photo if new one provided
+          visitor_photo_with_id_url:
+            photoUrl || existingVisitor.visitor_photo_with_id_url || null,
         };
 
+        const visitorUpdates: Record<string, string> = {};
         if (enrolleeData.birthday?.trim()) {
+          visitorUpdates.birthday = enrolleeData.birthday.trim();
+        }
+        if (photoUrl) {
+          visitorUpdates.visitor_photo_with_id_url = photoUrl;
+        }
+        if (Object.keys(visitorUpdates).length > 0) {
           await supabase
             .from('visitor')
-            .update({ birthday: enrolleeData.birthday.trim() })
+            .update(visitorUpdates)
             .eq('visitor_id', existingVisitor.visitor_id);
         }
 
@@ -415,11 +410,31 @@ export const enrolleeService = {
       // Create visit record
       console.log('\n🎫 Creating visit record...');
       
+      // Prefer first active enrollee step office for primary_office_id on insert
+      let firstOfficeId: number | null = null;
+      try {
+        const { data: firstStep } = await supabase
+          .from('enrollee_step')
+          .select('office_id')
+          .eq('is_active', true)
+          .order('step_order', { ascending: true })
+          .limit(1)
+          .maybeSingle();
+        if (firstStep?.office_id != null) {
+          firstOfficeId = Number(firstStep.office_id);
+        }
+      } catch {
+        // non-blocking
+      }
+
       const visitPayload = {
         visitor_id: visitorData.visitor_id,
         visit_type_id: 1, // Enrollee visit type
         qr_token: enrolleeData.qrToken,
         guard_user_id: guardUserId,
+        purpose_reason: 'Enrollment',
+        primary_office_id: firstOfficeId,
+        exit_status_id: entryExitStatusId,
         entry_time: toSupabaseTimestampPh(),
       };
       
@@ -512,25 +527,32 @@ export const enrolleeService = {
         return;
       }
 
-      const sorted = [...progressList].sort(
-        (a: any, b: any) => (a.step?.step_order ?? 0) - (b.step?.step_order ?? 0),
-      );
+      const sorted = [...progressList].sort((a: any, b: any) => {
+        const aStep = Array.isArray(a.step) ? a.step[0] : a.step;
+        const bStep = Array.isArray(b.step) ? b.step[0] : b.step;
+        return (aStep?.step_order ?? 0) - (bStep?.step_order ?? 0);
+      });
 
-      const rows = sorted
-        .map((row: any, index: number) => {
-          const oid = row.step?.office_id;
-          if (oid == null) {
-            return null;
-          }
-          return {
-            visit_id: visitId,
-            office_id: oid,
-            expected_order: row.step?.step_order ?? index + 1,
-            expectation_status_id: 1,
-            created_at: toSupabaseTimestampPh(),
-          };
-        })
-        .filter(Boolean) as Record<string, unknown>[];
+      // Unique by office_id — enrollee route can visit the same office twice
+      // (e.g. Admissions at step 1 and step 9), but office_expectation is unique per visit+office.
+      const seenOfficeIds = new Set<number>();
+      const rows: Record<string, unknown>[] = [];
+
+      sorted.forEach((row: any, index: number) => {
+        const step = Array.isArray(row.step) ? row.step[0] : row.step;
+        const oid = step?.office_id;
+        if (oid == null) return;
+        const officeId = Number(oid);
+        if (!Number.isFinite(officeId) || seenOfficeIds.has(officeId)) return;
+        seenOfficeIds.add(officeId);
+        rows.push({
+          visit_id: visitId,
+          office_id: officeId,
+          expected_order: step?.step_order ?? index + 1,
+          expectation_status_id: 1,
+          created_at: toSupabaseTimestampPh(),
+        });
+      });
 
       if (!rows.length) {
         return;
@@ -542,7 +564,8 @@ export const enrolleeService = {
         return;
       }
 
-      const firstOfficeId = sorted[0]?.step?.office_id;
+      const firstStep = Array.isArray(sorted[0]?.step) ? sorted[0]?.step[0] : sorted[0]?.step;
+      const firstOfficeId = firstStep?.office_id;
       if (firstOfficeId) {
         await supabase.from('visit').update({ primary_office_id: firstOfficeId }).eq('visit_id', visitId);
       }

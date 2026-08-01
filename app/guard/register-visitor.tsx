@@ -1,5 +1,6 @@
 import { DataPrivacyNoticeModal } from "@/components/guard/data-privacy-notice-modal";
 import { FaceCaptureStepScreen } from "@/components/guard/face-capture-step";
+import { ReturningVisitorModal } from "@/components/guard/returning-visitor-modal";
 import { VisitorInformationStepScreen } from "@/components/guard/visitor-information-step";
 import { Colors } from "@/constants/colors";
 import { useColorScheme } from "@/hooks/use-color-scheme";
@@ -11,6 +12,8 @@ import {
     contractorService,
     enrolleeService,
     normalVisitorService,
+    visitorLookupService,
+    type ReturningVisitorMatch,
 } from "@/services/visitor";
 import { runOCRDiagnostics } from "@/utils/diagnostics";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
@@ -246,6 +249,10 @@ export default function RegisterVisitorScreen() {
   const [enrolleeBirthday, setEnrolleeBirthday] = useState("");
   const [isCreatingEnrollee, setIsCreatingEnrollee] = useState(false);
   const [ocrExtractionFailed, setOcrExtractionFailed] = useState(false);
+  const [returningMatch, setReturningMatch] =
+    useState<ReturningVisitorMatch | null>(null);
+  const [showReturningModal, setShowReturningModal] = useState(false);
+  const [resumeExistingVisitor, setResumeExistingVisitor] = useState(false);
 
   const generateYearSixCode = () => {
     const year = new Date().getFullYear();
@@ -434,19 +441,35 @@ export default function RegisterVisitorScreen() {
     });
   };
 
-  const handleConfirmPhoto = async () => {
-    if (!capturedFacePhoto) {
+  const handleConfirmPhoto = async (options?: { skipFaceCapture?: boolean }) => {
+    const skipFaceCapture = options?.skipFaceCapture === true;
+    const faceUriForUpload = skipFaceCapture
+      ? undefined
+      : capturedFacePhoto || undefined;
+    const faceUriForTicket =
+      (skipFaceCapture ? returningMatch?.photoUrl : null) ||
+      photoPreview ||
+      undefined;
+
+    if (!skipFaceCapture && !capturedFacePhoto) {
       Alert.alert("Error", "No photo captured");
       return;
     }
 
-    console.log("✅ Face photo confirmed, saving registration...");
+    console.log(
+      skipFaceCapture
+        ? "♻️ Resume flow — skipping face capture, using saved photo..."
+        : "✅ Face photo confirmed, saving registration...",
+    );
 
     try {
       setIsCreatingEnrollee(true);
 
       if (visitorType === "enrollee") {
-        handleCreateEnrollee();
+        await handleCreateEnrollee({
+          facePhotoUri: faceUriForUpload,
+          facePhotoUriForTicket: faceUriForTicket,
+        });
       } else if (visitorType === "contractor") {
         const selectedOfficeIds = await officeService.getOfficeIds(
           contractorSelectedDestinationOffices,
@@ -462,7 +485,6 @@ export default function RegisterVisitorScreen() {
         }
 
         const primaryOfficeId = selectedOfficeIds[0];
-        const primaryOfficeName = contractorSelectedDestinationOffices[0];
 
         // Register contractor and generate QR pass
         const result = await contractorService.registerAndGenerateQRPass({
@@ -481,7 +503,7 @@ export default function RegisterVisitorScreen() {
           controlNumber: contractorControlNumber,
           reasonForVisit: contractorReasonForVisit,
           contactPerson: contractorContactPerson.trim(),
-          facePhotoUri: capturedFacePhoto || undefined,
+          facePhotoUri: faceUriForUpload,
           idPhotoUri: capturedIdPhoto || undefined,
         });
 
@@ -514,7 +536,7 @@ export default function RegisterVisitorScreen() {
             contactNo: contractorContactNo,
             address: `${contractorHouseNo} ${contractorStreet}, ${contractorBarangay}, ${contractorCity}, ${contractorProvince}`,
             purpose: contractorReasonForVisit,
-            facePhotoUri: photoPreview ?? undefined,
+            facePhotoUri: faceUriForTicket,
             offices: contractorSelectedDestinationOffices.map((name, index) => ({
               id: selectedOfficeIds[index] || index,
               name,
@@ -561,7 +583,7 @@ export default function RegisterVisitorScreen() {
           reasonForVisit: normalVisitorReasonForVisit,
           passNumber: normalVisitorPassNumber,
           controlNumber: normalVisitorControlNumber,
-          facePhotoUri: capturedFacePhoto || undefined,
+          facePhotoUri: faceUriForUpload,
           idPhotoUri: capturedIdPhoto || undefined,
           selectedOfficeIds: selectedOfficeIds,
         });
@@ -594,7 +616,7 @@ export default function RegisterVisitorScreen() {
             contactNo: normalVisitorContactNo,
             address: `${normalVisitorHouseNo} ${normalVisitorStreet}, ${normalVisitorBarangay}, ${normalVisitorCity}, ${normalVisitorProvince}`,
             reasonForVisit: normalVisitorReasonForVisit,
-            facePhotoUri: photoPreview ?? undefined,
+            facePhotoUri: faceUriForTicket,
             offices: selectedDestinationOffices.map((name, index) => ({
               id: selectedOfficeIds[index] || index,
               name,
@@ -615,6 +637,15 @@ export default function RegisterVisitorScreen() {
     } finally {
       setIsCreatingEnrollee(false);
     }
+  };
+
+  /** After Step 2: resume skips face capture; new visitors go to Step 3. */
+  const continueFromVisitorInfo = () => {
+    if (resumeExistingVisitor) {
+      void handleConfirmPhoto({ skipFaceCapture: true });
+      return;
+    }
+    setStep(3);
   };
 
   const handleRetakePhoto = () => {
@@ -685,11 +716,79 @@ export default function RegisterVisitorScreen() {
     }
   };
 
+  const applyReturningMatchToForm = (match: ReturningVisitorMatch) => {
+    const { addressParts } = match;
+
+    setExtractedFirstName(match.firstName);
+    setExtractedLastName(match.lastName);
+    setEnrolleeBirthday(match.birthday);
+    setContactNumber(match.contactNo || "");
+    setAddressHouseNo(addressParts.houseNo);
+    setAddressStreet(addressParts.street);
+    setAddressBarangay(addressParts.barangay);
+    setAddressMunicipality(addressParts.cityMunicipality);
+    setAddressProvince(addressParts.province);
+    setAddressRegion(addressParts.region);
+    setExtractedAddress(match.addressText);
+
+    setNormalVisitorFirstName(match.firstName);
+    setNormalVisitorLastName(match.lastName);
+    setNormalVisitorBirthday(match.birthday);
+    setNormalVisitorContactNo(match.contactNo || "");
+    setNormalVisitorHouseNo(addressParts.houseNo);
+    setNormalVisitorStreet(addressParts.street);
+    setNormalVisitorBarangay(addressParts.barangay);
+    setNormalVisitorCity(addressParts.cityMunicipality);
+    setNormalVisitorProvince(addressParts.province);
+    setNormalVisitorRegion(addressParts.region);
+
+    setContractorFirstName(match.firstName);
+    setContractorLastName(match.lastName);
+    setContractorBirthday(match.birthday);
+    setContractorContactNo(match.contactNo || "");
+    setContractorHouseNo(addressParts.houseNo);
+    setContractorStreet(addressParts.street);
+    setContractorBarangay(addressParts.barangay);
+    setContractorCity(addressParts.cityMunicipality);
+    setContractorProvince(addressParts.province);
+    setContractorRegion(addressParts.region);
+
+    // Reuse saved validation photo — Step 3 face capture will be skipped
+    setPhotoPreview(match.photoUrl);
+    setCapturedFacePhoto(null);
+    setResumeExistingVisitor(true);
+  };
+
+  const finishIdExtractionAndGoStep2 = () => {
+    setShowReturningModal(false);
+    setStep(2);
+  };
+
+  const handleConfirmResumeReturning = () => {
+    if (returningMatch) {
+      applyReturningMatchToForm(returningMatch);
+      console.log(
+        `♻️ Resuming visitor_id=${returningMatch.visitorId} as ${returningMatch.visitorType} (skip face capture)`,
+      );
+    }
+    finishIdExtractionAndGoStep2();
+  };
+
+  const handleCancelReturningAsNew = () => {
+    setResumeExistingVisitor(false);
+    setReturningMatch(null);
+    setPhotoPreview(null);
+    setCapturedFacePhoto(null);
+    console.log("🆕 Guard chose New Visitor — face photo required on Step 3");
+    finishIdExtractionAndGoStep2();
+  };
+
   // Extract data from ID image using OCR with intelligent parsing
+  // Returns true when the returning-visitor modal is open (do not advance step yet).
   const extractDataFromIdImage = async (
     idPhotoBase64: string,
     imageUri?: string | null,
-  ) => {
+  ): Promise<boolean> => {
     try {
       console.log("🔍 Starting ID text extraction...");
 
@@ -753,6 +852,8 @@ export default function RegisterVisitorScreen() {
 
         setExtractionConfidence(extractedData.confidence || null);
         setOcrExtractionFailed(false);
+        setResumeExistingVisitor(false);
+        setReturningMatch(null);
 
         const extractedFields: string[] = [];
         if (extractedData.firstName) extractedFields.push("First Name");
@@ -763,6 +864,31 @@ export default function RegisterVisitorScreen() {
         console.log(
           `✅ Data extracted successfully (${extractedData.confidence} confidence) - Fields: ${extractedFields.join(", ")}`,
         );
+
+        // Returning ENROLLEE resume modal only when registering as enrollee.
+        // Contractor / normal: use OCR ID fields only (person may change visit type).
+        if (
+          visitorType === "enrollee" &&
+          extractedData.firstName?.trim() &&
+          extractedData.lastName?.trim() &&
+          extractedData.birthday?.trim()
+        ) {
+          const match = await visitorLookupService.findReturningByNameAndBirthday({
+            firstName: extractedData.firstName,
+            lastName: extractedData.lastName,
+            birthday: extractedData.birthday,
+          });
+
+          if (match && match.visitorType === "enrollee") {
+            setReturningMatch(match);
+            setShowReturningModal(true);
+            return true;
+          }
+        } else if (visitorType === "contractor" || visitorType === "normal") {
+          console.log(
+            `ℹ️ ${visitorType} registration — skip enrollee resume modal; using OCR ID info only`,
+          );
+        }
 
         // Show confidence-based message
         let confidenceMessage = "";
@@ -796,6 +922,7 @@ export default function RegisterVisitorScreen() {
           `${confidenceMessage}\nFirst Name: ${extractedData.firstName || "(not extracted)"}\nLast Name: ${extractedData.lastName || "(not extracted)"}\nBirthday: ${extractedData.birthday || "(not extracted)"}\nAddress: ${extractedData.address || "(not extracted)"}\n\n${actionMessage}${warningNote}${missingFieldsNote}`,
           [{ text: "Review & Continue" }],
         );
+        return false;
       } else {
         // Extraction failed - guide user to manual entry
         console.warn(
@@ -809,6 +936,7 @@ export default function RegisterVisitorScreen() {
           "We could not automatically read your ID due to image quality, lighting, or obscured text.\n\n✏️ No problem! You can enter your information manually on the next screen.\n\nRequired fields:\n  • First Name\n  • Last Name\n  • Address\n\nYou can also edit the phone number if needed.",
           [{ text: "Proceed to Manual Entry" }],
         );
+        return false;
       }
     } catch (error) {
       console.error("❌ Error extracting ID data:", error);
@@ -823,6 +951,7 @@ export default function RegisterVisitorScreen() {
         "Could not automatically extract information from the ID. Please enter the details manually.\n\nYou will be able to enter your information in the next step.",
         [{ text: "Continue to Manual Entry" }],
       );
+      return false;
     }
   };
 
@@ -834,11 +963,15 @@ export default function RegisterVisitorScreen() {
 
     console.log("📋 ID photo confirmed, extracting data...");
 
-    // Extract data from ID image
-    await extractDataFromIdImage(capturedIdPhoto, idPhotoPreview);
+    const waitingForReturningDecision = await extractDataFromIdImage(
+      capturedIdPhoto,
+      idPhotoPreview,
+    );
 
-    // Proceed to Step 2
-    setStep(2);
+    // Stay on step 1 while returning modal is open
+    if (!waitingForReturningDecision) {
+      setStep(2);
+    }
   };
 
   const handleRetakeIdPhoto = () => {
@@ -870,7 +1003,10 @@ export default function RegisterVisitorScreen() {
     Alert.alert("OCR Diagnostics Results", message, [{ text: "OK" }]);
   };
 
-  const handleCreateEnrollee = async () => {
+  const handleCreateEnrollee = async (photoOpts?: {
+    facePhotoUri?: string;
+    facePhotoUriForTicket?: string;
+  }) => {
     // Validate required fields - at least firstName and lastName are required
     const missingFields: string[] = [];
     if (!extractedFirstName?.trim()) missingFields.push("First Name");
@@ -933,6 +1069,13 @@ export default function RegisterVisitorScreen() {
       const control = controlNumber || generateYearSixCode();
       const qrToken = `QR-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
+      const facePhotoUri =
+        photoOpts?.facePhotoUri !== undefined
+          ? photoOpts.facePhotoUri
+          : capturedFacePhoto || undefined;
+      const facePhotoUriForTicket =
+        photoOpts?.facePhotoUriForTicket ?? photoPreview ?? undefined;
+
       // Save enrollee to database
       const enrolleeResult = await enrolleeService.createEnrollee({
         firstName: extractedFirstName,
@@ -946,8 +1089,8 @@ export default function RegisterVisitorScreen() {
         addressProvince,
         addressRegion,
         contactNo: contactNumber || undefined,
-        facePhotoUri: capturedFacePhoto || undefined, // Use data URL with base64
-        idPhotoUri: capturedIdPhoto || undefined, // Use data URL with base64
+        facePhotoUri,
+        idPhotoUri: capturedIdPhoto || undefined,
         passNumber: pass,
         controlNumber: control,
         qrToken: qrToken,
@@ -1045,7 +1188,7 @@ export default function RegisterVisitorScreen() {
             firstName: extractedFirstName,
             lastName: extractedLastName,
             contactNo: contactNumber || "",
-            facePhotoUri: photoPreview ?? undefined,
+            facePhotoUri: facePhotoUriForTicket,
             offices: ticketOffices,
             enrolleeId: enrolleeResult.enrollee_id,
           }),
@@ -1234,8 +1377,14 @@ export default function RegisterVisitorScreen() {
               );
               return;
             }
-            setStep(3);
+            continueFromVisitorInfo();
           }}
+          continueButtonLabel={
+            resumeExistingVisitor
+              ? "Confirm & Generate QR"
+              : "Continue to Photo"
+          }
+          continueDisabled={isCreatingEnrollee}
           firstName={extractedFirstName}
           onChangeFirstName={setExtractedFirstName}
           lastName={extractedLastName}
@@ -1320,8 +1469,14 @@ export default function RegisterVisitorScreen() {
               );
               return;
             }
-            setStep(3);
+            continueFromVisitorInfo();
           }}
+          continueButtonLabel={
+            resumeExistingVisitor
+              ? "Confirm & Generate QR"
+              : "Continue to Photo"
+          }
+          continueDisabled={isCreatingEnrollee}
           firstName={contractorFirstName}
           onChangeFirstName={setContractorFirstName}
           lastName={contractorLastName}
@@ -1398,8 +1553,14 @@ export default function RegisterVisitorScreen() {
             );
             return;
           }
-          setStep(3);
+          continueFromVisitorInfo();
         }}
+        continueButtonLabel={
+          resumeExistingVisitor
+            ? "Confirm & Generate QR"
+            : "Continue to Photo"
+        }
+        continueDisabled={isCreatingEnrollee}
         firstName={normalVisitorFirstName}
         onChangeFirstName={setNormalVisitorFirstName}
         lastName={normalVisitorLastName}
@@ -1441,7 +1602,9 @@ export default function RegisterVisitorScreen() {
           isCapturingPhoto={isCapturingPhoto}
           isCreatingEnrollee={isCreatingEnrollee}
           onCaptureFace={() => requestPrivacyThen("captureFace")}
-          onConfirmPhoto={handleConfirmPhoto}
+          onConfirmPhoto={() => {
+            void handleConfirmPhoto();
+          }}
           onRetakePhoto={handleRetakePhoto}
         />
         <DataPrivacyNoticeModal
@@ -1667,6 +1830,12 @@ export default function RegisterVisitorScreen() {
           visible={showPrivacyModal}
           onAgree={handlePrivacyAgree}
           onDecline={handlePrivacyDecline}
+        />
+        <ReturningVisitorModal
+          visible={showReturningModal}
+          match={returningMatch}
+          onConfirmResume={handleConfirmResumeReturning}
+          onCancelNewVisitor={handleCancelReturningAsNew}
         />
       </View>
     );

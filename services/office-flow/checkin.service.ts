@@ -3,7 +3,7 @@ import { supabase } from '@/services/database/supabase';
 import { resolveActiveVisitFromScanInput } from './active-visit-resolve';
 import { VISIT_TYPE } from './constants';
 import type { OfficeCheckInScanRequest, OfficeCheckInScanResult } from './checkin.types';
-import { resolveCompletedEnrolleeStatusId, resolveCompletedStepStatusId, resolveValidationStatusId } from './db-status-lookups';
+import { resolveCompletedEnrolleeStatusId, resolveCompletedStepStatusId, resolveCompletedExpectationStatusId, resolveValidationStatusId } from './db-status-lookups';
 import { completeEnrolleeProgressAtOffice, nextOfficeIdFromEnrolleeProgress } from './enrollee-route';
 import {
   expectationsAreFullyCheckedIn,
@@ -292,55 +292,118 @@ export async function processOfficeCheckInScan(req: OfficeCheckInScanRequest): P
     };
   }
 
+  const expectationCompletedStatusId = (await resolveCompletedExpectationStatusId()) ?? 4;
+
   if (pending?.expectation_id != null) {
-    await supabase
+    const { error: expErr } = await supabase
       .from('office_expectation')
-      .update({ arrived_at: scanTime, expectation_status_id: 4 })
+      .update({ arrived_at: scanTime, expectation_status_id: expectationCompletedStatusId })
       .eq('expectation_id', pending.expectation_id);
+    if (expErr) {
+      console.warn('[OfficeCheckIn] expectation update failed:', expErr.message);
+    }
   } else {
-    // Fallback: when pending expectation_id is unavailable, mark the current office row as completed.
-    await supabase
+    // Mark matching pending row, or create one if enrollee progress authorized this office
+    // without an office_expectation row yet.
+    const { data: updatedRows, error: expErr } = await supabase
       .from('office_expectation')
-      .update({ arrived_at: scanTime, expectation_status_id: 4 })
+      .update({ arrived_at: scanTime, expectation_status_id: expectationCompletedStatusId })
       .eq('visit_id', visit.visit_id)
       .eq('office_id', scanningOfficeId)
-      .is('arrived_at', null);
+      .is('arrived_at', null)
+      .select('expectation_id');
+
+    if (expErr) {
+      console.warn('[OfficeCheckIn] expectation fallback update failed:', expErr.message);
+    }
+
+    if (!updatedRows?.length) {
+      const maxOrder = expectations.reduce(
+        (max, e) => Math.max(max, Number(e.expected_order) || 0),
+        0,
+      );
+      const { error: insExpErr } = await supabase.from('office_expectation').insert({
+        visit_id: visit.visit_id,
+        office_id: scanningOfficeId,
+        expected_order: maxOrder + 1,
+        expectation_status_id: expectationCompletedStatusId,
+        arrived_at: scanTime,
+        created_at: scanTime,
+      });
+      if (insExpErr) {
+        console.warn('[OfficeCheckIn] expectation insert failed:', insExpErr.message);
+      }
+    }
   }
 
+  let completedAllSteps = false;
   if (visit.visit_type_id === VISIT_TYPE.ENROLLEE) {
     const stepStatusId = await resolveCompletedStepStatusId();
     const enrolleeCompletedStatusId = await resolveCompletedEnrolleeStatusId();
-    const completedAllSteps = await completeEnrolleeProgressAtOffice(
+    completedAllSteps = await completeEnrolleeProgressAtOffice(
       visit.visitor_id,
       scanningOfficeId,
       scanTime,
       stepStatusId,
       enrolleeCompletedStatusId,
     );
-    if (completedAllSteps) {
-      return {
-        success: true,
-        authorized: true,
-        title: 'Authorized',
-        message: `${visitorName} completed all enrollee steps.`,
-        visitorName,
-        visitorPhotoUrl,
-        passNumber: visitor?.pass_number ?? null,
-        controlNumber: visitor?.control_number ?? null,
-        purposeLabel,
-        purposeReason,
-        entryTime: visit.entry_time,
-        scanTime,
-        registeredBy,
-        destinationStatusLabel: 'Correct destination',
-        enrolleeStatusLabel: 'Enrollee status: Completed',
-        isCorrectDestination: true,
-        destinationOffice: expectedOfficeName,
-        expectedOfficeName,
-        scanningOfficeName,
-        visitId: visit.visit_id,
-      };
+  }
+
+  // Advance primary_office_id AFTER marking this stop done so next office resolves correctly
+  try {
+    let nextOfficeId: number = scanningOfficeId;
+    if (visit.visit_type_id === VISIT_TYPE.ENROLLEE) {
+      const fromProgress = await nextOfficeIdFromEnrolleeProgress(visit.visitor_id);
+      if (fromProgress != null) {
+        nextOfficeId = fromProgress;
+      } else {
+        // All enrollee steps done — keep last scanned office as primary
+        nextOfficeId = scanningOfficeId;
+      }
+    } else {
+      const refreshed = await loadExpectationsForVisit(visit.visit_id);
+      const nextPending = firstPendingExpectation(refreshed);
+      if (nextPending != null) {
+        nextOfficeId = Number(nextPending.office_id);
+      }
     }
+
+    const { error: visitUpdErr } = await supabase
+      .from('visit')
+      .update({ primary_office_id: nextOfficeId })
+      .eq('visit_id', visit.visit_id);
+    if (visitUpdErr) {
+      console.warn('[OfficeCheckIn] primary_office_id update failed:', visitUpdErr.message);
+    } else {
+      console.log(`[OfficeCheckIn] primary_office_id → ${nextOfficeId}`);
+    }
+  } catch (e) {
+    console.warn('[OfficeCheckIn] failed advancing primary_office_id', e);
+  }
+
+  if (completedAllSteps) {
+    return {
+      success: true,
+      authorized: true,
+      title: 'Authorized',
+      message: `${visitorName} completed all enrollee steps.`,
+      visitorName,
+      visitorPhotoUrl,
+      passNumber: visitor?.pass_number ?? null,
+      controlNumber: visitor?.control_number ?? null,
+      purposeLabel,
+      purposeReason,
+      entryTime: visit.entry_time,
+      scanTime,
+      registeredBy,
+      destinationStatusLabel: 'Correct destination',
+      enrolleeStatusLabel: 'Enrollee status: Completed',
+      isCorrectDestination: true,
+      destinationOffice: expectedOfficeName,
+      expectedOfficeName,
+      scanningOfficeName,
+      visitId: visit.visit_id,
+    };
   }
 
   return {

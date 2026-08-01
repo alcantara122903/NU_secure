@@ -3,11 +3,15 @@
  * Handles file uploads for visitor photos and documents
  * 
  * Bucket structure:
- * - visitor-files/Face_ID_picture/ → face and ID capture photos
+ * - visitor-file/Face_ID_Picture/ → face and ID capture photos
  */
 
 import { File } from 'expo-file-system';
 import { supabase } from '../database/supabase';
+
+/** Storage bucket for visitor face/ID photos — must exist in Supabase Storage. */
+export const VISITOR_FILES_BUCKET =
+  process.env.EXPO_PUBLIC_STORAGE_BUCKET?.trim() || 'visitor-file';
 
 /**
  * Upload result interface
@@ -122,13 +126,13 @@ export async function uploadImage(
     }
 
     console.log('📡 Uploading to Supabase...');
-    console.log('   Bucket: visitor-files');
+    console.log(`   Bucket: ${VISITOR_FILES_BUCKET}`);
     console.log(`   Path: ${filePath}`);
     console.log(`   Data type: ${uploadData instanceof ArrayBuffer ? 'ArrayBuffer' : typeof uploadData}`);
 
     try {
       const { data, error } = await supabase.storage
-        .from('visitor-files')
+        .from(VISITOR_FILES_BUCKET)
         .upload(filePath, uploadData, {
           cacheControl: '3600',
           upsert: false,
@@ -140,9 +144,14 @@ export async function uploadImage(
         console.error('   Code:', (error as any).statusCode);
         console.error('   Message:', error.message);
         console.error('   Full error:', JSON.stringify(error));
+        const notFound =
+          /bucket not found/i.test(error.message) ||
+          String((error as any).statusCode) === '404';
         return {
           success: false,
-          error: `Upload failed: ${error.message}`,
+          error: notFound
+            ? `Upload failed: Storage bucket "${VISITOR_FILES_BUCKET}" not found. Create it in Supabase → Storage (Public), then add folder Face_ID_Picture.`
+            : `Upload failed: ${error.message}`,
         };
       }
 
@@ -169,7 +178,7 @@ export async function uploadImage(
 
       // Use relative path format (bucket/path) instead of full URL
       // This is more portable and matches friend's working format
-      const relativeUrl = `visitor-files/${filePath}`;
+      const relativeUrl = `${VISITOR_FILES_BUCKET}/${filePath}`;
       console.log(`✓ Public URL generated: ${relativeUrl}`);
 
       return {
@@ -197,7 +206,7 @@ export async function uploadImage(
 }
 
 /**
- * Upload face photo to Face_ID_picture folder
+ * Upload face photo to Face_ID_Picture folder
  * 
  * @param imageUri - Image URI from camera or gallery
  * @returns Upload result with file path and public URL
@@ -206,13 +215,13 @@ export async function uploadFacePhoto(imageUri: string): Promise<UploadResult> {
   console.log('\n👤 Uploading face photo...');
   
   const filename = generatePhotoFilename('jpg');
-  const filePath = `Face_ID_picture/face_${filename}`;
+  const filePath = `Face_ID_Picture/face_${filename}`;
   
   return uploadImage(filePath, imageUri);
 }
 
 /**
- * Upload ID photo to Face_ID_picture folder
+ * Upload ID photo to Face_ID_Picture folder
  * 
  * @param imageUri - Image URI from camera or gallery
  * @returns Upload result with file path and public URL
@@ -221,7 +230,7 @@ export async function uploadIdPhoto(imageUri: string): Promise<UploadResult> {
   console.log('\n🆔 Uploading ID photo...');
   
   const filename = generatePhotoFilename('jpg');
-  const filePath = `Face_ID_picture/id_${filename}`;
+  const filePath = `Face_ID_Picture/id_${filename}`;
   
   return uploadImage(filePath, imageUri);
 }
@@ -236,7 +245,7 @@ export async function deleteStorageFile(filePath: string): Promise<UploadResult>
     console.log(`🗑️  Deleting: ${filePath}`);
     
     const { error } = await supabase.storage
-      .from('visitor-files')
+      .from(VISITOR_FILES_BUCKET)
       .remove([filePath]);
 
     if (error) {
@@ -266,7 +275,7 @@ export async function deleteStorageFile(filePath: string): Promise<UploadResult>
  */
 export function getPublicUrl(filePath: string): string {
   const { data } = supabase.storage
-    .from('visitor-files')
+    .from(VISITOR_FILES_BUCKET)
     .getPublicUrl(filePath);
   
   return data.publicUrl;

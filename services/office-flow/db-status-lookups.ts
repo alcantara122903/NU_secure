@@ -46,3 +46,25 @@ export async function resolveCompletedEnrolleeStatusId(): Promise<number | null>
   });
   return hit?.enrollee_status_id ?? rows[0].enrollee_status_id;
 }
+
+/** expectation_status_id when an office stop is completed / arrived. */
+export async function resolveCompletedExpectationStatusId(): Promise<number | null> {
+  const { data: rows } = await supabase
+    .from('expectation_status')
+    .select('expectation_status_id, status_name')
+    .limit(40);
+  if (!rows?.length) {
+    return 4; // app convention fallback
+  }
+  const hit = rows.find((r) => {
+    const n = norm(r.status_name);
+    return (
+      n.includes('complete') ||
+      n.includes('arrived') ||
+      n.includes('done') ||
+      n.includes('checked') ||
+      n.includes('finished')
+    );
+  });
+  return hit?.expectation_status_id ?? rows[rows.length - 1]?.expectation_status_id ?? 4;
+}

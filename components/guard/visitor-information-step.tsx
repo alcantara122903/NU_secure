@@ -53,6 +53,10 @@ export type VisitorInformationStepProps = {
   onToggleOffice: (office: string) => void;
   onBack: () => void;
   onContinue: () => void;
+  /** Button label under the form. Default: Continue to Photo */
+  continueButtonLabel?: string;
+  /** Disable continue while submitting (e.g. resume skip-photo save). */
+  continueDisabled?: boolean;
   firstName: string;
   onChangeFirstName: (v: string) => void;
   lastName: string;
@@ -226,6 +230,8 @@ export function VisitorInformationStepScreen(
     onToggleOffice,
     onBack,
     onContinue,
+    continueButtonLabel = "Continue to Photo",
+    continueDisabled = false,
     firstName,
     onChangeFirstName,
     lastName,
@@ -608,11 +614,15 @@ export function VisitorInformationStepScreen(
 
           <TouchableOpacity
             activeOpacity={0.9}
-            style={styles.continueButton}
+            style={[
+              styles.continueButton,
+              continueDisabled && styles.continueButtonDisabled,
+            ]}
             onPress={onContinue}
+            disabled={continueDisabled}
           >
             <ArrowRight size={22} color="#FFFFFF" strokeWidth={2.6} />
-            <Text style={styles.continueText}>Continue to Photo</Text>
+            <Text style={styles.continueText}>{continueButtonLabel}</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -976,6 +986,9 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 4 },
     elevation: 4,
+  },
+  continueButtonDisabled: {
+    opacity: 0.55,
   },
   continueText: {
     color: "#FFFFFF",

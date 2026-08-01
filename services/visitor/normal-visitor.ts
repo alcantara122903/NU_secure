@@ -10,6 +10,10 @@ import { supabase } from '../database/supabase';
 import { uploadFacePhoto } from '../storage/upload';
 import { processOfficeCheckInScan } from '@/services/office-checkin-scan';
 import { visitorLookupService } from './visitor-lookup';
+import {
+  resolveDefaultEntryExitStatusId,
+  resolveLoggedInGuardUserId,
+} from './resolve-guard-user';
 
 /**
  * Generate a random token for QR code
@@ -96,28 +100,10 @@ export const normalVisitorService = {
         console.log('\n📤 STEP 2: No face photo URI provided');
       }
 
-      // Get current user from session
+      // Get current guard from app session (users.user_id)
       console.log('\n👤 Fetching current guard user...');
-      const { data: { user: authUser } } = await supabase.auth.getUser();
-      let guardUserId: number | null = null;
-      
-      if (authUser) {
-        // Query guard_user table to get user_id by email
-        const { data: guardUser, error: guardError } = await supabase
-          .from('guard_user')
-          .select('user_id')
-          .eq('email', authUser.email)
-          .single();
-        
-        if (guardUser) {
-          guardUserId = guardUser.user_id;
-          console.log(`✅ Guard user found: user_id=${guardUserId}`);
-        } else {
-          console.warn(`⚠️ Guard user not found for email: ${authUser.email}`);
-        }
-      } else {
-        console.warn('⚠️ No auth user session found');
-      }
+      const guardUserId = await resolveLoggedInGuardUserId();
+      const entryExitStatusId = await resolveDefaultEntryExitStatusId();
 
       // Attempt insert with retry logic for sequence issues
       console.log('\n👥 CHECKING FOR EXISTING VISITOR RECORD');
@@ -125,6 +111,7 @@ export const normalVisitorService = {
         firstName: visitorData.firstName,
         lastName: visitorData.lastName,
         contactNo: visitorData.contactNo,
+        birthday: visitorData.birthday,
       });
 
       let visitorData_db: any = null;
@@ -138,10 +125,17 @@ export const normalVisitorService = {
           visitor_id: existingVisitor.visitor_id,
         }];
         visitorError = null;
+        const normalUpdates: Record<string, string> = {};
         if (visitorData.birthday?.trim()) {
+          normalUpdates.birthday = visitorData.birthday.trim();
+        }
+        if (visitorPhotoUrl) {
+          normalUpdates.visitor_photo_with_id_url = visitorPhotoUrl;
+        }
+        if (Object.keys(normalUpdates).length > 0) {
           await supabase
             .from('visitor')
-            .update({ birthday: visitorData.birthday.trim() })
+            .update(normalUpdates)
             .eq('visitor_id', existingVisitor.visitor_id);
         }
         console.log('\n✅ Using existing visitor record - no new record created');
@@ -239,7 +233,8 @@ export const normalVisitorService = {
             primary_office_id: primaryOfficeId,
             qr_token: qrToken,
             guard_user_id: guardUserId,
-            purpose_reason: visitorData.reasonForVisit || null,
+            purpose_reason: visitorData.reasonForVisit?.trim() || null,
+            exit_status_id: entryExitStatusId,
             entry_time: toSupabaseTimestampPh(),
           }])
           .select('visit_id');

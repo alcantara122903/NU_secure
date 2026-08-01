@@ -48,8 +48,10 @@ class AuthService {
         } as ApiError;
       }
 
-      if (user.status !== 'active') {
-        console.error('❌ User account not active:', credentials.email);
+      // DB default is often "Active"; compare case-insensitively
+      const statusNorm = String(user.status ?? '').trim().toLowerCase();
+      if (statusNorm !== 'active') {
+        console.error('❌ User account not active:', credentials.email, user.status);
         throw {
           code: 'LOGIN_FAILED',
           message: 'User account is not active. Contact admin.',

@@ -3,9 +3,10 @@ import {
   Ionicons,
   MaterialCommunityIcons,
 } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
-import React from "react";
+import { useFocusEffect, useRouter } from "expo-router";
+import React, { useCallback, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   Platform,
   SafeAreaView,
@@ -17,9 +18,40 @@ import {
   View,
 } from "react-native";
 import { authSessionService } from "@/services/auth-session";
+import {
+  loadOfficePortalStats,
+  type OfficePortalStats,
+} from "@/services/office-portal-stats";
 
 export default function AdmissionsDashboardScreen() {
   const router = useRouter();
+  const [stats, setStats] = useState<OfficePortalStats | null>(null);
+  const [loadingStats, setLoadingStats] = useState(true);
+
+  const refreshStats = useCallback(async () => {
+    setLoadingStats(true);
+    try {
+      const next = await loadOfficePortalStats();
+      setStats(next);
+    } catch (e) {
+      console.warn("[OfficePortal] failed to load stats", e);
+    } finally {
+      setLoadingStats(false);
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      void refreshStats();
+    }, [refreshStats]),
+  );
+
+  const officeName = stats?.officeName ?? "Office";
+  const staffName = stats?.staffName ?? "Office Staff";
+  const staffRole = stats?.staffRole ?? "Office Staff";
+  const todayVisitors = stats?.todayVisitors ?? 0;
+  const pendingScans = stats?.pendingScans ?? 0;
+  const expectedVisitors = stats?.expectedVisitors ?? 0;
 
   const handleScanQr = () => {
     router.push("/office/office-scan");
@@ -58,8 +90,8 @@ export default function AdmissionsDashboardScreen() {
             </View>
 
             <View style={styles.headerTextBox}>
-              <Text style={styles.headerTitle}>Admissions Office</Text>
-              <Text style={styles.headerSubtitle}>Admissions Office</Text>
+              <Text style={styles.headerTitle}>{officeName}</Text>
+              <Text style={styles.headerSubtitle}>{officeName}</Text>
             </View>
 
             <TouchableOpacity
@@ -79,8 +111,8 @@ export default function AdmissionsDashboardScreen() {
           </View>
 
           <View>
-            <Text style={styles.profileName}>Ejay Dimayuga</Text>
-            <Text style={styles.profileRole}>Manager</Text>
+            <Text style={styles.profileName}>{staffName}</Text>
+            <Text style={styles.profileRole}>{staffRole}</Text>
           </View>
         </View>
 
@@ -131,7 +163,11 @@ export default function AdmissionsDashboardScreen() {
 
             <View>
               <Text style={styles.statLabel}>Today&apos;s Visitors</Text>
-              <Text style={[styles.statValue, styles.greenText]}>2</Text>
+              {loadingStats ? (
+                <ActivityIndicator size="small" color="#1FA855" style={{ marginTop: 6 }} />
+              ) : (
+                <Text style={[styles.statValue, styles.greenText]}>{todayVisitors}</Text>
+              )}
             </View>
           </View>
 
@@ -142,7 +178,11 @@ export default function AdmissionsDashboardScreen() {
 
             <View>
               <Text style={styles.statLabel}>Pending Scans</Text>
-              <Text style={[styles.statValue, styles.orangeText]}>40</Text>
+              {loadingStats ? (
+                <ActivityIndicator size="small" color="#F2A100" style={{ marginTop: 6 }} />
+              ) : (
+                <Text style={[styles.statValue, styles.orangeText]}>{pendingScans}</Text>
+              )}
             </View>
           </View>
         </View>
@@ -154,8 +194,12 @@ export default function AdmissionsDashboardScreen() {
 
           <View style={styles.expectedTextBox}>
             <Text style={styles.expectedTitle}>Expected Visitors</Text>
-            <Text style={styles.expectedNumber}>45</Text>
-            <Text style={styles.expectedSubtitle}>scheduled for today</Text>
+            {loadingStats ? (
+              <ActivityIndicator size="small" color="#064AA5" style={{ marginTop: 8 }} />
+            ) : (
+              <Text style={styles.expectedNumber}>{expectedVisitors}</Text>
+            )}
+            <Text style={styles.expectedSubtitle}>still expected at this office</Text>
           </View>
 
           <View style={styles.peopleDecor}>

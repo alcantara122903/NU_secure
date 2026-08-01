@@ -57,12 +57,16 @@ function resolvePhotoUri(raw: string): string {
   }
 
   const trimmed = decoded.replace(/^\/+/, "");
-  const storagePath = trimmed.startsWith("visitor-files/") ? trimmed.slice("visitor-files/".length) : trimmed;
+  const storagePath = trimmed.startsWith("visitor-files/")
+    ? trimmed.slice("visitor-files/".length)
+    : trimmed.startsWith("visitor-file/")
+      ? trimmed.slice("visitor-file/".length)
+      : trimmed;
   if (!storagePath) {
     return "";
   }
 
-  const { data } = supabase.storage.from("visitor-files").getPublicUrl(storagePath);
+  const { data } = supabase.storage.from("visitor-file").getPublicUrl(storagePath);
   return data.publicUrl || "";
 }
 
@@ -142,7 +146,7 @@ export default function VisitorInformationScreen() {
     : expectedOffice || destinationOffice || "(not available)";
 
   const handleDone = () => {
-    router.replace("/office/office-scan");
+    router.replace("/office/office-portal");
   };
 
   const headerPaddingTop = insets.top + 14;

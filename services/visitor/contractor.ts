@@ -9,6 +9,10 @@ import { addressService, type AddressData } from '../address';
 import { supabase } from '../database/supabase';
 import { uploadFacePhoto } from '../storage/upload';
 import { visitorLookupService } from './visitor-lookup';
+import {
+  resolveDefaultEntryExitStatusId,
+  resolveLoggedInGuardUserId,
+} from './resolve-guard-user';
 
 /**
  * Generate a random token for QR code
@@ -105,28 +109,10 @@ export const contractorService = {
         console.log('\n📤 STEP 2: No face photo URI provided');
       }
 
-      // Get current user from session
+      // Get current guard from app session (users.user_id)
       console.log('\n👤 Fetching current guard user...');
-      const { data: { user: authUser } } = await supabase.auth.getUser();
-      let guardUserId: number | null = null;
-      
-      if (authUser) {
-        // Query guard_user table to get user_id by email
-        const { data: guardUser, error: guardError } = await supabase
-          .from('guard_user')
-          .select('user_id')
-          .eq('email', authUser.email)
-          .single();
-        
-        if (guardUser) {
-          guardUserId = guardUser.user_id;
-          console.log(`✅ Guard user found: user_id=${guardUserId}`);
-        } else {
-          console.warn(`⚠️ Guard user not found for email: ${authUser.email}`);
-        }
-      } else {
-        console.warn('⚠️ No auth user session found');
-      }
+      const guardUserId = await resolveLoggedInGuardUserId();
+      const entryExitStatusId = await resolveDefaultEntryExitStatusId();
 
       // ======= VISITOR DEDUPLICATION LOGIC =======
       // Check if visitor already exists to prevent duplicate records
@@ -135,6 +121,7 @@ export const contractorService = {
         firstName: contractorData.firstName,
         lastName: contractorData.lastName,
         contactNo: contractorData.contactNo,
+        birthday: contractorData.birthday,
       });
 
       let visitorData_db: any;
@@ -147,10 +134,17 @@ export const contractorService = {
         console.log(`   Control Number: ${existingVisitor.control_number}`);
         
         visitorData_db = [{ visitor_id: existingVisitor.visitor_id }];
+        const contractorUpdates: Record<string, string> = {};
         if (contractorData.birthday?.trim()) {
+          contractorUpdates.birthday = contractorData.birthday.trim();
+        }
+        if (photoUrl) {
+          contractorUpdates.visitor_photo_with_id_url = photoUrl;
+        }
+        if (Object.keys(contractorUpdates).length > 0) {
           await supabase
             .from('visitor')
-            .update({ birthday: contractorData.birthday.trim() })
+            .update(contractorUpdates)
             .eq('visitor_id', existingVisitor.visitor_id);
         }
         console.log('\n✅ Using existing visitor record - no new record created');
@@ -243,7 +237,9 @@ export const contractorService = {
             primary_office_id: contractorData.destinationOfficeId,
             qr_token: qrToken,
             guard_user_id: guardUserId,
-            purpose_reason: contractorData.reasonForVisit || null,
+            purpose_reason: contractorData.reasonForVisit?.trim() || null,
+            destination_text: contractorData.contactPerson?.trim() || null,
+            exit_status_id: entryExitStatusId,
             entry_time: toSupabaseTimestampPh(),
           }])
           .select('visit_id');

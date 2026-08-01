@@ -80,11 +80,15 @@ const resolvePhotoUri = (raw: string | null | undefined): string => {
     return value;
   }
   const trimmed = value.replace(/^\/+/, '');
-  const storagePath = trimmed.startsWith('visitor-files/') ? trimmed.slice('visitor-files/'.length) : trimmed;
+  const storagePath = trimmed.startsWith('visitor-files/')
+    ? trimmed.slice('visitor-files/'.length)
+    : trimmed.startsWith('visitor-file/')
+      ? trimmed.slice('visitor-file/'.length)
+      : trimmed;
   if (!storagePath) {
     return '';
   }
-  const { data } = supabase.storage.from('visitor-files').getPublicUrl(storagePath);
+  const { data } = supabase.storage.from('visitor-file').getPublicUrl(storagePath);
   return data.publicUrl || '';
 };
 
