@@ -5,6 +5,8 @@ type IncomingBody = {
   qrToken?: string;
   rawQrValue?: string;
   scannedByUserId?: number | string;
+  /** 'guard' = facility exit (no office_staff required). Default office portal. */
+  scannerContext?: 'guard' | 'office' | string;
   controlNumber?: string;
   passNumber?: string;
   visitId?: number | string;
@@ -277,11 +279,26 @@ const lookupVisitAndVisitor = async (
   }
 
   if (candidate.kind === 'visit_qr_token' || candidate.kind === 'raw') {
-    const visitResult = await supabase
+    // Prefer active (open) visit first — legacy tokens may not use QR- prefix.
+    let visitResult = await supabase
       .from('visit')
       .select('visit_id, visitor_id, guard_user_id, primary_office_id, purpose_reason, entry_time, exit_time, duration_minutes, exit_status_id, qr_token')
       .eq('qr_token', candidate.value)
+      .is('exit_time', null)
+      .order('entry_time', { ascending: false })
+      .limit(1)
       .maybeSingle();
+
+    if (!visitResult.data && !visitResult.error) {
+      visitResult = await supabase
+        .from('visit')
+        .select('visit_id, visitor_id, guard_user_id, primary_office_id, purpose_reason, entry_time, exit_time, duration_minutes, exit_status_id, qr_token')
+        .ilike('qr_token', candidate.value)
+        .is('exit_time', null)
+        .order('entry_time', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+    }
 
     if (visitResult.data && !visitResult.error) {
       const visitorResult = await getVisitor(supabase, visitResult.data.visitor_id);
@@ -487,22 +504,29 @@ Deno.serve(async (req) => {
 
   try {
     const supabase = getSupabaseClient();
+    const isGuardExit = String(body.scannerContext || '').toLowerCase() === 'guard';
 
-    const { data: officeStaff, error: officeStaffError } = await supabase
-      .from('office_staff')
-      .select('staff_id, user_id, office_id, position')
-      .eq('user_id', scannedByUserId)
-      .maybeSingle();
+    let officeStaff: { staff_id: number; user_id: number; office_id: number; position: string | null } | null =
+      null;
 
-    console.log('[office-exit-scan] office staff lookup', { officeStaffError, officeStaff });
+    if (!isGuardExit) {
+      const { data: officeStaffRow, error: officeStaffError } = await supabase
+        .from('office_staff')
+        .select('staff_id, user_id, office_id, position')
+        .eq('user_id', scannedByUserId)
+        .maybeSingle();
 
-    if (officeStaffError || !officeStaff) {
-      return jsonResponse({
-        success: false,
-        message: 'Office account is not linked to this user.',
-        errorCode: 'OFFICE_STAFF_NOT_FOUND',
-        data: null,
-      });
+      console.log('[office-exit-scan] office staff lookup', { officeStaffError, officeStaff: officeStaffRow });
+
+      if (officeStaffError || !officeStaffRow) {
+        return jsonResponse({
+          success: false,
+          message: 'Office account is not linked to this user.',
+          errorCode: 'OFFICE_STAFF_NOT_FOUND',
+          data: null,
+        });
+      }
+      officeStaff = officeStaffRow;
     }
 
     let visit: any | null = null;
@@ -574,11 +598,17 @@ Deno.serve(async (req) => {
       .eq('office_id', expectedOfficeId)
       .maybeSingle();
 
-    const isCorrectDestination = Number(expectedOfficeId) === Number(officeStaff.office_id);
+    const isCorrectDestination = isGuardExit
+      ? true
+      : officeStaff != null &&
+        expectedOfficeId != null &&
+        Number(expectedOfficeId) === Number(officeStaff.office_id);
 
-    const destinationStatusLabel = isCorrectDestination
-      ? 'Correct destination'
-      : 'Wrong destination';
+    const destinationStatusLabel = isGuardExit
+      ? 'Facility exit'
+      : isCorrectDestination
+        ? 'Correct destination'
+        : 'Wrong destination';
 
     const { data: registeredByUser } = await supabase
       .from('users')
@@ -660,23 +690,33 @@ Deno.serve(async (req) => {
     }
 
     let officeScanInserted = false;
-    const { error: officeScanError } = await supabase
-      .from('office_scan')
-      .insert({
-        visit_id: visit.visit_id,
-        office_id: officeStaff.office_id,
-        scanned_by_user_id: scannedByUserId,
-        scan_time: toSupabaseTimestampPh(exitTime),
-        validation_status_id: validationStatusId,
-        remarks: isCorrectDestination
-          ? 'Office scan validated: correct destination'
-          : 'Office scan validated: wrong destination',
-      });
+    const scanOfficeId =
+      officeStaff?.office_id ??
+      (visit.primary_office_id != null ? Number(visit.primary_office_id) : null);
 
-    console.log('[office-exit-scan] office_scan insert', { officeScanError });
+    if (scanOfficeId != null && Number.isFinite(scanOfficeId)) {
+      const { error: officeScanError } = await supabase
+        .from('office_scan')
+        .insert({
+          visit_id: visit.visit_id,
+          office_id: scanOfficeId,
+          scanned_by_user_id: scannedByUserId,
+          scan_time: toSupabaseTimestampPh(exitTime),
+          validation_status_id: validationStatusId,
+          remarks: isGuardExit
+            ? 'Guard facility exit scan'
+            : isCorrectDestination
+              ? 'Office scan validated: correct destination'
+              : 'Office scan validated: wrong destination',
+        });
 
-    if (!officeScanError) {
-      officeScanInserted = true;
+      console.log('[office-exit-scan] office_scan insert', { officeScanError });
+
+      if (!officeScanError) {
+        officeScanInserted = true;
+      }
+    } else {
+      console.log('[office-exit-scan] office_scan skipped (no office_id for guard/facility exit)');
     }
 
     const visitorName = `${visitor.first_name || ''} ${visitor.last_name || ''}`.trim();

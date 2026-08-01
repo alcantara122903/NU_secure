@@ -17,12 +17,13 @@ import {
 } from './resolve-guard-user';
 
 /**
- * Generate a random token for QR code
+ * Generate a QR token compatible with web + mobile exit scan.
+ * Always use `QR-` prefix — web manual entry often rejects tokens without it.
  */
 function generateQRToken(): string {
   const timestamp = Date.now().toString(36);
-  const random = Math.random().toString(36).substring(2, 8);
-  return `${timestamp}-${random}`.toUpperCase();
+  const random = Math.random().toString(36).substring(2, 9);
+  return `QR-${timestamp}-${random}`.toUpperCase();
 }
 
 /** Generate ID format: YYYY-XXXXXX */
