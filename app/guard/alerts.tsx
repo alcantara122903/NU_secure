@@ -29,6 +29,7 @@ type AlertRow = {
   id: number;
   name: string;
   office: string;
+  expectedOffice: string;
   controlNumber: string;
   raisedAt: string;
   detailMessage: string;
@@ -100,6 +101,7 @@ export default function MonitorVisitorActivitiesScreen() {
         id: item.alertId,
         name: item.visitorName || 'Visitor',
         office: item.scannedOfficeName || 'Unknown office',
+        expectedOffice: item.expectedOfficeName || '—',
         controlNumber: item.controlNumber || item.passNumber || '—',
         raisedAt: item.createdAtLabel || '—',
         detailMessage: item.message || 'Wrong destination alert',
@@ -263,7 +265,10 @@ function AlertCard({
           {item.name}
         </Text>
         <Text style={styles.cardSubText} numberOfLines={2}>
-          {item.office} • {item.controlNumber}
+          Scanned: {item.office} • {item.controlNumber}
+        </Text>
+        <Text style={styles.cardSubText} numberOfLines={2}>
+          Expected: {item.expectedOffice}
         </Text>
         <Text style={styles.cardDateText}>Raised at {item.raisedAt}</Text>
         {expanded ? <Text style={styles.cardDetailText}>{item.detailMessage}</Text> : null}

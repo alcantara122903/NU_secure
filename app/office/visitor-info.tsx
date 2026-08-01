@@ -144,6 +144,7 @@ export default function VisitorInformationScreen() {
   const officeCardValue = isCorrectDestination
     ? destinationOffice
     : expectedOffice || destinationOffice || "(not available)";
+  const scannedOfficeValue = (params.scanningOffice as string) || "";
 
   const handleDone = () => {
     router.replace("/office/office-portal");
@@ -240,6 +241,20 @@ export default function VisitorInformationScreen() {
             ) : null}
           </View>
         </View>
+
+        {!isCorrectDestination && scannedOfficeValue ? (
+          <View style={styles.infoCard}>
+            <View style={styles.iconBox}>
+              <MaterialCommunityIcons name="qrcode-scan" size={24} color="#064AA5" />
+            </View>
+            <View style={styles.cardContent}>
+              <Text style={styles.cardLabel}>SCANNED OFFICE</Text>
+              <Text style={styles.cardValue} numberOfLines={3}>
+                {scannedOfficeValue}
+              </Text>
+            </View>
+          </View>
+        ) : null}
 
         <View style={styles.infoCard}>
           <View style={styles.iconBox}>

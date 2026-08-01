@@ -17,6 +17,7 @@ export type UnresolvedWrongDestinationAlert = {
   passNumber: string;
   controlNumber: string;
   scannedOfficeName: string;
+  expectedOfficeName: string;
   message: string;
   createdAt: string | null;
   createdAtLabel: string;
@@ -315,6 +316,10 @@ export async function fetchUnresolvedWrongDestinationAlerts(): Promise<Unresolve
     const visitorName = [vis?.first, vis?.last].filter(Boolean).join(' ') || 'Visitor';
     const officeId = a.scan_id != null ? scanOfficeByScanId.get(a.scan_id) ?? null : null;
     const scannedOfficeName = officeId != null ? officeNameById.get(officeId) || 'Unknown office' : 'Unknown office';
+    const message = String(a.message ?? '').trim() || 'Wrong destination alert';
+    // Message format: "... checked in at X but was expected at Y."
+    const expectedMatch = message.match(/expected at\s+(.+?)\.?\s*$/i);
+    const expectedOfficeName = expectedMatch?.[1]?.trim() || '—';
 
     return {
       alertId: a.alert_id,
@@ -324,7 +329,8 @@ export async function fetchUnresolvedWrongDestinationAlerts(): Promise<Unresolve
       passNumber: vis?.pass || '',
       controlNumber: vis?.control || '',
       scannedOfficeName,
-      message: String(a.message ?? '').trim() || 'Wrong destination alert',
+      expectedOfficeName,
+      message,
       createdAt: a.created_at,
       createdAtLabel: formatDateTime(a.created_at),
     };
