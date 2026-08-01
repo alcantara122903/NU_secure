@@ -311,7 +311,8 @@ export async function processOfficeCheckInScan(req: OfficeCheckInScanRequest): P
       registeredBy,
       destinationStatusLabel: 'Wrong office destination',
       isCorrectDestination: false,
-      destinationOffice: scanningOfficeName,
+      // Expected office on the enrollee route (NOT the office that scanned).
+      destinationOffice: expectedOfficeName,
       expectedOfficeName,
       scanningOfficeName,
       visitId: visit.visit_id,
