@@ -406,8 +406,8 @@ export function VisitorInformationStepScreen(
               {destinationOfficeFreeText ? (
                 <>
                   <FormInput
-                    label="Destination Office"
-                    placeholder="e.g., HR Office, Registrar's Office"
+                    label="Office to Visit"
+                    placeholder="Type where the contractor is going"
                     value={destinationOfficeTypedValue}
                     onChangeText={onChangeDestinationOfficeTyped ?? (() => {})}
                     icon={

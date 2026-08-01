@@ -14,6 +14,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { supabase } from "@/services/database";
+import { resolveVisitorPhotoDisplayUri } from "@/services/storage/upload";
 
 const formatDateTime = (value: string): string => {
   if (!value) {
@@ -46,30 +47,6 @@ function decodePhotoParam(raw: string): string {
   }
 }
 
-function resolvePhotoUri(raw: string): string {
-  const decoded = decodePhotoParam(raw);
-  if (!decoded) {
-    return "";
-  }
-
-  if (decoded.startsWith("http://") || decoded.startsWith("https://")) {
-    return decoded;
-  }
-
-  const trimmed = decoded.replace(/^\/+/, "");
-  const storagePath = trimmed.startsWith("visitor-files/")
-    ? trimmed.slice("visitor-files/".length)
-    : trimmed.startsWith("visitor-file/")
-      ? trimmed.slice("visitor-file/".length)
-      : trimmed;
-  if (!storagePath) {
-    return "";
-  }
-
-  const { data } = supabase.storage.from("visitor-file").getPublicUrl(storagePath);
-  return data.publicUrl || "";
-}
-
 export default function VisitorInformationScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -92,53 +69,49 @@ export default function VisitorInformationScreen() {
   const idLabel = passNumber || visitorId || "";
 
   const visitIdParam = String(params.visitId ?? "").trim();
-  const photoFromParams = useMemo(() => resolvePhotoUri(String(params.visitorPhotoUrl ?? "")), [params.visitorPhotoUrl]);
-  const [profilePhotoUri, setProfilePhotoUri] = useState(photoFromParams);
+  const photoParamRaw = useMemo(
+    () => decodePhotoParam(String(params.visitorPhotoUrl ?? "")),
+    [params.visitorPhotoUrl],
+  );
+  const [profilePhotoUri, setProfilePhotoUri] = useState("");
   const [photoLoadFailed, setPhotoLoadFailed] = useState(false);
 
   useEffect(() => {
-    setProfilePhotoUri(photoFromParams);
-    setPhotoLoadFailed(false);
-  }, [photoFromParams]);
-
-  useEffect(() => {
-    if (photoFromParams) {
-      return undefined;
-    }
-    const vid = Number(visitIdParam);
-    if (!Number.isFinite(vid) || vid <= 0) {
-      return undefined;
-    }
     let cancelled = false;
+    setPhotoLoadFailed(false);
+
     void (async () => {
-      const { data: visitRow, error: visitErr } = await supabase
-        .from("visit")
-        .select("visitor_id")
-        .eq("visit_id", vid)
-        .maybeSingle();
-      if (cancelled || visitErr || visitRow?.visitor_id == null) {
-        return;
+      let uri = (await resolveVisitorPhotoDisplayUri(photoParamRaw)) || "";
+
+      if (!uri && visitIdParam) {
+        const vid = Number(visitIdParam);
+        if (Number.isFinite(vid) && vid > 0) {
+          const { data: visitRow } = await supabase
+            .from("visit")
+            .select("visitor_id")
+            .eq("visit_id", vid)
+            .maybeSingle();
+          if (visitRow?.visitor_id != null) {
+            const { data: visitorRow } = await supabase
+              .from("visitor")
+              .select("visitor_photo_with_id_url")
+              .eq("visitor_id", visitRow.visitor_id)
+              .maybeSingle();
+            uri =
+              (await resolveVisitorPhotoDisplayUri(visitorRow?.visitor_photo_with_id_url)) || "";
+          }
+        }
       }
-      const { data: visitorRow, error: visitorErr } = await supabase
-        .from("visitor")
-        .select("visitor_photo_with_id_url")
-        .eq("visitor_id", visitRow.visitor_id)
-        .maybeSingle();
-      if (cancelled || visitorErr) {
-        return;
-      }
-      const url =
-        typeof visitorRow?.visitor_photo_with_id_url === "string"
-          ? resolvePhotoUri(visitorRow.visitor_photo_with_id_url)
-          : "";
-      if (url) {
-        setProfilePhotoUri(url);
+
+      if (!cancelled) {
+        setProfilePhotoUri(uri);
       }
     })();
+
     return () => {
       cancelled = true;
     };
-  }, [photoFromParams, visitIdParam]);
+  }, [photoParamRaw, visitIdParam]);
 
   const officeCardLabel = isCorrectDestination ? "DESTINATION OFFICE" : "EXPECTED OFFICE";
   const officeCardValue = isCorrectDestination

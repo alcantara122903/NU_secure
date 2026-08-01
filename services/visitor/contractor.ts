@@ -38,7 +38,8 @@ export const contractorService = {
    * Register contractor and generate QR pass
    */
   async registerAndGenerateQRPass(contractorData: VisitorRegistrationData & {
-    destinationOfficeId: number;
+    /** Free-text where the contractor is going (stored in visit.destination_text). */
+    officeToVisit: string;
     idPassNumber: string;
     controlNumber?: string;
     reasonForVisit: string;
@@ -51,6 +52,7 @@ export const contractorService = {
     visitorId: number;
     contractorId: number;
     visitId: number;
+    destinationOfficeId: number | null;
   } | null> {
     try {
       console.log('\n💾 === CONTRACTOR PASS GENERATION ===\n');
@@ -60,14 +62,38 @@ export const contractorService = {
       console.log(`   contactNo: ${contractorData.contactNo}`);
       console.log(`   idPassNumber: ${contractorData.idPassNumber}`);
       console.log(`   reasonForVisit: ${contractorData.reasonForVisit}`);
-      console.log(`   destinationOfficeId: ${contractorData.destinationOfficeId}`);
+      console.log(`   officeToVisit: ${contractorData.officeToVisit}`);
       console.log(`   contactPerson: ${contractorData.contactPerson?.trim() || '(derive from visitor name)'}`);
+
+      const officeToVisit = contractorData.officeToVisit.trim();
+      if (!officeToVisit) {
+        console.error('❌ officeToVisit is required');
+        return null;
+      }
+
+      // Optional: match typed text to a known office for primary_office_id / expectation
+      let destinationOfficeId: number | null = null;
+      const { data: officeRows } = await supabase
+        .from('office')
+        .select('office_id, office_name')
+        .eq('is_active', true);
+      const needle = officeToVisit.toLowerCase();
+      const matched = (officeRows || []).find((o) => {
+        const name = String(o.office_name || '').toLowerCase();
+        return name === needle || name.includes(needle) || needle.includes(name);
+      });
+      if (matched?.office_id != null) {
+        destinationOfficeId = Number(matched.office_id);
+        console.log(`   Matched office_id=${destinationOfficeId} for "${officeToVisit}"`);
+      } else {
+        console.log(`   No office match for "${officeToVisit}" — destination_text only`);
+      }
 
       // STEP 1: Create address record if components provided
       let addressId: number | null = null;
-      if (contractorData.addressHouseNo || contractorData.addressStreet || 
+      if (contractorData.addressHouseNo || contractorData.addressStreet ||
           contractorData.addressBarangay || contractorData.addressMunicipality) {
-        
+
         console.log('\n📝 STEP 1: Creating/checking address record...');
         const addressData: AddressData = {
           houseNo: contractorData.addressHouseNo || undefined,
@@ -235,11 +261,11 @@ export const contractorService = {
           .insert([{
             visitor_id: visitorId,
             visit_type_id: 2, // Contractor visit type
-            primary_office_id: contractorData.destinationOfficeId,
+            primary_office_id: destinationOfficeId,
             qr_token: qrToken,
             guard_user_id: guardUserId,
             purpose_reason: contractorData.reasonForVisit?.trim() || null,
-            destination_text: contractorData.contactPerson?.trim() || null,
+            destination_text: officeToVisit,
             exit_status_id: entryExitStatusId,
             entry_time: toSupabaseTimestampPh(),
           }])
@@ -332,24 +358,28 @@ export const contractorService = {
 
       const contractorId = contractorData_db?.[0]?.contractor_id || 0;
 
-      // STEP 5: Create office expectation for destination office
-      console.log('\n📝 STEP 5: Creating office expectation...');
+      // STEP 5: Create office expectation only when typed destination matches a known office
+      if (destinationOfficeId != null) {
+        console.log('\n📝 STEP 5: Creating office expectation...');
 
-      const pendingExpectationStatusId = await resolvePendingExpectationStatusId();
-      const expectationResult = await supabase
-        .from('office_expectation')
-        .insert([{
-          visit_id: visitId,
-          office_id: contractorData.destinationOfficeId,
-          expected_order: 1,
-          expectation_status_id: pendingExpectationStatusId,
-          created_at: toSupabaseTimestampPh(),
-        }]);
+        const pendingExpectationStatusId = await resolvePendingExpectationStatusId();
+        const expectationResult = await supabase
+          .from('office_expectation')
+          .insert([{
+            visit_id: visitId,
+            office_id: destinationOfficeId,
+            expected_order: 1,
+            expectation_status_id: pendingExpectationStatusId,
+            created_at: toSupabaseTimestampPh(),
+          }]);
 
-      if (expectationResult.error) {
-        console.warn('⚠️ Office expectation creation failed:', expectationResult.error.message);
+        if (expectationResult.error) {
+          console.warn('⚠️ Office expectation creation failed:', expectationResult.error.message);
+        } else {
+          console.log(`✅ Office expectation created for office_id=${destinationOfficeId}`);
+        }
       } else {
-        console.log(`✅ Office expectation created for office_id=${contractorData.destinationOfficeId}`);
+        console.log('\n📝 STEP 5: Skipping office_expectation (free-text destination only)');
       }
 
       console.log('\n✅ === CONTRACTOR PASS GENERATED SUCCESSFULLY ===\n');
@@ -361,6 +391,7 @@ export const contractorService = {
         visitorId,
         contractorId,
         visitId,
+        destinationOfficeId,
       };
     } catch (error) {
       console.error('❌ CONTRACTOR PASS GENERATION ERROR:', error);

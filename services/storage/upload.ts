@@ -282,6 +282,78 @@ export function getPublicUrl(filePath: string): string {
 }
 
 /**
+ * Turn a stored visitor photo value into a URI Image can load.
+ * Handles absolute URLs, `visitor-file/...` relative paths from upload, and private buckets (signed URL).
+ */
+export async function resolveVisitorPhotoDisplayUri(
+  raw: string | null | undefined,
+): Promise<string | null> {
+  const value = (raw || '').trim();
+  if (!value) {
+    return null;
+  }
+
+  let storagePath: string | null = null;
+
+  if (value.startsWith('http://') || value.startsWith('https://')) {
+    // Extract path from Supabase public/signed object URLs so we can re-sign if needed
+    const publicMarker = `/storage/v1/object/public/${VISITOR_FILES_BUCKET}/`;
+    const signedMarker = `/storage/v1/object/sign/${VISITOR_FILES_BUCKET}/`;
+    const altPublic = `/storage/v1/object/public/visitor-files/`;
+    const altSigned = `/storage/v1/object/sign/visitor-files/`;
+    for (const marker of [publicMarker, signedMarker, altPublic, altSigned]) {
+      const idx = value.indexOf(marker);
+      if (idx >= 0) {
+        storagePath = decodeURIComponent(value.slice(idx + marker.length).split('?')[0] || '');
+        break;
+      }
+    }
+    // Non-storage absolute URL — use as-is
+    if (!storagePath) {
+      return value;
+    }
+  } else {
+    const trimmed = value.replace(/^\/+/, '');
+    if (trimmed.startsWith('visitor-files/')) {
+      storagePath = trimmed.slice('visitor-files/'.length);
+    } else if (trimmed.startsWith(`${VISITOR_FILES_BUCKET}/`)) {
+      storagePath = trimmed.slice(VISITOR_FILES_BUCKET.length + 1);
+    } else if (trimmed.startsWith('visitor-file/')) {
+      storagePath = trimmed.slice('visitor-file/'.length);
+    } else {
+      storagePath = trimmed;
+    }
+  }
+
+  if (!storagePath) {
+    return null;
+  }
+
+  try {
+    const { data: signed, error } = await supabase.storage
+      .from(VISITOR_FILES_BUCKET)
+      .createSignedUrl(storagePath, 60 * 60);
+    if (!error && signed?.signedUrl) {
+      return signed.signedUrl;
+    }
+  } catch (err) {
+    console.warn('[resolveVisitorPhotoDisplayUri] signed URL failed:', err);
+  }
+
+  const { data: publicData } = supabase.storage.from(VISITOR_FILES_BUCKET).getPublicUrl(storagePath);
+  if (publicData?.publicUrl) {
+    return publicData.publicUrl;
+  }
+
+  const supabaseUrl = (process.env.EXPO_PUBLIC_SUPABASE_URL || '').replace(/\/$/, '');
+  if (supabaseUrl) {
+    return `${supabaseUrl}/storage/v1/object/public/${VISITOR_FILES_BUCKET}/${storagePath}`;
+  }
+
+  return null;
+}
+
+/**
  * Storage service class (optional - for dependency injection pattern)
  */
 export class StorageService {
