@@ -20,14 +20,11 @@ import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import {
     ArrowLeft,
-    Ban,
     Camera,
     ChevronRight,
     FileText,
     IdCard,
-    Lightbulb,
     RefreshCw,
-    Search,
     ShieldCheck,
     UploadCloud,
     Wrench,
@@ -157,6 +154,14 @@ function CaptureIdRequirementItem({
     </View>
   );
 }
+
+const SUPPORTED_ID_TYPES = [
+  "National ID",
+  "UMID",
+  "Voter's ID",
+  "Driver's License",
+  "Senior ID",
+] as const;
 
 export default function RegisterVisitorScreen() {
   const colorScheme = useColorScheme();
@@ -1773,29 +1778,25 @@ export default function RegisterVisitorScreen() {
 
                 <View style={captureStepStyles.requirementsCard}>
                   <View style={captureStepStyles.requirementsHeader}>
-                    <ShieldCheck size={26} color="#0648A8" fill="#0648A8" />
-                    <Text style={captureStepStyles.requirementsTitle}>
-                      ID Requirements
-                    </Text>
+                    <IdCard size={26} color="#0648A8" />
+                    <View style={captureStepStyles.requirementsHeaderText}>
+                      <Text style={captureStepStyles.requirementsTitle}>
+                        Supported ID Types
+                      </Text>
+                      <Text style={captureStepStyles.requirementsSubtitle}>
+                        Present a clear photo of one valid government-issued ID
+                      </Text>
+                    </View>
                   </View>
 
-                  <CaptureIdRequirementItem
-                    icon={<IdCard size={24} color="#0648A8" />}
-                    text="Valid government-issued ID required"
-                  />
-                  <CaptureIdRequirementItem
-                    icon={<Search size={24} color="#0648A8" />}
-                    text="Ensure all details are clearly visible"
-                  />
-                  <CaptureIdRequirementItem
-                    icon={<Lightbulb size={24} color="#0648A8" />}
-                    text="Good lighting and no glare"
-                  />
-                  <CaptureIdRequirementItem
-                    icon={<Ban size={24} color="#0648A8" />}
-                    text="No expired IDs"
-                    isLast
-                  />
+                  {SUPPORTED_ID_TYPES.map((idType, index) => (
+                    <CaptureIdRequirementItem
+                      key={idType}
+                      icon={<IdCard size={22} color="#0648A8" />}
+                      text={idType}
+                      isLast={index === SUPPORTED_ID_TYPES.length - 1}
+                    />
+                  ))}
                 </View>
               </>
             ) : (
@@ -1835,14 +1836,16 @@ export default function RegisterVisitorScreen() {
                 <View style={captureStepStyles.requirementsCard}>
                   <View style={captureStepStyles.requirementsHeader}>
                     <ShieldCheck size={26} color="#22C55E" fill="#22C55E" />
-                    <Text
-                      style={[
-                        captureStepStyles.requirementsTitle,
-                        { color: "#15803D" },
-                      ]}
-                    >
-                      ID captured
-                    </Text>
+                    <View style={captureStepStyles.requirementsHeaderText}>
+                      <Text
+                        style={[
+                          captureStepStyles.requirementsTitle,
+                          { color: "#15803D" },
+                        ]}
+                      >
+                        ID captured
+                      </Text>
+                    </View>
                   </View>
                   <Text style={captureStepStyles.previewHintText}>
                     ID document captured. Confirm to run OCR and continue to
@@ -2824,14 +2827,24 @@ const captureStepStyles = StyleSheet.create({
   },
   requirementsHeader: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     marginBottom: 10,
+    gap: 8,
+  },
+  requirementsHeaderText: {
+    flex: 1,
   },
   requirementsTitle: {
     color: "#0648A8",
     fontSize: 17,
     fontWeight: "900",
-    marginLeft: 8,
+  },
+  requirementsSubtitle: {
+    marginTop: 3,
+    color: "#64748B",
+    fontSize: 12,
+    fontWeight: "500",
+    lineHeight: 16,
   },
   requirementItem: {
     flexDirection: "row",
