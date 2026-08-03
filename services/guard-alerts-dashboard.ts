@@ -151,7 +151,7 @@ export async function fetchReadyToExitVisitors(): Promise<ReadyToExitVisitor[]> 
 
   const { data: visitRows, error: visitErr } = await supabase
     .from('visit')
-    .select('visit_id, visitor_id, purpose_reason, destination_text, primary_office_id')
+    .select('visit_id, visitor_id, purpose_reason, destination_text, primary_office_id, pass_number, control_number')
     .in('visit_id', readyVisitIds);
 
   if (visitErr || !visitRows?.length) {
@@ -162,7 +162,7 @@ export async function fetchReadyToExitVisitors(): Promise<ReadyToExitVisitor[]> 
   const visitorIds = [...new Set(visitRows.map((v) => v.visitor_id as number).filter(Number.isFinite))];
   const { data: visitorRows } = await supabase
     .from('visitor')
-    .select('visitor_id, first_name, last_name, pass_number, control_number')
+    .select('visitor_id, first_name, last_name')
     .in('visitor_id', visitorIds);
 
   const visitorById = new Map(
@@ -171,8 +171,6 @@ export async function fetchReadyToExitVisitors(): Promise<ReadyToExitVisitor[]> 
       {
         first_name: r.first_name as string | null,
         last_name: r.last_name as string | null,
-        pass_number: r.pass_number as string | null,
-        control_number: r.control_number as string | null,
       },
     ]),
   );
@@ -201,14 +199,12 @@ export async function fetchReadyToExitVisitors(): Promise<ReadyToExitVisitor[]> 
     const vis = visitorById.get(visitorId) ?? {
       first_name: null as string | null,
       last_name: null as string | null,
-      pass_number: null as string | null,
-      control_number: null as string | null,
     };
     const first = vis?.first_name?.trim() ?? '';
     const last = vis?.last_name?.trim() ?? '';
     const name = [first, last].filter(Boolean).join(' ') || 'Visitor';
-    const control = vis?.control_number?.trim();
-    const pass = vis?.pass_number?.trim();
+    const control = String(v.control_number ?? '').trim();
+    const pass = String(v.pass_number ?? '').trim();
     const idPart = control || pass || '—';
     const purpose = (v.purpose_reason as string | null)?.trim();
     const destText = (v.destination_text as string | null)?.trim();
@@ -272,16 +268,30 @@ export async function fetchUnresolvedWrongDestinationAlerts(): Promise<Unresolve
   const openAlerts = alertRows;
 
   const visitorIds = [...new Set(openAlerts.map((r) => r.visitor_id))];
-  const { data: visitors } = await supabase
-    .from('visitor')
-    .select('visitor_id, first_name, last_name, pass_number, control_number')
-    .in('visitor_id', visitorIds);
+  const visitIds = [...new Set(openAlerts.map((r) => r.visit_id))];
+  const [{ data: visitors }, { data: visitPassRows }] = await Promise.all([
+    supabase
+      .from('visitor')
+      .select('visitor_id, first_name, last_name')
+      .in('visitor_id', visitorIds),
+    supabase
+      .from('visit')
+      .select('visit_id, pass_number, control_number')
+      .in('visit_id', visitIds),
+  ]);
   const visitorById = new Map(
     (visitors ?? []).map((v) => [
       v.visitor_id as number,
       {
         first: String(v.first_name ?? '').trim(),
         last: String(v.last_name ?? '').trim(),
+      },
+    ]),
+  );
+  const visitPassById = new Map(
+    (visitPassRows ?? []).map((v) => [
+      v.visit_id as number,
+      {
         pass: String(v.pass_number ?? '').trim(),
         control: String(v.control_number ?? '').trim(),
       },
@@ -313,6 +323,7 @@ export async function fetchUnresolvedWrongDestinationAlerts(): Promise<Unresolve
 
   return openAlerts.map((a) => {
     const vis = visitorById.get(a.visitor_id);
+    const visitPass = visitPassById.get(a.visit_id);
     const visitorName = [vis?.first, vis?.last].filter(Boolean).join(' ') || 'Visitor';
     const officeId = a.scan_id != null ? scanOfficeByScanId.get(a.scan_id) ?? null : null;
     const scannedOfficeName = officeId != null ? officeNameById.get(officeId) || 'Unknown office' : 'Unknown office';
@@ -326,8 +337,8 @@ export async function fetchUnresolvedWrongDestinationAlerts(): Promise<Unresolve
       visitId: a.visit_id,
       visitorId: a.visitor_id,
       visitorName,
-      passNumber: vis?.pass || '',
-      controlNumber: vis?.control || '',
+      passNumber: visitPass?.pass || '',
+      controlNumber: visitPass?.control || '',
       scannedOfficeName,
       expectedOfficeName,
       message,

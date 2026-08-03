@@ -232,10 +232,13 @@ const buildLookupCandidates = (body: IncomingBody) => {
   };
 };
 
+const VISIT_EXIT_SELECT =
+  'visit_id, visitor_id, guard_user_id, primary_office_id, purpose_reason, entry_time, exit_time, duration_minutes, exit_status_id, qr_token, pass_number, control_number';
+
 const getVisitor = async (supabase: ReturnType<typeof getSupabaseClient>, visitorId: number) => {
   const { data, error } = await supabase
     .from('visitor')
-    .select('visitor_id, first_name, last_name, pass_number, control_number')
+    .select('visitor_id, first_name, last_name')
     .eq('visitor_id', visitorId)
     .maybeSingle();
 
@@ -245,8 +248,25 @@ const getVisitor = async (supabase: ReturnType<typeof getSupabaseClient>, visito
 const getActiveVisitByVisitorId = async (supabase: ReturnType<typeof getSupabaseClient>, visitorId: number) => {
   const { data, error } = await supabase
     .from('visit')
-    .select('visit_id, visitor_id, guard_user_id, primary_office_id, purpose_reason, entry_time, exit_time, duration_minutes, exit_status_id, qr_token')
+    .select(VISIT_EXIT_SELECT)
     .eq('visitor_id', visitorId)
+    .is('exit_time', null)
+    .order('entry_time', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  return { data, error };
+};
+
+const getActiveVisitByPassOrControl = async (
+  supabase: ReturnType<typeof getSupabaseClient>,
+  field: 'pass_number' | 'control_number',
+  value: string,
+) => {
+  const { data, error } = await supabase
+    .from('visit')
+    .select(VISIT_EXIT_SELECT)
+    .eq(field, value)
     .is('exit_time', null)
     .order('entry_time', { ascending: false })
     .limit(1)
@@ -262,7 +282,7 @@ const lookupVisitAndVisitor = async (
   if (candidate.kind === 'visit_id') {
     const visitResult = await supabase
       .from('visit')
-      .select('visit_id, visitor_id, guard_user_id, primary_office_id, purpose_reason, entry_time, exit_time, duration_minutes, exit_status_id, qr_token')
+      .select(VISIT_EXIT_SELECT)
       .eq('visit_id', candidate.value)
       .maybeSingle();
 
@@ -282,7 +302,7 @@ const lookupVisitAndVisitor = async (
     // Prefer active (open) visit first — legacy tokens may not use QR- prefix.
     let visitResult = await supabase
       .from('visit')
-      .select('visit_id, visitor_id, guard_user_id, primary_office_id, purpose_reason, entry_time, exit_time, duration_minutes, exit_status_id, qr_token')
+      .select(VISIT_EXIT_SELECT)
       .eq('qr_token', candidate.value)
       .is('exit_time', null)
       .order('entry_time', { ascending: false })
@@ -292,7 +312,7 @@ const lookupVisitAndVisitor = async (
     if (!visitResult.data && !visitResult.error) {
       visitResult = await supabase
         .from('visit')
-        .select('visit_id, visitor_id, guard_user_id, primary_office_id, purpose_reason, entry_time, exit_time, duration_minutes, exit_status_id, qr_token')
+        .select(VISIT_EXIT_SELECT)
         .ilike('qr_token', candidate.value)
         .is('exit_time', null)
         .order('entry_time', { ascending: false })
@@ -310,42 +330,34 @@ const lookupVisitAndVisitor = async (
     }
 
     if (candidate.kind === 'raw') {
-      const byControl = await supabase
-        .from('visitor')
-        .select('visitor_id, first_name, last_name, pass_number, control_number')
-        .eq('control_number', candidate.value)
-        .maybeSingle();
+      const byControl = await getActiveVisitByPassOrControl(supabase, 'control_number', candidate.value);
 
       if (byControl.data && !byControl.error) {
-        const activeVisit = await getActiveVisitByVisitorId(supabase, byControl.data.visitor_id);
+        const visitorResult = await getVisitor(supabase, byControl.data.visitor_id);
         return {
-          visit: activeVisit.data || null,
-          visitor: byControl.data,
+          visit: byControl.data,
+          visitor: visitorResult.data || null,
           debug: {
             candidate,
-            via: 'visitor.control_number(raw)',
-            visitorFound: true,
-            activeVisitFound: !!activeVisit.data,
+            via: 'visit.control_number(raw)',
+            visitorFound: !!visitorResult.data,
+            activeVisitFound: true,
           },
         };
       }
 
-      const byPass = await supabase
-        .from('visitor')
-        .select('visitor_id, first_name, last_name, pass_number, control_number')
-        .eq('pass_number', candidate.value)
-        .maybeSingle();
+      const byPass = await getActiveVisitByPassOrControl(supabase, 'pass_number', candidate.value);
 
       if (byPass.data && !byPass.error) {
-        const activeVisit = await getActiveVisitByVisitorId(supabase, byPass.data.visitor_id);
+        const visitorResult = await getVisitor(supabase, byPass.data.visitor_id);
         return {
-          visit: activeVisit.data || null,
-          visitor: byPass.data,
+          visit: byPass.data,
+          visitor: visitorResult.data || null,
           debug: {
             candidate,
-            via: 'visitor.pass_number(raw)',
-            visitorFound: true,
-            activeVisitFound: !!activeVisit.data,
+            via: 'visit.pass_number(raw)',
+            visitorFound: !!visitorResult.data,
+            activeVisitFound: true,
           },
         };
       }
@@ -359,49 +371,37 @@ const lookupVisitAndVisitor = async (
   }
 
   if (candidate.kind === 'visitor_control_number') {
-    const visitorResult = await supabase
-      .from('visitor')
-      .select('visitor_id, first_name, last_name, pass_number, control_number')
-      .eq('control_number', candidate.value)
-      .maybeSingle();
-
-    if (visitorResult.error || !visitorResult.data) {
-      return { visit: null, visitor: null, debug: { candidate, error: visitorResult.error?.message || null } };
+    const activeVisit = await getActiveVisitByPassOrControl(supabase, 'control_number', candidate.value);
+    if (activeVisit.error || !activeVisit.data) {
+      return { visit: null, visitor: null, debug: { candidate, error: activeVisit.error?.message || null } };
     }
-
-    const activeVisit = await getActiveVisitByVisitorId(supabase, visitorResult.data.visitor_id);
+    const visitorResult = await getVisitor(supabase, activeVisit.data.visitor_id);
     return {
-      visit: activeVisit.data || null,
-      visitor: visitorResult.data,
+      visit: activeVisit.data,
+      visitor: visitorResult.data || null,
       debug: {
         candidate,
-        via: 'visitor.control_number',
-        visitorFound: true,
-        activeVisitFound: !!activeVisit.data,
+        via: 'visit.control_number',
+        visitorFound: !!visitorResult.data,
+        activeVisitFound: true,
       },
     };
   }
 
   if (candidate.kind === 'visitor_pass_number') {
-    const visitorResult = await supabase
-      .from('visitor')
-      .select('visitor_id, first_name, last_name, pass_number, control_number')
-      .eq('pass_number', candidate.value)
-      .maybeSingle();
-
-    if (visitorResult.error || !visitorResult.data) {
-      return { visit: null, visitor: null, debug: { candidate, error: visitorResult.error?.message || null } };
+    const activeVisit = await getActiveVisitByPassOrControl(supabase, 'pass_number', candidate.value);
+    if (activeVisit.error || !activeVisit.data) {
+      return { visit: null, visitor: null, debug: { candidate, error: activeVisit.error?.message || null } };
     }
-
-    const activeVisit = await getActiveVisitByVisitorId(supabase, visitorResult.data.visitor_id);
+    const visitorResult = await getVisitor(supabase, activeVisit.data.visitor_id);
     return {
-      visit: activeVisit.data || null,
-      visitor: visitorResult.data,
+      visit: activeVisit.data,
+      visitor: visitorResult.data || null,
       debug: {
         candidate,
-        via: 'visitor.pass_number',
-        visitorFound: true,
-        activeVisitFound: !!activeVisit.data,
+        via: 'visit.pass_number',
+        visitorFound: !!visitorResult.data,
+        activeVisitFound: true,
       },
     };
   }
@@ -729,8 +729,8 @@ Deno.serve(async (req) => {
         visitId: Number(visit.visit_id),
         visitorId: Number(visitor.visitor_id),
         visitorName: visitorName || '(unknown visitor)',
-        passNumber: visitor.pass_number || null,
-        controlNumber: visitor.control_number || null,
+        passNumber: visit.pass_number || null,
+        controlNumber: visit.control_number || null,
         destinationOffice: destinationOffice?.office_name || null,
         expectedOffice: expectedOffice?.office_name || null,
         purposeReason: visit.purpose_reason || null,

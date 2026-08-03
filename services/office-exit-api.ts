@@ -144,7 +144,10 @@ const readErrorContextBody = async (context: unknown): Promise<unknown> => {
 };
 
 const VISIT_EXIT_SELECT =
-  'visit_id, visitor_id, guard_user_id, primary_office_id, purpose_reason, destination_text, entry_time, exit_time, exit_status_id, qr_token, duration_minutes';
+  'visit_id, visitor_id, guard_user_id, primary_office_id, purpose_reason, destination_text, entry_time, exit_time, exit_status_id, qr_token, duration_minutes, pass_number, control_number';
+
+const VISITOR_EXIT_SELECT =
+  'visitor_id, first_name, last_name, visitor_photo_with_id_url';
 
 const resolveScanByDatabase = async (payload: ExitScanRequest): Promise<ExitScanResult> => {
   const candidates = buildCandidates(payload);
@@ -196,7 +199,7 @@ const resolveScanByDatabase = async (payload: ExitScanRequest): Promise<ExitScan
   if (visit && !visitor) {
     const { data: visitVisitor } = await supabase
       .from('visitor')
-      .select('visitor_id, first_name, last_name, pass_number, control_number, visitor_photo_with_id_url')
+      .select(VISITOR_EXIT_SELECT)
       .eq('visitor_id', visit.visitor_id)
       .maybeSingle();
     if (visitVisitor) {
@@ -219,36 +222,27 @@ const resolveScanByDatabase = async (payload: ExitScanRequest): Promise<ExitScan
       visit = byToken;
     } else {
       const { data: byControl } = await supabase
-        .from('visitor')
-        .select('visitor_id, first_name, last_name, pass_number, control_number, visitor_photo_with_id_url')
+        .from('visit')
+        .select(VISIT_EXIT_SELECT)
         .eq('control_number', candidate)
+        .is('exit_time', null)
+        .order('entry_time', { ascending: false })
+        .limit(1)
         .maybeSingle();
 
       if (byControl) {
-        visitor = byControl;
+        visit = byControl;
       } else {
         const { data: byPass } = await supabase
-          .from('visitor')
-          .select('visitor_id, first_name, last_name, pass_number, control_number, visitor_photo_with_id_url')
-          .eq('pass_number', candidate)
-          .maybeSingle();
-        if (byPass) {
-          visitor = byPass;
-        }
-      }
-
-      if (visitor) {
-        const { data: activeVisit } = await supabase
           .from('visit')
           .select(VISIT_EXIT_SELECT)
-          .eq('visitor_id', visitor.visitor_id)
+          .eq('pass_number', candidate)
           .is('exit_time', null)
           .order('entry_time', { ascending: false })
           .limit(1)
           .maybeSingle();
-
-        if (activeVisit) {
-          visit = activeVisit;
+        if (byPass) {
+          visit = byPass;
         }
       }
     }
@@ -256,7 +250,7 @@ const resolveScanByDatabase = async (payload: ExitScanRequest): Promise<ExitScan
     if (visit) {
       const { data: visitVisitor } = await supabase
         .from('visitor')
-      .select('visitor_id, first_name, last_name, pass_number, control_number, visitor_photo_with_id_url')
+        .select(VISITOR_EXIT_SELECT)
         .eq('visitor_id', visit.visitor_id)
         .maybeSingle();
 
@@ -464,8 +458,8 @@ const resolveScanByDatabase = async (payload: ExitScanRequest): Promise<ExitScan
       visitId: Number(visit.visit_id),
       visitorId: Number(visitor.visitor_id),
       visitorName,
-      passNumber: visitor.pass_number || null,
-      controlNumber: visitor.control_number || null,
+      passNumber: visit.pass_number || null,
+      controlNumber: visit.control_number || null,
       destinationOffice: destinationOffice?.office_name || null,
       expectedOffice: expectedOffice?.office_name || null,
       purposeReason: visit.purpose_reason || null,

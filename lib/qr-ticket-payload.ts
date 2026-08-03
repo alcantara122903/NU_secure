@@ -45,6 +45,20 @@ export function buildQRTicketPayloadV1(params: {
   return JSON.stringify(payload);
 }
 
+/**
+ * Compact QR payload for normal visitor + contractor tickets (not a progress URL).
+ * Example: {"control_number":"2026-793330","qr_token":"QR-1785773798405-XPSX3Y"}
+ */
+export function buildVisitorScanQrJson(params: {
+  control_number: string | null | undefined;
+  qr_token: string;
+}): string {
+  return JSON.stringify({
+    control_number: String(params.control_number ?? '').trim(),
+    qr_token: String(params.qr_token ?? '').trim(),
+  });
+}
+
 const normalizeScanText = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
 
 const parsePositiveInt = (value: unknown): number | null => {

@@ -8,8 +8,6 @@ export interface Visitor {
   first_name: string;
   last_name: string;
   contact_no?: string;
-  pass_number?: string;
-  control_number?: string;
   visitor_photo_with_id_url?: string;
   address_id?: number;
   created_at: string;

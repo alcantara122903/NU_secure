@@ -45,7 +45,7 @@ export async function loadEnrolleeProgressByQrToken(
 
   const { data: visit, error: visitErr } = await supabase
     .from('visit')
-    .select('visit_id, visitor_id, qr_token, visit_type_id, exit_time')
+    .select('visit_id, visitor_id, qr_token, visit_type_id, exit_time, pass_number, control_number')
     .eq('qr_token', qrToken)
     .order('entry_time', { ascending: false })
     .limit(1)
@@ -58,14 +58,14 @@ export async function loadEnrolleeProgressByQrToken(
 
   const { data: visitor } = await supabase
     .from('visitor')
-    .select('visitor_id, first_name, last_name, pass_number, control_number')
+    .select('visitor_id, first_name, last_name')
     .eq('visitor_id', visit.visitor_id)
     .maybeSingle();
 
   const visitorName =
     `${visitor?.first_name || ''} ${visitor?.last_name || ''}`.trim() || 'Visitor';
-  const passNumber = String(visitor?.pass_number ?? '').trim() || '—';
-  const controlNumber = visitor?.control_number ? String(visitor.control_number) : null;
+  const passNumber = String(visit.pass_number ?? '').trim() || '—';
+  const controlNumber = visit.control_number ? String(visit.control_number) : null;
 
   const { data: enrollee } = await supabase
     .from('enrollee')

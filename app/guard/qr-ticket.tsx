@@ -8,7 +8,23 @@ import { EnhancedQrTicketView } from "@/components/guard/enhanced-qr-ticket-view
 import { Colors } from "@/constants/colors";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { buildEnrolleeProgressUrl } from "@/lib/enrollee-progress-url";
+import { buildVisitorScanQrJson } from "@/lib/qr-ticket-payload";
 import { supabase } from "@/services/database/supabase";
+
+/** Enrollee → progress URL; normal/contractor → scan JSON (not a URL). */
+function resolveTicketQrValue(ticket: {
+  type: VisitorType;
+  qrToken: string;
+  controlNumber: string;
+}): string {
+  if (ticket.type === "enrollee") {
+    return buildEnrolleeProgressUrl(ticket.qrToken);
+  }
+  return buildVisitorScanQrJson({
+    control_number: ticket.controlNumber,
+    qr_token: ticket.qrToken,
+  });
+}
 import {
     getBluetoothPrinterDevices,
     isThermalPrinterNativeAvailable,
@@ -39,7 +55,7 @@ type VisitorType = "enrollee" | "contractor" | "normal_visitor" | "normal";
 interface VisitorQRTicketData {
   type: VisitorType;
   qrToken: string;
-  /** JSON v1 payload encoded in the QR image (offices route + ids). Falls back to qrToken when absent. */
+  /** JSON encoded in the QR image for non-enrollee tickets. Enrollee uses progress URL instead. */
   qrPayload?: string;
   passNumber: string;
   controlNumber: string;
@@ -202,7 +218,7 @@ export default function QRTicketScreen() {
       ticketData.offices?.length > 0
         ? ticketData.offices.map((o) => o.name).join(", ")
         : "—";
-    const qrData = buildEnrolleeProgressUrl(ticketData.qrToken);
+    const qrData = resolveTicketQrValue(ticketData);
 
     await printVisitorThermalTicket(address, {
       fullName: visitorName,
@@ -484,8 +500,8 @@ export default function QRTicketScreen() {
               
               <div class="qr-section">
                 <div class="qr-label">Scan this code at each office</div>
-                <img src="https://api.qrserver.com/v1/create-qr-code/?size=600x600&margin=30&data=${encodeURIComponent(buildEnrolleeProgressUrl(ticketData.qrToken))}" alt="QR Code" class="qr-image" />
-                <div style="font-size: 10px; color: #666; margin-top: 10px; word-break: break-all;">${buildEnrolleeProgressUrl(ticketData.qrToken)}</div>
+                <img src="https://api.qrserver.com/v1/create-qr-code/?size=600x600&margin=30&data=${encodeURIComponent(resolveTicketQrValue(ticketData))}" alt="QR Code" class="qr-image" />
+                <div style="font-size: 10px; color: #666; margin-top: 10px; word-break: break-all;">${resolveTicketQrValue(ticketData)}</div>
               </div>
               
               <div class="section">
@@ -545,8 +561,8 @@ export default function QRTicketScreen() {
   }
 
   const visitorName = `${ticketData.firstName} ${ticketData.lastName}`.trim();
-  // QR image encodes the public enrollee progress URL (phone camera + office scan).
-  const qrEncoded = buildEnrolleeProgressUrl(ticketData.qrToken);
+  // Enrollee: progress URL. Normal / contractor: {"control_number","qr_token"} JSON.
+  const qrEncoded = resolveTicketQrValue(ticketData);
 
   const typeLabel =
     ticketData.type === "contractor"

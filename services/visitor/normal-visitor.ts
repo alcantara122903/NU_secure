@@ -154,8 +154,6 @@ export const normalVisitorService = {
               first_name: visitorData.firstName,
               last_name: visitorData.lastName,
               contact_no: visitorData.contactNo,
-              pass_number: passNumber,
-              control_number: controlNumber,
               birthday: visitorData.birthday?.trim() || null,
               address_id: addressId || null,
               visitor_photo_with_id_url: visitorPhotoUrl || null,
@@ -172,23 +170,6 @@ export const normalVisitorService = {
           }
 
           console.log(`   ⚠️ Attempt ${attempt} failed: ${visitorError.message}`);
-
-          // On last attempt, try to fetch existing visitor by pass_number
-          if (attempt === 3) {
-            console.log('   📝 Trying to fetch existing visitor by pass_number...');
-            const { data: existing } = await supabase
-              .from('visitor')
-              .select('visitor_id')
-              .eq('pass_number', passNumber)
-              .single();
-
-            if (existing?.visitor_id) {
-              console.log(`   ✅ Found existing visitor: visitor_id=${existing.visitor_id}`);
-              visitorData_db = [existing];
-              visitorError = null;
-              break;
-            }
-          }
 
           // Wait before retry
           if (attempt < 3) {
@@ -237,6 +218,8 @@ export const normalVisitorService = {
             guard_user_id: guardUserId,
             purpose_reason: visitorData.reasonForVisit?.trim() || null,
             exit_status_id: entryExitStatusId,
+            pass_number: passNumber,
+            control_number: controlNumber,
             entry_time: toSupabaseTimestampPh(),
           }])
           .select('visit_id');
