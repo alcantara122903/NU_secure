@@ -4,7 +4,7 @@ import { ReturningVisitorModal } from "@/components/guard/returning-visitor-moda
 import { VisitorInformationStepScreen } from "@/components/guard/visitor-information-step";
 import { Colors } from "@/constants/colors";
 import { useColorScheme } from "@/hooks/use-color-scheme";
-import { buildQRTicketPayloadV1 } from "@/lib/qr-ticket-payload";
+import { buildQRTicketPayloadV1, buildVisitorScanQrJson } from "@/lib/qr-ticket-payload";
 import { cameraService, FACE_PHOTO_QUALITY, ID_PHOTO_QUALITY } from "@/services/camera";
 import { supabase } from "@/services/database";
 import { officeService } from "@/services/office";
@@ -498,20 +498,9 @@ export default function RegisterVisitorScreen() {
         });
 
         if (result) {
-          const route = [
-            {
-              order: 1,
-              office_id: 0,
-              office_name: officeToVisit, // display label only — not an office.office_id
-            },
-          ];
-          const qrPayload = buildQRTicketPayloadV1({
-            kind: "contractor",
-            qr_token: result.qrToken,
-            visit_id: result.visitId,
-            visitor_id: result.visitorId,
+          const qrPayload = buildVisitorScanQrJson({
             control_number: result.controlNumber,
-            route,
+            qr_token: result.qrToken,
           });
 
           const ticketData = {
@@ -584,18 +573,9 @@ export default function RegisterVisitorScreen() {
         });
 
         if (result) {
-          const route = selectedDestinationOffices.map((name, index) => ({
-            order: index + 1,
-            office_id: selectedOfficeIds[index] ?? index,
-            office_name: name,
-          }));
-          const qrPayload = buildQRTicketPayloadV1({
-            kind: "normal_visitor",
-            qr_token: result.qrToken,
-            visit_id: result.visitId,
-            visitor_id: result.visitorId,
+          const qrPayload = buildVisitorScanQrJson({
             control_number: result.controlNumber,
-            route,
+            qr_token: result.qrToken,
           });
 
           const ticketData = {
