@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   Alert,
   Platform,
+  RefreshControl,
   SafeAreaView,
   ScrollView,
   StatusBar,
@@ -27,9 +28,15 @@ export default function AdmissionsDashboardScreen() {
   const router = useRouter();
   const [stats, setStats] = useState<OfficePortalStats | null>(null);
   const [loadingStats, setLoadingStats] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const refreshStats = useCallback(async () => {
-    setLoadingStats(true);
+  const refreshStats = useCallback(async (opts?: { soft?: boolean }) => {
+    const soft = opts?.soft === true;
+    if (soft) {
+      setRefreshing(true);
+    } else {
+      setLoadingStats(true);
+    }
     try {
       const next = await loadOfficePortalStats();
       setStats(next);
@@ -37,6 +44,7 @@ export default function AdmissionsDashboardScreen() {
       console.warn("[OfficePortal] failed to load stats", e);
     } finally {
       setLoadingStats(false);
+      setRefreshing(false);
     }
   }, []);
 
@@ -82,6 +90,14 @@ export default function AdmissionsDashboardScreen() {
         style={styles.container}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => void refreshStats({ soft: true })}
+            tintColor="#064AA5"
+            colors={["#064AA5"]}
+          />
+        }
       >
         <View style={styles.header}>
           <View style={styles.headerContent}>
@@ -91,7 +107,7 @@ export default function AdmissionsDashboardScreen() {
 
             <View style={styles.headerTextBox}>
               <Text style={styles.headerTitle}>{officeName}</Text>
-              <Text style={styles.headerSubtitle}>{officeName}</Text>
+              <Text style={styles.headerSubtitle}>Office Portal</Text>
             </View>
 
             <TouchableOpacity
@@ -161,7 +177,7 @@ export default function AdmissionsDashboardScreen() {
               <FontAwesome5 name="users" size={24} color="#1FA855" />
             </View>
 
-            <View>
+            <View style={styles.statTextCol}>
               <Text style={styles.statLabel}>Today&apos;s Visitors</Text>
               {loadingStats ? (
                 <ActivityIndicator size="small" color="#1FA855" style={{ marginTop: 6 }} />
@@ -176,7 +192,7 @@ export default function AdmissionsDashboardScreen() {
               <MaterialCommunityIcons name="clipboard-clock-outline" size={30} color="#F2A100" />
             </View>
 
-            <View>
+            <View style={styles.statTextCol}>
               <Text style={styles.statLabel}>Pending Scans</Text>
               {loadingStats ? (
                 <ActivityIndicator size="small" color="#F2A100" style={{ marginTop: 6 }} />
@@ -553,6 +569,10 @@ const styles = StyleSheet.create({
     fontSize: 11.5,
     color: "#4B5563",
     fontWeight: "700",
+  },
+
+  statTextCol: {
+    flex: 1,
   },
 
   statValue: {
