@@ -32,7 +32,7 @@ type WrongDestinationAlertPayload = {
 async function loadVisitorDisplay(visitorId: number) {
   const { data: visitor } = await supabase
     .from('visitor')
-    .select('visitor_id, first_name, last_name, pass_number, control_number, visitor_photo_with_id_url')
+    .select('visitor_id, first_name, last_name, visitor_photo_with_id_url')
     .eq('visitor_id', visitorId)
     .maybeSingle();
 
@@ -302,8 +302,8 @@ export async function processOfficeCheckInScan(req: OfficeCheckInScanRequest): P
       message: `This visitor is expected at ${expectedOfficeName}, not here.`,
       visitorName,
       visitorPhotoUrl,
-      passNumber: visitor?.pass_number ?? null,
-      controlNumber: visitor?.control_number ?? null,
+      passNumber: visit.pass_number ?? null,
+      controlNumber: visit.control_number ?? null,
       purposeLabel,
       purposeReason,
       entryTime: visit.entry_time,
@@ -464,8 +464,8 @@ export async function processOfficeCheckInScan(req: OfficeCheckInScanRequest): P
       message: `${visitorName} completed all enrollee steps.`,
       visitorName,
       visitorPhotoUrl,
-      passNumber: visitor?.pass_number ?? null,
-      controlNumber: visitor?.control_number ?? null,
+      passNumber: visit.pass_number ?? null,
+      controlNumber: visit.control_number ?? null,
       purposeLabel,
       purposeReason,
       entryTime: visit.entry_time,
@@ -488,8 +488,8 @@ export async function processOfficeCheckInScan(req: OfficeCheckInScanRequest): P
     message: `${visitorName} is at the correct office for this step.`,
     visitorName,
     visitorPhotoUrl,
-    passNumber: visitor?.pass_number ?? null,
-    controlNumber: visitor?.control_number ?? null,
+    passNumber: visit.pass_number ?? null,
+    controlNumber: visit.control_number ?? null,
     purposeLabel,
     purposeReason,
     entryTime: visit.entry_time,

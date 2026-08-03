@@ -126,7 +126,7 @@ export default function DashboardScreen() {
       const [{ data: openVisits, error: visitErr }, readyRows] = await Promise.all([
         supabase
           .from('visit')
-          .select('visit_id, visitor_id, visit_type_id, entry_time, purpose_reason, destination_text, primary_office_id')
+          .select('visit_id, visitor_id, visit_type_id, entry_time, purpose_reason, destination_text, primary_office_id, pass_number, control_number')
           .is('exit_time', null)
           .order('entry_time', { ascending: false }),
         fetchReadyToExitVisitors().catch((e) => {
@@ -170,7 +170,7 @@ export default function DashboardScreen() {
         visitorIds.length > 0
           ? supabase
               .from('visitor')
-              .select('visitor_id, first_name, last_name, pass_number, control_number')
+              .select('visitor_id, first_name, last_name')
               .in('visitor_id', visitorIds)
           : Promise.resolve({ data: [] as any[] }),
         officeIds.length > 0
@@ -184,8 +184,6 @@ export default function DashboardScreen() {
           {
             firstName: String(v.first_name ?? '').trim(),
             lastName: String(v.last_name ?? '').trim(),
-            pass: String(v.pass_number ?? '').trim(),
-            control: String(v.control_number ?? '').trim(),
           },
         ]),
       );
@@ -203,7 +201,7 @@ export default function DashboardScreen() {
         const destinationText = String(v.destination_text ?? '').trim();
         const officeName =
           v.primary_office_id != null ? officeMap.get(Number(v.primary_office_id)) || '' : '';
-        const tag = visitor?.control || visitor?.pass || '';
+        const tag = String(v.control_number ?? '').trim() || String(v.pass_number ?? '').trim() || '';
         const primaryDetail = purpose || destinationText || officeName || 'Inside campus';
         const detail = tag ? `${primaryDetail} • ${tag}` : primaryDetail;
 

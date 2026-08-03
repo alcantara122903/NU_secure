@@ -37,6 +37,7 @@ import {
     ActivityIndicator,
     Alert,
     Image,
+    Modal,
     Platform,
     ScrollView,
     StatusBar,
@@ -228,6 +229,8 @@ export default function RegisterVisitorScreen() {
   const [idPhotoPreview, setIdPhotoPreview] = useState<string | null>(null);
   const [isCapturingIdPhoto, setIsCapturingIdPhoto] = useState(false);
   const [isUploadingIdPhoto, setIsUploadingIdPhoto] = useState(false);
+  /** Controllable overlay — RN Alert.alert cannot be dismissed in code. */
+  const [isProcessingId, setIsProcessingId] = useState(false);
 
   // Step 2: Enrollee Info (extracted from ID)
   const [extractedFirstName, setExtractedFirstName] = useState("");
@@ -252,6 +255,10 @@ export default function RegisterVisitorScreen() {
   const [returningMatch, setReturningMatch] =
     useState<ReturningVisitorMatch | null>(null);
   const [showReturningModal, setShowReturningModal] = useState(false);
+  /** enrollee-resume = progress modal; identity-confirm = Existing Visitor Found */
+  const [returningModalMode, setReturningModalMode] = useState<
+    "enrollee-resume" | "identity-confirm"
+  >("enrollee-resume");
   const [resumeExistingVisitor, setResumeExistingVisitor] = useState(false);
 
   const generateYearSixCode = () => {
@@ -777,28 +784,15 @@ export default function RegisterVisitorScreen() {
     idPhotoBase64: string,
     imageUri?: string | null,
   ): Promise<boolean> => {
+    setIsProcessingId(true);
     try {
       console.log("🔍 Starting ID text extraction...");
-
-      // Show processing alert
-      let processingAlert: any = null;
-      processingAlert = Alert.alert(
-        "Processing ID",
-        "Analyzing your ID document and extracting information...",
-        [{ text: "Processing..." }],
-        { cancelable: false },
-      );
 
       // Prefer local URI for compression (avoids iOS File.write encoding bug)
       const extractedData = await enrolleeService.extractDataFromID(
         idPhotoBase64,
         imageUri ?? idPhotoPreview,
       );
-
-      // Close processing alert
-      if (processingAlert) {
-        processingAlert?.dismiss?.();
-      }
 
       if (extractedData) {
         // Extraction successful - set whatever fields were extracted
@@ -853,10 +847,11 @@ export default function RegisterVisitorScreen() {
           `✅ Data extracted successfully (${extractedData.confidence} confidence) - Fields: ${extractedFields.join(", ")}`,
         );
 
-        // Returning ENROLLEE resume modal only when registering as enrollee.
-        // Contractor / normal: use OCR ID fields only (person may change visit type).
+        // Returning match after OCR (name + birthday):
+        // - Enrollee registration → Returning Enrollee modal WITH progress
+        // - Contractor / Normal → Existing Visitor Found (identity only), even if
+        //   they were previously an enrollee who finished steps 1–9
         if (
-          visitorType === "enrollee" &&
           extractedData.firstName?.trim() &&
           extractedData.lastName?.trim() &&
           extractedData.birthday?.trim()
@@ -867,15 +862,44 @@ export default function RegisterVisitorScreen() {
             birthday: extractedData.birthday,
           });
 
-          if (match && match.visitorType === "enrollee") {
-            setReturningMatch(match);
-            setShowReturningModal(true);
-            return true;
+          if (match) {
+            if (visitorType === "enrollee") {
+              if (match.visitorType === "enrollee" || match.progress) {
+                setIsProcessingId(false);
+                setReturningMatch({
+                  ...match,
+                  visitorType: "enrollee",
+                });
+                setReturningModalMode("enrollee-resume");
+                setShowReturningModal(true);
+                return true;
+              }
+              // Known person but not an enrollee yet — identity confirm only
+              setIsProcessingId(false);
+              setReturningMatch({
+                ...match,
+                progress: null,
+                lastVisitSummary: null,
+              });
+              setReturningModalMode("identity-confirm");
+              setShowReturningModal(true);
+              return true;
+            }
+
+            if (visitorType === "contractor" || visitorType === "normal") {
+              setIsProcessingId(false);
+              setReturningMatch({
+                ...match,
+                visitorType:
+                  visitorType === "contractor" ? "contractor" : "normal",
+                progress: null,
+                lastVisitSummary: null,
+              });
+              setReturningModalMode("identity-confirm");
+              setShowReturningModal(true);
+              return true;
+            }
           }
-        } else if (visitorType === "contractor" || visitorType === "normal") {
-          console.log(
-            `ℹ️ ${visitorType} registration — skip enrollee resume modal; using OCR ID info only`,
-          );
         }
 
         // Show confidence-based message
@@ -905,6 +929,7 @@ export default function RegisterVisitorScreen() {
             "\n\n💡 Your ID may have holograms, security stickers, or glare that affected extraction. You will be able to manually correct any fields on the next screen.";
         }
 
+        setIsProcessingId(false);
         Alert.alert(
           "ID Data Extracted",
           `${confidenceMessage}\nFirst Name: ${extractedData.firstName || "(not extracted)"}\nLast Name: ${extractedData.lastName || "(not extracted)"}\nBirthday: ${extractedData.birthday || "(not extracted)"}\nAddress: ${extractedData.address || "(not extracted)"}\n\n${actionMessage}${warningNote}${missingFieldsNote}`,
@@ -919,6 +944,7 @@ export default function RegisterVisitorScreen() {
         setExtractionConfidence("low");
         setOcrExtractionFailed(true);
 
+        setIsProcessingId(false);
         Alert.alert(
           "⚠️ Unable to Extract ID Details",
           "We could not automatically read your ID due to image quality, lighting, or obscured text.\n\n✏️ No problem! You can enter your information manually on the next screen.\n\nRequired fields:\n  • First Name\n  • Last Name\n  • Address\n\nYou can also edit the phone number if needed.",
@@ -934,12 +960,15 @@ export default function RegisterVisitorScreen() {
 
       setOcrExtractionFailed(true);
 
+      setIsProcessingId(false);
       Alert.alert(
         "Extraction Failed",
         "Could not automatically extract information from the ID. Please enter the details manually.\n\nYou will be able to enter your information in the next step.",
         [{ text: "Continue to Manual Entry" }],
       );
       return false;
+    } finally {
+      setIsProcessingId(false);
     }
   };
 
@@ -1853,9 +1882,27 @@ export default function RegisterVisitorScreen() {
         <ReturningVisitorModal
           visible={showReturningModal}
           match={returningMatch}
+          mode={returningModalMode}
           onConfirmResume={handleConfirmResumeReturning}
           onCancelNewVisitor={handleCancelReturningAsNew}
         />
+        <Modal
+          visible={isProcessingId}
+          transparent
+          animationType="fade"
+          statusBarTranslucent
+          onRequestClose={() => {}}
+        >
+          <View style={styles.processingOverlay}>
+            <View style={styles.processingCard}>
+              <ActivityIndicator size="large" color="#0B2F6B" />
+              <Text style={styles.processingTitle}>Processing ID</Text>
+              <Text style={styles.processingSubtitle}>
+                Analyzing your ID document and extracting information...
+              </Text>
+            </View>
+          </View>
+        </Modal>
       </View>
     );
   }
@@ -1866,6 +1913,36 @@ export default function RegisterVisitorScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  processingOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.45)",
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 28,
+  },
+  processingCard: {
+    width: "100%",
+    maxWidth: 340,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    paddingVertical: 28,
+    paddingHorizontal: 24,
+    alignItems: "center",
+    gap: 10,
+  },
+  processingTitle: {
+    marginTop: 8,
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#111827",
+    textAlign: "center",
+  },
+  processingSubtitle: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: "#6B7280",
+    textAlign: "center",
   },
   header: {
     flexDirection: "row",

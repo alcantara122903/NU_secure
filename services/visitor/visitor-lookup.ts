@@ -19,8 +19,6 @@ export interface VisitorSearchCriteria {
 
 export interface ExistingVisitor {
   visitor_id: number;
-  pass_number: string;
-  control_number: string;
   first_name: string;
   last_name: string;
   contact_no: string;
@@ -163,8 +161,6 @@ const pickBestPhotoRaw = (rows: any[]): string | null => {
 
 const mapExistingVisitor = (visitor: any): ExistingVisitor => ({
   visitor_id: visitor.visitor_id,
-  pass_number: visitor.pass_number,
-  control_number: visitor.control_number,
   first_name: visitor.first_name,
   last_name: visitor.last_name,
   contact_no: visitor.contact_no,
@@ -172,6 +168,23 @@ const mapExistingVisitor = (visitor: any): ExistingVisitor => ({
   birthday: visitor.birthday ?? null,
   visitor_photo_with_id_url: visitor.visitor_photo_with_id_url ?? null,
 });
+
+async function loadLatestVisitPassControl(visitorId: number): Promise<{
+  passNumber: string;
+  controlNumber: string;
+}> {
+  const { data } = await supabase
+    .from('visit')
+    .select('pass_number, control_number')
+    .eq('visitor_id', visitorId)
+    .order('entry_time', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return {
+    passNumber: String(data?.pass_number ?? ''),
+    controlNumber: String(data?.control_number ?? ''),
+  };
+}
 
 export const visitorLookupService = {
   /**
@@ -309,7 +322,8 @@ export const visitorLookupService = {
 
       const visitorIds = matches.map((v) => v.visitor_id as number);
 
-      // Prefer unfinished enrollee progress
+      // Prefer unfinished enrollee progress; otherwise still treat as returning enrollee
+      // even when steps 1–9 are already complete (modal should still appear).
       const { data: enrolleeRows } = await supabase
         .from('enrollee')
         .select('enrollee_id, visitor_id, updated_at')
@@ -322,23 +336,54 @@ export const visitorLookupService = {
       let progress: ReturningVisitorMatch['progress'] = null;
       let lastVisitSummary: string | null = null;
 
+      let incompleteEnrollee: {
+        visitor: (typeof matches)[0];
+        enrolleeId: number;
+        progress: NonNullable<ReturningVisitorMatch['progress']>;
+      } | null = null;
+      let completedEnrollee: {
+        visitor: (typeof matches)[0];
+        enrolleeId: number;
+        progress: NonNullable<ReturningVisitorMatch['progress']>;
+      } | null = null;
+
       for (const row of enrolleeRows ?? []) {
         const summary = await this.buildEnrolleeProgress(row.enrollee_id);
-        if (summary && !summary.allCompleted) {
-          const visitor = matches.find(
-            (v) => Number(v.visitor_id) === Number(row.visitor_id),
-          );
-          if (visitor) {
-            chosen = visitor;
-            enrolleeId = row.enrollee_id;
-            visitTypeId = VISIT_TYPE.ENROLLEE;
-            progress = summary;
-            break;
-          }
+        if (!summary) continue;
+        const visitor = matches.find(
+          (v) => Number(v.visitor_id) === Number(row.visitor_id),
+        );
+        if (!visitor || row.enrollee_id == null) continue;
+
+        if (!summary.allCompleted && !incompleteEnrollee) {
+          incompleteEnrollee = {
+            visitor,
+            enrolleeId: row.enrollee_id,
+            progress: summary,
+          };
+          break; // prefer first unfinished (most recently updated)
+        }
+        if (summary.allCompleted && !completedEnrollee) {
+          completedEnrollee = {
+            visitor,
+            enrolleeId: row.enrollee_id,
+            progress: summary,
+          };
         }
       }
 
-      // If no unfinished enrollee, use most recent visit type
+      const enrolleePick = incompleteEnrollee || completedEnrollee;
+      if (enrolleePick) {
+        chosen = enrolleePick.visitor;
+        enrolleeId = enrolleePick.enrolleeId;
+        visitTypeId = VISIT_TYPE.ENROLLEE;
+        progress = enrolleePick.progress;
+        lastVisitSummary = progress.allCompleted
+          ? `Enrollment complete · ${progress.completedSteps}/${progress.totalSteps} steps`
+          : `Enrollment in progress · ${progress.completedSteps}/${progress.totalSteps} done`;
+      }
+
+      // If no enrollee row at all, use most recent visit type
       if (visitTypeId !== VISIT_TYPE.ENROLLEE || !progress) {
         const { data: recentVisits } = await supabase
           .from('visit')
@@ -368,7 +413,6 @@ export const visitorLookupService = {
           if (visitor) chosen = visitor;
           visitTypeId = Number(latest.visit_type_id) || VISIT_TYPE.NORMAL;
 
-          // If enrollee but progress was complete / missing, still try summary
           if (visitTypeId === VISIT_TYPE.ENROLLEE && !progress) {
             const enrolleeForVisitor = (enrolleeRows ?? []).find(
               (e) => Number(e.visitor_id) === Number(chosen.visitor_id),
@@ -388,7 +432,7 @@ export const visitorLookupService = {
           lastVisitSummary = officeName
             ? `Last visit: ${typeName} · ${officeName}`
             : `Last visit: ${typeName}`;
-        } else if ((enrolleeRows ?? []).length > 0) {
+        } else if ((enrolleeRows ?? []).length > 0 && !progress) {
           visitTypeId = VISIT_TYPE.ENROLLEE;
           const first = enrolleeRows![0];
           const visitor = matches.find(
@@ -439,6 +483,8 @@ export const visitorLookupService = {
       );
       console.log(`   Resolved photo URL: ${photoUrl ? 'yes' : 'no'}`);
 
+      const passControl = await loadLatestVisitPassControl(chosen.visitor_id);
+
       const match: ReturningVisitorMatch = {
         visitorId: chosen.visitor_id,
         firstName: chosen.first_name || firstName,
@@ -452,8 +498,8 @@ export const visitorLookupService = {
         visitTypeId,
         progress,
         lastVisitSummary,
-        passNumber: String(chosen.pass_number ?? ''),
-        controlNumber: String(chosen.control_number ?? ''),
+        passNumber: passControl.passNumber,
+        controlNumber: passControl.controlNumber,
       };
 
       console.log('✅ Returning visitor match:');

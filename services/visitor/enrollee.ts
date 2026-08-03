@@ -279,8 +279,6 @@ export const enrolleeService = {
           first_name: existingVisitor.first_name,
           last_name: existingVisitor.last_name,
           contact_no: existingVisitor.contact_no,
-          pass_number: existingVisitor.pass_number,
-          control_number: existingVisitor.control_number,
           address_id: existingVisitor.address_id,
           visitor_photo_with_id_url:
             photoUrl || existingVisitor.visitor_photo_with_id_url || null,
@@ -311,8 +309,6 @@ export const enrolleeService = {
           contact_no: enrolleeData.contactNo || null,
           // Save uploaded photo URL or null if no photo
           visitor_photo_with_id_url: photoUrl || null,
-          pass_number: enrolleeData.passNumber,
-          control_number: enrolleeData.controlNumber,
           birthday: enrolleeData.birthday?.trim() || null,
           address_id: addressId || null,
           created_at: toSupabaseTimestampPh(),
@@ -500,6 +496,8 @@ export const enrolleeService = {
         purpose_reason: 'Enrollment',
         primary_office_id: firstOfficeId,
         exit_status_id: entryExitStatusId,
+        pass_number: enrolleeData.passNumber,
+        control_number: enrolleeData.controlNumber,
         entry_time: toSupabaseTimestampPh(),
       };
       

@@ -144,8 +144,6 @@ export const contractorService = {
         // Visitor already exists - reuse their record
         console.log('\n♻️ REUSING EXISTING VISITOR RECORD');
         console.log(`   Visitor ID: ${existingVisitor.visitor_id}`);
-        console.log(`   Pass Number: ${existingVisitor.pass_number}`);
-        console.log(`   Control Number: ${existingVisitor.control_number}`);
         
         visitorData_db = [{ visitor_id: existingVisitor.visitor_id }];
         const contractorUpdates: Record<string, string> = {};
@@ -177,8 +175,6 @@ export const contractorService = {
               first_name: contractorData.firstName,
               last_name: contractorData.lastName,
               contact_no: contractorData.contactNo,
-              pass_number: passNumber,
-              control_number: controlNumber,
               birthday: contractorData.birthday?.trim() || null,
               address_id: addressId || null,
               visitor_photo_with_id_url: photoUrl || null,
@@ -195,23 +191,6 @@ export const contractorService = {
           }
 
           console.log(`   ⚠️ Attempt ${attempt} failed: ${visitorError.message}`);
-
-          // On last attempt, try to fetch existing visitor by pass_number
-          if (attempt === 3) {
-            console.log('   📝 Trying to fetch existing visitor by pass_number...');
-            const { data: existing } = await supabase
-              .from('visitor')
-              .select('visitor_id')
-              .eq('pass_number', passNumber)
-              .single();
-
-            if (existing?.visitor_id) {
-              console.log(`   ✅ Found existing visitor: visitor_id=${existing.visitor_id}`);
-              visitorData_db = [existing];
-              visitorError = null;
-              break;
-            }
-          }
 
           // Wait before retry
           if (attempt < 3) {
@@ -254,6 +233,8 @@ export const contractorService = {
             purpose_reason: contractorData.reasonForVisit?.trim() || null,
             destination_text: officeToVisit, // plain varchar only
             exit_status_id: entryExitStatusId,
+            pass_number: passNumber,
+            control_number: controlNumber,
             entry_time: toSupabaseTimestampPh(),
           }])
           .select('visit_id');

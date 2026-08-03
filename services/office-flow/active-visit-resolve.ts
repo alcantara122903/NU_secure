@@ -12,10 +12,12 @@ export type ActiveVisitRow = {
   guard_user_id: number | null;
   entry_time: string | null;
   exit_time: string | null;
+  pass_number?: string | null;
+  control_number?: string | null;
 };
 
 const VISIT_SELECT =
-  'visit_id, visitor_id, visit_type_id, primary_office_id, qr_token, purpose_reason, guard_user_id, entry_time, exit_time';
+  'visit_id, visitor_id, visit_type_id, primary_office_id, qr_token, purpose_reason, guard_user_id, entry_time, exit_time, pass_number, control_number';
 
 function uniqueNonEmptyStrings(values: (string | null | undefined)[]): string[] {
   const out: string[] = [];
@@ -128,33 +130,30 @@ export async function resolveActiveVisitFromScanInput(rawQrValue: string): Promi
       break;
     }
 
-    let resolvedVisitorId: number | undefined;
-    const { data: byControl } = await supabase
-      .from('visitor')
-      .select('visitor_id')
+    const { data: byControlVisit } = await supabase
+      .from('visit')
+      .select(VISIT_SELECT)
       .eq('control_number', token)
+      .is('exit_time', null)
+      .order('entry_time', { ascending: false })
+      .limit(1)
       .maybeSingle();
-    resolvedVisitorId = byControl?.visitor_id;
-
-    if (resolvedVisitorId == null) {
-      const { data: byPass } = await supabase
-        .from('visitor')
-        .select('visitor_id')
-        .eq('pass_number', token)
-        .maybeSingle();
-      resolvedVisitorId = byPass?.visitor_id ?? undefined;
+    if (byControlVisit) {
+      visit = byControlVisit as ActiveVisitRow;
+      break;
     }
 
-    if (resolvedVisitorId != null) {
-      const { data } = await supabase
-        .from('visit')
-        .select(VISIT_SELECT)
-        .eq('visitor_id', resolvedVisitorId)
-        .is('exit_time', null)
-        .order('entry_time', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      visit = data as ActiveVisitRow | null;
+    const { data: byPassVisit } = await supabase
+      .from('visit')
+      .select(VISIT_SELECT)
+      .eq('pass_number', token)
+      .is('exit_time', null)
+      .order('entry_time', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (byPassVisit) {
+      visit = byPassVisit as ActiveVisitRow;
+      break;
     }
   }
 

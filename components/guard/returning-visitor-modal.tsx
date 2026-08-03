@@ -14,44 +14,47 @@ import {
 export type ReturningVisitorModalProps = {
   visible: boolean;
   match: ReturningVisitorMatch | null;
+  /**
+   * enrollee-resume: show enrollment progress (registering as enrollee).
+   * identity-confirm: Existing Visitor Found — photo + basic info only
+   *   (registering as contractor/normal, including former enrollees).
+   */
+  mode?: "enrollee-resume" | "identity-confirm";
   onConfirmResume: () => void;
   onCancelNewVisitor: () => void;
 };
 
-const TYPE_COPY: Record<
-  ReturningVisitorMatch["visitorType"],
-  { title: string; subtitle: string; progressLabel: string }
-> = {
-  enrollee: {
-    title: "Returning Enrollee Found",
-    subtitle:
-      "This enrollee has unfinished office steps. Confirm to resume the same enrollment progress on the new QR pass.",
-    progressLabel: "Enrollment Progress",
-  },
-  contractor: {
-    title: "Returning Contractor Found",
-    subtitle:
-      "This contractor was registered before. Confirm to resume their visitor record on the new QR pass.",
-    progressLabel: "Visit History",
-  },
-  normal: {
-    title: "Returning Visitor Found",
-    subtitle:
-      "This visitor was registered before. Confirm to resume their visitor record on the new QR pass.",
-    progressLabel: "Visit History",
-  },
+const ENROLLEE_COPY = {
+  title: "Returning Enrollee Found",
+  subtitle:
+    "This enrollee was registered before. Confirm to resume their enrollment record on the new QR pass.",
+  progressLabel: "Enrollment Progress",
+  confirmText: "Yes, Resume Enrollment",
+};
+
+const IDENTITY_COPY = {
+  title: "Existing Visitor Found",
+  subtitle:
+    "We found a matching visitor record. Please confirm whether this is the same person before continuing. Tap Cancel to create a new visitor record instead.",
+  confirmText: "Yes, Continue",
 };
 
 function formatProgressLine(match: ReturningVisitorMatch): string {
-  if (match.visitorType === "enrollee" && match.progress) {
-    const { completedSteps, totalSteps, nextStepName, nextOfficeName } =
-      match.progress;
+  if (match.progress) {
+    const {
+      completedSteps,
+      totalSteps,
+      nextStepName,
+      nextOfficeName,
+      allCompleted,
+    } = match.progress;
+    if (allCompleted) {
+      return `${completedSteps}/${totalSteps} done · All steps complete`;
+    }
     const next =
       nextOfficeName || nextStepName
         ? ` · Next: ${nextOfficeName || nextStepName}`
-        : match.progress.allCompleted
-          ? " · All steps complete"
-          : "";
+        : "";
     return `${completedSteps}/${totalSteps} done${next}`;
   }
 
@@ -68,6 +71,7 @@ function formatProgressLine(match: ReturningVisitorMatch): string {
 export function ReturningVisitorModal({
   visible,
   match,
+  mode = "enrollee-resume",
   onConfirmResume,
   onCancelNewVisitor,
 }: ReturningVisitorModalProps) {
@@ -81,7 +85,8 @@ export function ReturningVisitorModal({
 
   if (!match) return null;
 
-  const copy = TYPE_COPY[match.visitorType];
+  const isIdentity = mode === "identity-confirm";
+  const copy = isIdentity ? IDENTITY_COPY : ENROLLEE_COPY;
   const fullName = `${match.firstName} ${match.lastName}`.trim();
   const showPhoto = Boolean(match.photoUrl) && !photoFailed;
 
@@ -152,20 +157,15 @@ export function ReturningVisitorModal({
                 label="Saved Address"
                 value={match.addressText?.trim() || "—"}
               />
-              <InfoRow
-                label={copy.progressLabel}
-                value={formatProgressLine(match)}
-              />
-              <InfoRow
-                label="Visitor Type"
-                value={
-                  match.visitorType === "enrollee"
-                    ? "Enrollee"
-                    : match.visitorType === "contractor"
-                      ? "Contractor"
-                      : "Normal Visitor"
-                }
-              />
+              {!isIdentity ? (
+                <>
+                  <InfoRow
+                    label={ENROLLEE_COPY.progressLabel}
+                    value={formatProgressLine(match)}
+                  />
+                  <InfoRow label="Visitor Type" value="Enrollee" />
+                </>
+              ) : null}
             </View>
           </ScrollView>
 
@@ -182,11 +182,7 @@ export function ReturningVisitorModal({
               onPress={onConfirmResume}
               activeOpacity={0.85}
             >
-              <Text style={styles.confirmText}>
-                {match.visitorType === "enrollee"
-                  ? "Yes, Resume Enrollment"
-                  : "Yes, Resume Visit"}
-              </Text>
+              <Text style={styles.confirmText}>{copy.confirmText}</Text>
             </TouchableOpacity>
           </View>
         </View>
