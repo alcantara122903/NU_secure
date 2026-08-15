@@ -89,7 +89,9 @@ function HeaderBackgroundPattern() {
 export default function DashboardScreen() {
   const router = useRouter();
 
-  const [guardName, setGuardName] = useState('Guard Demo');
+  const [guardName, setGuardName] = useState(
+    () => authSessionService.getCurrentUserFirstLastName() || 'Guard',
+  );
   const [activeVisitors, setActiveVisitors] = useState<number | null>(null);
   const [readyToExitCount, setReadyToExitCount] = useState(0);
   const [currentTime, setCurrentTime] = useState('');
@@ -114,12 +116,12 @@ export default function DashboardScreen() {
     return () => clearInterval(interval);
   }, []);
 
-  useEffect(() => {
-    const name = authSessionService.getCurrentUserFirstLastName();
-    if (name) {
-      setGuardName(name);
-    }
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      const name = authSessionService.getCurrentUserFirstLastName();
+      setGuardName(name || 'Guard');
+    }, []),
+  );
 
   const loadCurrentlyInside = useCallback(async () => {
     try {
@@ -282,7 +284,7 @@ export default function DashboardScreen() {
               <View style={styles.shieldIcon}>
                 <Text style={styles.shieldText}>✓</Text>
               </View>
-              <Text style={styles.headerSubtitle}>Guard Demo</Text>
+              <Text style={styles.headerSubtitle}>{guardName}</Text>
             </View>
           </View>
 
