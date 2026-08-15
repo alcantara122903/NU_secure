@@ -16,6 +16,7 @@ export default function GuardLayout() {
           <Stack.Screen name="dashboard" options={{ headerShown: false }} />
           <Stack.Screen name="select-visitor-type" options={{ headerShown: false }} />
           <Stack.Screen name="register-visitor" options={{ headerShown: false }} />
+          <Stack.Screen name="id-auto-capture" options={{ headerShown: false }} />
           <Stack.Screen name="qr-ticket" options={{ headerShown: false }} />
           <Stack.Screen name="exit-scan" options={{ headerShown: false }} />
           <Stack.Screen name="alerts" options={{ headerShown: false }} />

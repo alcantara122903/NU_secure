@@ -2,7 +2,7 @@
  * Live stats for the office staff portal (scoped to the signed-in staff's office).
  *
  * - Today's Visitors: distinct visits with an office_scan at this office today (Manila).
- * - Pending Scans: open visits whose next stop (lowest pending expected_order) is this office.
+ * - Pending Scans: open visits still due at this office (any order for normal visitors).
  * - Expected Visitors: open visits that still have any unarrived expectation at this office.
  */
 
@@ -149,41 +149,9 @@ export async function loadOfficePortalStats(): Promise<OfficePortalStats | null>
     if (id != null) expectedVisitIds.add(id);
   }
 
-  // --- Pending Scans: this office is the visit's next stop ---
-  let pendingScans = 0;
-  if (expectedVisitIds.size > 0) {
-    const ids = [...expectedVisitIds];
-    const { data: allPending, error: allPendingErr } = await supabase
-      .from('office_expectation')
-      .select('visit_id, office_id, expected_order')
-      .in('visit_id', ids)
-      .is('arrived_at', null);
-
-    if (allPendingErr) {
-      console.warn('[OfficePortalStats] next-stop lookup error:', allPendingErr.message);
-      // Fallback: treat every expected visit as pending at this office
-      pendingScans = expectedVisitIds.size;
-    } else {
-      const nextByVisit = new Map<number, { officeId: number; order: number }>();
-      for (const row of allPending ?? []) {
-        const visitId = asPositiveInt(row.visit_id);
-        const rowOfficeId = asPositiveInt(row.office_id);
-        const order = Number(row.expected_order);
-        if (visitId == null || rowOfficeId == null || !Number.isFinite(order)) continue;
-
-        const existing = nextByVisit.get(visitId);
-        if (!existing || order < existing.order) {
-          nextByVisit.set(visitId, { officeId: rowOfficeId, order });
-        }
-      }
-
-      for (const next of nextByVisit.values()) {
-        if (next.officeId === officeId) {
-          pendingScans += 1;
-        }
-      }
-    }
-  }
+  // Normal visitors may visit selected offices in any order — count all open
+  // expectations at this office, not only visits whose "next" stop is here.
+  const pendingScans = expectedVisitIds.size;
 
   return {
     officeId,

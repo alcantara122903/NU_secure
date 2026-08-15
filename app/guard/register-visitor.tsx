@@ -4,6 +4,7 @@ import { ReturningVisitorModal } from "@/components/guard/returning-visitor-moda
 import { VisitorInformationStepScreen } from "@/components/guard/visitor-information-step";
 import { Colors } from "@/constants/colors";
 import { useColorScheme } from "@/hooks/use-color-scheme";
+import { beginIdCapture } from "./id-auto-capture";
 import { buildQRTicketPayloadV1, buildVisitorScanQrJson } from "@/lib/qr-ticket-payload";
 import { cameraService, FACE_PHOTO_QUALITY, ID_PHOTO_QUALITY } from "@/services/camera";
 import { supabase } from "@/services/database";
@@ -638,25 +639,30 @@ export default function RegisterVisitorScreen() {
     try {
       setIsCapturingIdPhoto(true);
       setIsUploadingIdPhoto(false);
-      console.log("📸 Opening camera for ID capture");
+      console.log("📸 Opening auto ID capture");
 
-      const result = await cameraService.capturePhoto({
-        quality: ID_PHOTO_QUALITY,
-      });
+      const resultPromise = beginIdCapture();
+      router.push("/guard/id-auto-capture");
+      const result = await resultPromise;
 
-      if (!result.success) {
-        if (result.error !== "Camera capture cancelled") {
-          Alert.alert(
-            "Camera Error",
-            result.error || "Failed to capture ID photo",
-          );
+      if (!result.ok) {
+        if (!("cancelled" in result && result.cancelled) && "error" in result && result.error) {
+          Alert.alert("Camera Error", result.error);
         }
         return;
       }
 
-      console.log("✅ ID photo captured successfully");
-      setCapturedIdPhoto(result.base64 || null);
-      setIdPhotoPreview(result.uri || null);
+      console.log("✅ ID photo captured automatically");
+      setCapturedIdPhoto(result.base64);
+      setIdPhotoPreview(result.uri);
+
+      const waitingForReturningDecision = await extractDataFromIdImage(
+        result.base64,
+        result.uri,
+      );
+      if (!waitingForReturningDecision) {
+        setStep(2);
+      }
     } catch (error) {
       console.error("❌ Error capturing ID photo:", error);
       Alert.alert("Error", "Failed to capture ID photo. Please try again.");
@@ -1749,7 +1755,7 @@ export default function RegisterVisitorScreen() {
 
                 <CaptureIdActionButton
                   title="Capture ID"
-                  subtitle="Use camera to take a photo"
+                  subtitle="Auto-capture when the ID is in frame"
                   icon={<Camera size={24} color="#FFFFFF" fill="#FFFFFF" />}
                   color="#0648A8"
                   onPress={() => requestPrivacyThen("captureId")}
@@ -1879,7 +1885,7 @@ export default function RegisterVisitorScreen() {
           <View style={styles.processingOverlay}>
             <View style={styles.processingCard}>
               <ActivityIndicator size="large" color="#0B2F6B" />
-              <Text style={styles.processingTitle}>Processing ID</Text>
+              <Text style={styles.processingTitle}>Reading ID…</Text>
               <Text style={styles.processingSubtitle}>
                 Analyzing your ID document and extracting information...
               </Text>

@@ -17,6 +17,8 @@ export {
   loadExpectationsForVisit,
   expectationsAreFullyCheckedIn,
   firstPendingExpectation,
+  findPendingExpectationAtOffice,
+  hasExpectationAtOffice,
   type OfficeExpectationRow,
 } from './expectation-route';
 export { nextOfficeIdFromEnrolleeProgress, completeEnrolleeProgressAtOffice } from './enrollee-route';

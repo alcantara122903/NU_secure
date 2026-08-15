@@ -13,7 +13,9 @@ import {
 import { completeEnrolleeProgressAtOffice, nextOfficeIdFromEnrolleeProgress, officeStillHasIncompleteEnrolleeSteps } from './enrollee-route';
 import {
   expectationsAreFullyCheckedIn,
+  findPendingExpectationAtOffice,
   firstPendingExpectation,
+  hasExpectationAtOffice,
   loadExpectationsForVisit,
   type OfficeExpectationRow,
 } from './expectation-route';
@@ -83,6 +85,62 @@ async function resolveExpectedStop(
   }
 
   return null;
+}
+
+type CheckInStop = {
+  expectedOfficeId: number;
+  pending: OfficeExpectationRow | undefined;
+  authorized: boolean;
+  unauthorizedMessage?: string;
+};
+
+/**
+ * Normal visitors may visit any selected office in any order.
+ * Enrollees still follow sequential step order.
+ */
+async function resolveCheckInStop(
+  visit: NonNullable<Awaited<ReturnType<typeof resolveActiveVisitFromScanInput>>>,
+  expectations: OfficeExpectationRow[],
+  scanningOfficeId: number,
+): Promise<CheckInStop | null> {
+  if (visit.visit_type_id === VISIT_TYPE.NORMAL) {
+    const pendingAtScanner = findPendingExpectationAtOffice(expectations, scanningOfficeId);
+    if (pendingAtScanner) {
+      return {
+        expectedOfficeId: scanningOfficeId,
+        pending: pendingAtScanner,
+        authorized: true,
+      };
+    }
+
+    if (hasExpectationAtOffice(expectations, scanningOfficeId)) {
+      return {
+        expectedOfficeId: scanningOfficeId,
+        pending: undefined,
+        authorized: false,
+        unauthorizedMessage: 'This visitor has already been checked in at this office.',
+      };
+    }
+
+    const firstPending = firstPendingExpectation(expectations);
+    return {
+      expectedOfficeId: firstPending != null ? Number(firstPending.office_id) : Number(scanningOfficeId),
+      pending: undefined,
+      authorized: false,
+      unauthorizedMessage: 'This visitor is not scheduled to visit this office.',
+    };
+  }
+
+  const stop = await resolveExpectedStop(visit, expectations);
+  if (stop == null) {
+    return null;
+  }
+
+  return {
+    expectedOfficeId: stop.expectedOfficeId,
+    pending: stop.pending,
+    authorized: Number(scanningOfficeId) === Number(stop.expectedOfficeId),
+  };
 }
 
 async function loadRegisteredByName(userId: number | null): Promise<string | null> {
@@ -232,7 +290,7 @@ export async function processOfficeCheckInScan(req: OfficeCheckInScanRequest): P
     }
   }
 
-  const stop = await resolveExpectedStop(visit, expectations);
+  const stop = await resolveCheckInStop(visit, expectations, scanningOfficeId);
   if (stop == null) {
     return {
       success: false,
@@ -244,10 +302,9 @@ export async function processOfficeCheckInScan(req: OfficeCheckInScanRequest): P
       errorCode: 'NO_EXPECTATION',
     };
   }
-  const { expectedOfficeId, pending } = stop;
+  const { expectedOfficeId, pending, authorized, unauthorizedMessage } = stop;
 
   const { expectedOfficeName, scanningOfficeName } = await loadOfficeNames(expectedOfficeId, scanningOfficeId);
-  const authorized = Number(scanningOfficeId) === Number(expectedOfficeId);
   const purposeLabel = visit.visit_type_id === VISIT_TYPE.ENROLLEE ? 'Step' : 'Purpose of Visit';
   const enrolleeStep = visit.visit_type_id === VISIT_TYPE.ENROLLEE ? await loadEnrolleeStepLabel(visit.visitor_id) : null;
   const purposeReason = visit.visit_type_id === VISIT_TYPE.ENROLLEE ? enrolleeStep || 'Step' : visit.purpose_reason || '(not provided)';
@@ -299,7 +356,9 @@ export async function processOfficeCheckInScan(req: OfficeCheckInScanRequest): P
       success: true,
       authorized: false,
       title: 'Unauthorized',
-      message: `This visitor is expected at ${expectedOfficeName}, not here.`,
+      message:
+        unauthorizedMessage ??
+        `This visitor is expected at ${expectedOfficeName}, not here.`,
       visitorName,
       visitorPhotoUrl,
       passNumber: visit.pass_number ?? null,
@@ -485,7 +544,7 @@ export async function processOfficeCheckInScan(req: OfficeCheckInScanRequest): P
     success: true,
     authorized: true,
     title: 'Authorized',
-    message: `${visitorName} is at the correct office for this step.`,
+    message: `${visitorName} is at a scheduled office for this visit.`,
     visitorName,
     visitorPhotoUrl,
     passNumber: visit.pass_number ?? null,
@@ -497,8 +556,8 @@ export async function processOfficeCheckInScan(req: OfficeCheckInScanRequest): P
     registeredBy,
     destinationStatusLabel: 'Correct destination',
     isCorrectDestination: true,
-    destinationOffice: expectedOfficeName,
-    expectedOfficeName,
+    destinationOffice: scanningOfficeName,
+    expectedOfficeName: scanningOfficeName,
     scanningOfficeName,
     visitId: visit.visit_id,
   };

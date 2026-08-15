@@ -10,17 +10,14 @@
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
+        "NSCameraUsageDescription": "NU-SECURE uses the camera to capture visitor IDs and scan QR tickets.",
         "NSBluetoothAlwaysUsageDescription": "Bluetooth is used to connect to a thermal printer for visitor passes.",
         "NSBluetoothPeripheralUsageDescription": "Bluetooth is used to connect to a thermal printer for visitor passes."
       }
     },
     "android": {
       "permissions": [
-        "android.permission.BLUETOOTH",
-        "android.permission.BLUETOOTH_ADMIN",
-        "android.permission.BLUETOOTH_CONNECT",
-        "android.permission.BLUETOOTH_SCAN",
-        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.CAMERA",
         "android.permission.BLUETOOTH",
         "android.permission.BLUETOOTH_ADMIN",
         "android.permission.BLUETOOTH_CONNECT",
@@ -38,11 +35,19 @@
       "package": "com.anonymous.Nu_secure"
     },
     "web": {
-      "output": "static",
+      "output": "single",
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
       "expo-router",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow NU-SECURE to capture visitor ID photos and scan QR tickets.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false
+        }
+      ],
       [
         "expo-splash-screen",
         {

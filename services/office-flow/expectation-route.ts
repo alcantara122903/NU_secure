@@ -27,3 +27,20 @@ export function firstPendingExpectation(
 ): OfficeExpectationRow | undefined {
   return expectations.find((e) => !e.arrived_at);
 }
+
+/** Pending stop at a specific office (used for flexible normal-visitor routing). */
+export function findPendingExpectationAtOffice(
+  expectations: OfficeExpectationRow[],
+  officeId: number,
+): OfficeExpectationRow | undefined {
+  return expectations.find(
+    (e) => !e.arrived_at && Number(e.office_id) === Number(officeId),
+  );
+}
+
+export function hasExpectationAtOffice(
+  expectations: OfficeExpectationRow[],
+  officeId: number,
+): boolean {
+  return expectations.some((e) => Number(e.office_id) === Number(officeId));
+}
