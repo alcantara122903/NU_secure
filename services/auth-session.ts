@@ -1,16 +1,9 @@
-import type { User } from '@/types/auth';
+import type { User, UserProfile } from '@/types/auth';
 
 interface AuthSession {
   token?: string;
   user: User;
-  userProfile?: {
-    user_id: number;
-    email: string;
-    first_name?: string;
-    last_name?: string;
-    role_id: number;
-    status?: string;
-  };
+  userProfile?: UserProfile;
 }
 
 let currentSession: AuthSession | null = null;
@@ -22,6 +15,10 @@ export const authSessionService = {
 
   getSession(): AuthSession | null {
     return currentSession;
+  },
+
+  getToken(): string | null {
+    return currentSession?.token ?? null;
   },
 
   getCurrentUserId(): number | null {

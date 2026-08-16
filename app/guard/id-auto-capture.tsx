@@ -2,7 +2,6 @@ import { ID_PHOTO_QUALITY } from '@/services/camera';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as FileSystem from 'expo-file-system';
 import * as ImageManipulator from 'expo-image-manipulator';
-import { Accelerometer } from 'expo-sensors';
 import { useNavigation, useRouter } from 'expo-router';
 import { X } from 'lucide-react-native';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -231,6 +230,16 @@ export default function IdAutoCaptureScreen() {
         return;
       }
       try {
+        const accelerometerModule = require('expo-sensors/build/Accelerometer') as {
+          default: {
+            isAvailableAsync: () => Promise<boolean>;
+            setUpdateInterval: (intervalMs: number) => void;
+            addListener: (listener: (data: { x: number; y: number; z: number }) => void) => {
+              remove: () => void;
+            };
+          };
+        };
+        const Accelerometer = accelerometerModule.default;
         const available = await Accelerometer.isAvailableAsync();
         if (!available) {
           return;

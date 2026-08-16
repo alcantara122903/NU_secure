@@ -18,7 +18,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { authSessionService } from "@/services/auth-session";
+import { useAuth } from "@/contexts/auth-context";
 import {
   loadOfficePortalStats,
   type OfficePortalStats,
@@ -26,6 +26,7 @@ import {
 
 export default function AdmissionsDashboardScreen() {
   const router = useRouter();
+  const { logout } = useAuth();
   const [stats, setStats] = useState<OfficePortalStats | null>(null);
   const [loadingStats, setLoadingStats] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -72,11 +73,9 @@ export default function AdmissionsDashboardScreen() {
         text: "Logout",
         style: "destructive",
         onPress: () => {
-          try {
-            authSessionService.clearSession();
-          } finally {
+          void logout().finally(() => {
             router.replace("/(tabs)");
-          }
+          });
         },
       },
     ]);

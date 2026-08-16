@@ -1,5 +1,6 @@
-import { authService } from "@/services/auth";
-import { authSessionService } from "@/services/auth-session";
+import { useAuth } from "@/contexts/auth-context";
+import { AUTH_ERROR_MESSAGES } from "@/services/api";
+import { AuthError } from "@/services/authentication";
 import type { AuthStatus } from "@/types/auth";
 import { validateLoginForm } from "@/utils/validation";
 import Ionicons from "@expo/vector-icons/Ionicons";
@@ -22,8 +23,31 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+function getLoginErrorMessage(error: unknown): string {
+  if (error instanceof AuthError || error instanceof Error) {
+    const message = error.message.trim();
+    if (
+      message === AUTH_ERROR_MESSAGES.NETWORK ||
+      message === AUTH_ERROR_MESSAGES.SERVER ||
+      message === AUTH_ERROR_MESSAGES.UNAUTHORIZED ||
+      message === AUTH_ERROR_MESSAGES.INVALID_CREDENTIALS
+    ) {
+      return message;
+    }
+    if (error instanceof AuthError && error.code === "ADMIN_NOT_ALLOWED") {
+      return message;
+    }
+    if (error instanceof AuthError && error.code === "LOGIN_FAILED") {
+      return message;
+    }
+  }
+
+  return AUTH_ERROR_MESSAGES.SERVER;
+}
+
 export default function LoginScreen() {
   const router = useRouter();
+  const { login } = useAuth();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -34,7 +58,10 @@ export default function LoginScreen() {
   const [showPassword, setShowPassword] = useState(false);
 
   const handleLogin = useCallback(async () => {
-    // Validate form
+    if (status === "loading") {
+      return;
+    }
+
     const validation = validateLoginForm(email, password);
 
     if (!validation.isValid) {
@@ -46,37 +73,14 @@ export default function LoginScreen() {
     setErrors({});
 
     try {
-      const response = await authService.login({
-        email: email.toLowerCase().trim(),
-        password,
-      });
-
-      if (response.success) {
-        if (response.user) {
-          authSessionService.setSession({
-            token: response.token,
-            user: response.user,
-            userProfile: response.userProfile,
-          });
-        }
-
-        setStatus("success");
-        // Navigate to dashboard based on role from database
-        setTimeout(() => {
-          router.push(response.dashboard);
-        }, 200);
-      } else {
-        setStatus("error");
-        Alert.alert("Login Failed", response.message || "Please try again");
-      }
+      const dashboard = await login(email.toLowerCase().trim(), password);
+      setStatus("success");
+      router.replace(dashboard);
     } catch (error) {
       setStatus("error");
-      const errorMessage =
-        error instanceof Error ? error.message : "An error occurred";
-      console.error("Login error details:", errorMessage);
-      Alert.alert("Login Error", errorMessage);
+      Alert.alert("Login Failed", getLoginErrorMessage(error));
     }
-  }, [email, password, router]);
+  }, [email, password, login, router, status]);
 
   const isLoading = status === "loading";
   const handleForgotPassword = useCallback(() => {
@@ -215,7 +219,10 @@ export default function LoginScreen() {
                 disabled={isLoading}
               >
                 {isLoading ? (
-                  <ActivityIndicator color="#FFFFFF" size="small" />
+                  <View style={styles.signInButtonContent}>
+                    <ActivityIndicator color="#FFFFFF" size="small" />
+                    <Text style={styles.signInButtonText}>Signing in...</Text>
+                  </View>
                 ) : (
                   <Text style={styles.signInButtonText}>Sign In</Text>
                 )}
@@ -381,6 +388,12 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 6 },
     elevation: 5,
+  },
+
+  signInButtonContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
   },
 
   signInButtonDisabled: {

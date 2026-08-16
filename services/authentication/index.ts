@@ -1,3 +1,8 @@
-// Barrel export for authentication
-export { authService } from './auth';
-
+export {
+  authService,
+  AuthError,
+  extractLaravelUser,
+  getDashboardRouteForRole,
+  mapLaravelUser,
+  MOBILE_DEVICE_NAME,
+} from './auth';

@@ -1,3 +1,4 @@
+import { useAuth } from '@/contexts/auth-context';
 import { authSessionService } from '@/services/auth-session';
 import { supabase } from '@/services/database';
 import { fetchReadyToExitVisitors } from '@/services/guard-alerts-dashboard';
@@ -88,6 +89,7 @@ function HeaderBackgroundPattern() {
 
 export default function DashboardScreen() {
   const router = useRouter();
+  const { logout } = useAuth();
 
   const [guardName, setGuardName] = useState(
     () => authSessionService.getCurrentUserFirstLastName() || 'Guard',
@@ -247,13 +249,9 @@ export default function DashboardScreen() {
   );
 
   const handleLogout = () => {
-    try {
-      authSessionService.clearSession();
+    void logout().finally(() => {
       router.replace('/(tabs)');
-    } catch (error) {
-      console.error('Error clearing session:', error);
-      router.replace('/(tabs)');
-    }
+    });
   };
 
   const filteredInsideVisitors = useMemo(() => {

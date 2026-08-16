@@ -1,13 +1,31 @@
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import { Stack } from 'expo-router';
+import { Redirect, Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import 'react-native-reanimated';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { useAuth } from '@/contexts/auth-context';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
 export default function GuardLayout() {
   const colorScheme = useColorScheme();
+  const { isRestoring, isAuthenticated, userProfile } = useAuth();
+
+  if (isRestoring) {
+    return null;
+  }
+
+  if (!isAuthenticated) {
+    return <Redirect href="/(tabs)" />;
+  }
+
+  if (userProfile?.role_id === 3) {
+    return <Redirect href="/office/office-portal" />;
+  }
+
+  if (userProfile?.role_id !== 2) {
+    return <Redirect href="/(tabs)" />;
+  }
 
   return (
     <SafeAreaProvider>
