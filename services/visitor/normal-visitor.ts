@@ -35,13 +35,19 @@ function generateYearSixCode(): string {
   return `${year}-${sixDigits}`;
 }
 
+export type NormalVisitorRegistrationInput = VisitorRegistrationData & {
+  selectedOfficeIds: number[];
+  /** Free-text destination when visitor chose "Others" (no office checklist). */
+  destinationText?: string;
+};
+
 export const normalVisitorService = {
   /**
    * Register normal visitor and create QR ticket
    */
-  async registerAndGenerateQRTicket(visitorData: VisitorRegistrationData & {
-    selectedOfficeIds: number[];
-  }): Promise<{
+  async registerAndGenerateQRTicket(
+    visitorData: NormalVisitorRegistrationInput,
+  ): Promise<{
     qrToken: string;
     passNumber: string;
     controlNumber: string;
@@ -54,7 +60,18 @@ export const normalVisitorService = {
       console.log(`   firstName: ${visitorData.firstName}`);
       console.log(`   lastName: ${visitorData.lastName}`);
       console.log(`   contactNo: ${visitorData.contactNo}`);
-      console.log(`   selectedOffices: ${visitorData.selectedOfficeIds.length} office(s)`);
+      const destinationText = visitorData.destinationText?.trim() || '';
+      const usingOthersDestination = destinationText.length > 0;
+      console.log(
+        usingOthersDestination
+          ? `   destinationText: ${destinationText}`
+          : `   selectedOffices: ${visitorData.selectedOfficeIds.length} office(s)`,
+      );
+
+      if (!usingOthersDestination && visitorData.selectedOfficeIds.length === 0) {
+        console.error('❌ selectedOfficeIds or destinationText is required');
+        return null;
+      }
 
       // STEP 1: Create address record if components provided
       let addressId: number | null = null;
@@ -199,7 +216,9 @@ export const normalVisitorService = {
       // STEP 3: Create visit record
       console.log('\n📝 STEP 3: Creating visit record...');
       const qrToken = generateQRToken();
-      const primaryOfficeId = visitorData.selectedOfficeIds[0];
+      const primaryOfficeId = usingOthersDestination
+        ? null
+        : visitorData.selectedOfficeIds[0];
 
       // Attempt insert with retry logic
       let visitData: any = null;
@@ -217,6 +236,7 @@ export const normalVisitorService = {
             qr_token: qrToken,
             guard_user_id: guardUserId,
             purpose_reason: visitorData.reasonForVisit?.trim() || null,
+            destination_text: usingOthersDestination ? destinationText : null,
             exit_status_id: entryExitStatusId,
             pass_number: passNumber,
             control_number: controlNumber,
@@ -270,7 +290,12 @@ export const normalVisitorService = {
 
       console.log(`✅ Visit created: visit_id=${visitId}, qr_token=${qrToken}`);
 
-      // STEP 4: Create office_expectation records (one per selected office)
+      // STEP 4: Create office_expectation records (skipped for free-text "Others")
+      if (usingOthersDestination) {
+        console.log(
+          '\n📝 STEP 4: Skipping office expectations (Others destination_text only)',
+        );
+      } else {
       console.log('\n📝 STEP 4: Creating office expectations...');
       const pendingExpectationStatusId = await resolvePendingExpectationStatusId();
       const expectations = visitorData.selectedOfficeIds.map((officeId, index) => ({
@@ -311,6 +336,7 @@ export const normalVisitorService = {
         console.warn('⚠️ Visitor and visit records were created, but office route could not be set up');
       } else {
         console.log(`✅ Office expectations created: ${visitorData.selectedOfficeIds.length} office(s) added to route`);
+      }
       }
 
       console.log('\n✅ === NORMAL VISITOR QR TICKET GENERATED SUCCESSFULLY ===\n');

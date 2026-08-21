@@ -14,6 +14,7 @@ import {
     enrolleeService,
     normalVisitorService,
     visitorLookupService,
+    type NormalVisitorRegistrationInput,
     type ReturningVisitorMatch,
 } from "@/services/visitor";
 import { runOCRDiagnostics } from "@/utils/diagnostics";
@@ -205,6 +206,10 @@ export default function RegisterVisitorScreen() {
     useState("");
   const [normalVisitorReasonForVisit, setNormalVisitorReasonForVisit] =
     useState("");
+  const [normalVisitorOthersSelected, setNormalVisitorOthersSelected] =
+    useState(false);
+  const [normalVisitorOtherDestination, setNormalVisitorOtherDestination] =
+    useState("");
 
   // Contractor Step 1 Fields
   const [contractorFirstName, setContractorFirstName] = useState("");
@@ -307,11 +312,25 @@ export default function RegisterVisitorScreen() {
   ];
 
   const toggleDestinationOffice = (office: string) => {
+    setNormalVisitorOthersSelected(false);
+    setNormalVisitorOtherDestination("");
     setSelectedDestinationOffices((prev) =>
       prev.includes(office)
         ? prev.filter((o) => o !== office)
         : [...prev, office],
     );
+  };
+
+  const toggleNormalVisitorOthersDestination = () => {
+    setNormalVisitorOthersSelected((prev) => {
+      const next = !prev;
+      if (next) {
+        setSelectedDestinationOffices([]);
+      } else {
+        setNormalVisitorOtherDestination("");
+      }
+      return next;
+    });
   };
 
   // Auto-generate control number only (ID pass number is manual input).
@@ -545,22 +564,28 @@ export default function RegisterVisitorScreen() {
           );
         }
       } else if (visitorType === "normal") {
-        // Get office ID for the selected destination office
-        const selectedOfficeIds = await officeService.getOfficeIds(
-          selectedDestinationOffices,
-        );
+        const otherDestination = normalVisitorOtherDestination.trim();
+        const usingOthersDestination =
+          normalVisitorOthersSelected && otherDestination.length > 0;
 
-        if (selectedOfficeIds.length === 0) {
-          Alert.alert(
-            "Error",
-            "Could not find selected offices. Please try again.",
+        let selectedOfficeIds: number[] = [];
+        if (!usingOthersDestination) {
+          selectedOfficeIds = await officeService.getOfficeIds(
+            selectedDestinationOffices,
           );
-          setIsCreatingEnrollee(false);
-          return;
+
+          if (selectedOfficeIds.length === 0) {
+            Alert.alert(
+              "Error",
+              "Could not find selected offices. Please try again.",
+            );
+            setIsCreatingEnrollee(false);
+            return;
+          }
         }
 
         // Register normal visitor and generate QR ticket
-        const result = await normalVisitorService.registerAndGenerateQRTicket({
+        const registrationPayload: NormalVisitorRegistrationInput = {
           firstName: normalVisitorFirstName,
           lastName: normalVisitorLastName,
           birthday: normalVisitorBirthday,
@@ -576,14 +601,28 @@ export default function RegisterVisitorScreen() {
           controlNumber: normalVisitorControlNumber,
           facePhotoUri: faceUriForUpload,
           idPhotoUri: capturedIdPhoto || undefined,
-          selectedOfficeIds: selectedOfficeIds,
-        });
+          selectedOfficeIds,
+          destinationText: usingOthersDestination
+            ? otherDestination
+            : undefined,
+        };
+        const result =
+          await normalVisitorService.registerAndGenerateQRTicket(
+            registrationPayload,
+          );
 
         if (result) {
           const qrPayload = buildVisitorScanQrJson({
             control_number: result.controlNumber,
             qr_token: result.qrToken,
           });
+
+          const ticketOffices = usingOthersDestination
+            ? [{ id: 0, name: otherDestination }]
+            : selectedDestinationOffices.map((name, index) => ({
+                id: selectedOfficeIds[index] || index,
+                name,
+              }));
 
           const ticketData = {
             type: "normal" as const,
@@ -599,10 +638,10 @@ export default function RegisterVisitorScreen() {
             address: `${normalVisitorHouseNo} ${normalVisitorStreet}, ${normalVisitorBarangay}, ${normalVisitorCity}, ${normalVisitorProvince}`,
             reasonForVisit: normalVisitorReasonForVisit,
             facePhotoUri: faceUriForTicket,
-            offices: selectedDestinationOffices.map((name, index) => ({
-              id: selectedOfficeIds[index] || index,
-              name,
-            })),
+            offices: ticketOffices,
+            destinationText: usingOthersDestination
+              ? otherDestination
+              : undefined,
           };
 
           router.replace({
@@ -1557,6 +1596,11 @@ export default function RegisterVisitorScreen() {
         offices={offices}
         selectedOffices={selectedDestinationOffices}
         onToggleOffice={toggleDestinationOffice}
+        showOthersDestinationOption
+        othersDestinationSelected={normalVisitorOthersSelected}
+        onToggleOthersDestination={toggleNormalVisitorOthersDestination}
+        othersDestinationText={normalVisitorOtherDestination}
+        onChangeOthersDestinationText={setNormalVisitorOtherDestination}
         onBack={handleBack}
         onContinue={() => {
           const missingFields: string[] = [];
@@ -1566,8 +1610,13 @@ export default function RegisterVisitorScreen() {
           if (!normalVisitorPassNumber?.trim())
             missingFields.push("ID Pass Number");
           if (!normalVisitorContactNo?.trim()) missingFields.push("Contact No");
-          if (selectedDestinationOffices.length === 0)
+          if (normalVisitorOthersSelected) {
+            if (!normalVisitorOtherDestination.trim()) {
+              missingFields.push("Other Destination");
+            }
+          } else if (selectedDestinationOffices.length === 0) {
             missingFields.push("Destination Office");
+          }
           if (!normalVisitorReasonForVisit?.trim())
             missingFields.push("Purpose");
           if (missingFields.length > 0) {

@@ -75,4 +75,6 @@ export interface VisitorRegistrationData {
   reasonForVisit?: string;
   passNumber?: string;
   controlNumber?: string;
+  /** Free-text destination (e.g. normal visitor "Others"). */
+  destinationText?: string;
 }

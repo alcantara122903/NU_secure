@@ -51,6 +51,12 @@ export type VisitorInformationStepProps = {
   offices: string[];
   selectedOffices: string[];
   onToggleOffice: (office: string) => void;
+  /** Normal visitor: show "Others" option that unlocks a free-text destination. */
+  showOthersDestinationOption?: boolean;
+  othersDestinationSelected?: boolean;
+  onToggleOthersDestination?: () => void;
+  othersDestinationText?: string;
+  onChangeOthersDestinationText?: (v: string) => void;
   onBack: () => void;
   onContinue: () => void;
   /** Button label under the form. Default: Continue to Photo */
@@ -228,6 +234,11 @@ export function VisitorInformationStepScreen(
     offices,
     selectedOffices,
     onToggleOffice,
+    showOthersDestinationOption = false,
+    othersDestinationSelected = false,
+    onToggleOthersDestination,
+    othersDestinationText = "",
+    onChangeOthersDestinationText,
     onBack,
     onContinue,
     continueButtonLabel = "Continue to Photo",
@@ -553,7 +564,63 @@ export function VisitorInformationStepScreen(
                             </TouchableOpacity>
                           );
                         })}
+                        {showOthersDestinationOption ? (
+                          <TouchableOpacity
+                            activeOpacity={0.82}
+                            style={[
+                              styles.destinationOfficeGridCell,
+                              styles.destinationOfficeOthersCell,
+                              othersDestinationSelected &&
+                                styles.destinationOfficeGridCellSelected,
+                            ]}
+                            onPress={() => onToggleOthersDestination?.()}
+                          >
+                            {othersDestinationSelected ? (
+                              <CheckSquare
+                                size={18}
+                                color="#0648A8"
+                                strokeWidth={2.4}
+                              />
+                            ) : (
+                              <Square
+                                size={18}
+                                color="#0648A8"
+                                strokeWidth={2.2}
+                              />
+                            )}
+                            <Text
+                              style={[
+                                styles.destinationOfficeGridCellText,
+                                othersDestinationSelected &&
+                                  styles.destinationOfficeGridCellTextSelected,
+                              ]}
+                              numberOfLines={3}
+                            >
+                              Others — Tap to enter destination
+                            </Text>
+                          </TouchableOpacity>
+                        ) : null}
                       </View>
+                      {showOthersDestinationOption &&
+                      othersDestinationSelected ? (
+                        <View style={styles.othersDestinationInputWrap}>
+                          <FormInput
+                            label="Other Destination"
+                            placeholder="Type where the visitor is going"
+                            value={othersDestinationText}
+                            onChangeText={
+                              onChangeOthersDestinationText ?? (() => {})
+                            }
+                            icon={
+                              <Building2
+                                size={17}
+                                color="#0648A8"
+                                strokeWidth={2.2}
+                              />
+                            }
+                          />
+                        </View>
+                      ) : null}
                     </>
                   )}
                 </View>
@@ -894,6 +961,13 @@ const styles = StyleSheet.create({
   },
   destinationOfficeGridCellTextSelected: {
     color: "#0648A8",
+  },
+  destinationOfficeOthersCell: {
+    width: "100%",
+    minHeight: 56,
+  },
+  othersDestinationInputWrap: {
+    marginTop: 12,
   },
   destinationOfficeFieldText: {
     flex: 1,
