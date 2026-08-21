@@ -29,7 +29,7 @@ import {
     TouchableOpacity,
     View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Circle, Path } from "react-native-svg";
 
 export type VisitorInformationStepProps = {
@@ -261,17 +261,14 @@ export function VisitorInformationStepScreen(
     topSlot,
   } = props;
 
+  const insets = useSafeAreaInsets();
+
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={["bottom", "left", "right"]}>
       <StatusBar barStyle="light-content" backgroundColor="#0648A8" />
 
-      <ScrollView
-        style={styles.container}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-      >
-        <View style={styles.header}>
+      <View style={styles.layout}>
+        <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
           <HeaderPattern />
 
           <View style={styles.headerTop}>
@@ -303,6 +300,13 @@ export function VisitorInformationStepScreen(
           </View>
         </View>
 
+        <ScrollView
+          style={styles.container}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          overScrollMode="never"
+        >
         <View style={styles.contentPanel}>
           {topSlot}
 
@@ -626,12 +630,17 @@ export function VisitorInformationStepScreen(
           </TouchableOpacity>
         </View>
       </ScrollView>
+      </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   safeArea: {
+    flex: 1,
+    backgroundColor: "#0648A8",
+  },
+  layout: {
     flex: 1,
     backgroundColor: "#0648A8",
   },
@@ -645,7 +654,6 @@ const styles = StyleSheet.create({
   header: {
     backgroundColor: "#0648A8",
     paddingHorizontal: 16,
-    paddingTop: 4,
     paddingBottom: 22,
     position: "relative",
     overflow: "hidden",
@@ -739,7 +747,7 @@ const styles = StyleSheet.create({
   },
   contentPanel: {
     backgroundColor: "#F8FAFC",
-    marginTop: -18,
+    marginTop: 0,
     borderTopLeftRadius: 22,
     borderTopRightRadius: 22,
     paddingHorizontal: 14,

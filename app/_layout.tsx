@@ -5,7 +5,7 @@ import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native
 import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import 'react-native-reanimated';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -31,23 +31,34 @@ function AuthNavigationGate({ children }: { children: ReactNode }) {
   const router = useRouter();
   const rootSegment = segments[0];
   const inProtectedGroup = rootSegment === 'guard' || rootSegment === 'office';
-  const onLoginGroup = rootSegment === '(tabs)' || rootSegment == null;
-  const showRestoreOverlay =
-    isRestoring || Boolean(isAuthenticated && dashboardRoute && onLoginGroup);
+  const showRestoreOverlay = isRestoring;
+  const wasRestoringRef = useRef(true);
 
   useEffect(() => {
     if (isRestoring) {
+      wasRestoringRef.current = true;
       return;
     }
 
     SplashScreen.hideAsync().catch(() => {});
 
     if (!isAuthenticated && inProtectedGroup) {
+      wasRestoringRef.current = false;
       router.replace('/(tabs)');
       return;
     }
 
-    if (isAuthenticated && dashboardRoute && onLoginGroup) {
+    // Only auto-redirect after cold session restore. Interactive login
+    // navigates from the login screen so we don't race two replaces.
+    const justFinishedRestore = wasRestoringRef.current;
+    wasRestoringRef.current = false;
+
+    if (
+      justFinishedRestore &&
+      isAuthenticated &&
+      dashboardRoute &&
+      rootSegment === '(tabs)'
+    ) {
       router.replace(dashboardRoute);
     }
   }, [
@@ -55,7 +66,7 @@ function AuthNavigationGate({ children }: { children: ReactNode }) {
     inProtectedGroup,
     isAuthenticated,
     isRestoring,
-    onLoginGroup,
+    rootSegment,
     router,
   ]);
 
@@ -81,9 +92,11 @@ export default function RootLayout() {
           <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
             <AuthNavigationGate>
               <Stack>
-                <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-                <Stack.Screen name="guard" options={{ headerShown: false }} />
-                <Stack.Screen name="office" options={{ headerShown: false }} />
+                <Stack.Screen name="(tabs)" options={{ headerShown: false, animation: 'fade' }} />
+                <Stack.Screen name="forgot-password" options={{ headerShown: false }} />
+                <Stack.Screen name="reset-password" options={{ headerShown: false }} />
+                <Stack.Screen name="guard" options={{ headerShown: false, animation: 'fade' }} />
+                <Stack.Screen name="office" options={{ headerShown: false, animation: 'fade' }} />
                 <Stack.Screen name="enrollee" options={{ headerShown: false }} />
               </Stack>
             </AuthNavigationGate>

@@ -1,18 +1,20 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Redirect, Stack } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import 'react-native-reanimated';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { useAuth } from '@/contexts/auth-context';
-import { useColorScheme } from '@/hooks/use-color-scheme';
+
+const GUARD_BLUE = '#0648A8';
 
 export default function GuardLayout() {
-  const colorScheme = useColorScheme();
   const { isRestoring, isAuthenticated, userProfile } = useAuth();
 
   if (isRestoring) {
-    return null;
+    return (
+      <View style={styles.restore}>
+        <ActivityIndicator color="#FFD914" size="large" />
+      </View>
+    );
   }
 
   if (!isAuthenticated) {
@@ -28,20 +30,30 @@ export default function GuardLayout() {
   }
 
   return (
-    <SafeAreaProvider>
-      <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-        <Stack>
-          <Stack.Screen name="dashboard" options={{ headerShown: false }} />
-          <Stack.Screen name="select-visitor-type" options={{ headerShown: false }} />
-          <Stack.Screen name="register-visitor" options={{ headerShown: false }} />
-          <Stack.Screen name="id-auto-capture" options={{ headerShown: false }} />
-          <Stack.Screen name="qr-ticket" options={{ headerShown: false }} />
-          <Stack.Screen name="exit-scan" options={{ headerShown: false }} />
-          <Stack.Screen name="alerts" options={{ headerShown: false }} />
-          <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
-        </Stack>
-        <StatusBar style="auto" />
-      </ThemeProvider>
-    </SafeAreaProvider>
+    <Stack
+      screenOptions={{
+        headerShown: false,
+        animation: 'fade',
+        contentStyle: { backgroundColor: GUARD_BLUE },
+      }}
+    >
+      <Stack.Screen name="dashboard" />
+      <Stack.Screen name="select-visitor-type" />
+      <Stack.Screen name="register-visitor" />
+      <Stack.Screen name="id-auto-capture" />
+      <Stack.Screen name="qr-ticket" />
+      <Stack.Screen name="exit-scan" />
+      <Stack.Screen name="alerts" />
+      <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal', animation: 'slide_from_bottom' }} />
+    </Stack>
   );
 }
+
+const styles = StyleSheet.create({
+  restore: {
+    flex: 1,
+    backgroundColor: GUARD_BLUE,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+});

@@ -23,7 +23,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface ScannedInfo {
   name?: string;
@@ -107,6 +107,7 @@ export default function ExitScanScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme || 'light'];
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [permission, requestPermission] = useCameraPermissions();
   const [scanState, setScanState] = useState<GuardScanState>({ type: 'idle' });
   const [scannedInfo, setScannedInfo] = useState<ScannedInfo | null>(null);
@@ -295,31 +296,33 @@ export default function ExitScanScreen() {
     };
 
     return (
-      <SafeAreaView style={styles.gh_safe_area}>
+      <SafeAreaView style={styles.gh_safe_area} edges={['bottom', 'left', 'right']}>
         <StatusBar barStyle="light-content" backgroundColor="#0A4DB3" />
 
-        <View style={styles.gh_header}>
-          <View style={styles.gh_header_bg_icon_left}>
-            <MaterialIcons name="business" size={120} color="rgba(255,255,255,0.06)" />
+        <View style={styles.gh_layout}>
+          <View style={[styles.gh_header, { paddingTop: insets.top + 12 }]}>
+            <View style={styles.gh_header_bg_icon_left}>
+              <MaterialIcons name="business" size={120} color="rgba(255,255,255,0.06)" />
+            </View>
+
+            <View style={styles.gh_header_bg_icon_right}>
+              <MaterialIcons name="shield" size={140} color="rgba(255,255,255,0.07)" />
+            </View>
+
+            <TouchableOpacity style={styles.gh_back_button} activeOpacity={0.8} onPress={handleBack}>
+              <MaterialIcons name="arrow-back" size={26} color="#FFFFFF" />
+            </TouchableOpacity>
+
+            <Text style={styles.gh_header_title}>Process visitor exit</Text>
           </View>
 
-          <View style={styles.gh_header_bg_icon_right}>
-            <MaterialIcons name="shield" size={140} color="rgba(255,255,255,0.07)" />
-          </View>
-
-          <TouchableOpacity style={styles.gh_back_button} activeOpacity={0.8} onPress={handleBack}>
-            <MaterialIcons name="arrow-back" size={26} color="#FFFFFF" />
-          </TouchableOpacity>
-
-          <Text style={styles.gh_header_title}>Process visitor exit</Text>
-        </View>
-
-        <ScrollView
-          style={styles.gh_container}
-          contentContainerStyle={styles.gh_scroll_content}
-          showsVerticalScrollIndicator={false}
-          removeClippedSubviews={false}
-        >
+          <ScrollView
+            style={styles.gh_container}
+            contentContainerStyle={styles.gh_scroll_content}
+            showsVerticalScrollIndicator={false}
+            overScrollMode="never"
+            removeClippedSubviews={false}
+          >
           <View style={styles.gh_main_wrapper}>
             <View style={styles.gh_success_card}>
               <View style={styles.gh_success_left}>
@@ -469,6 +472,7 @@ export default function ExitScanScreen() {
             </TouchableOpacity>
           </View>
         </ScrollView>
+        </View>
       </SafeAreaView>
     );
   }
@@ -487,17 +491,18 @@ export default function ExitScanScreen() {
         : 'Position QR code within the frame';
 
   return (
-    <SafeAreaView style={styles.exitSafeArea}>
+    <SafeAreaView style={styles.exitSafeArea} edges={['bottom', 'left', 'right']}>
       <StatusBar barStyle="light-content" backgroundColor="#064AA5" />
 
-      <View style={styles.exitHeader}>
-        <TouchableOpacity style={styles.exitBackButton} activeOpacity={0.75} onPress={handleBack}>
-          <MaterialIcons name="arrow-back" size={30} color="#FFFFFF" />
-          <Text style={styles.exitBackText}>Back</Text>
-        </TouchableOpacity>
-        <Text style={styles.exitHeaderTitle}>Process visitor exit</Text>
-        <View style={styles.exitHeaderRightSpace} />
-      </View>
+      <View style={styles.exitLayout}>
+        <View style={[styles.exitHeader, { paddingTop: insets.top + 10 }]}>
+          <TouchableOpacity style={styles.exitBackButton} activeOpacity={0.75} onPress={handleBack}>
+            <MaterialIcons name="arrow-back" size={30} color="#FFFFFF" />
+            <Text style={styles.exitBackText}>Back</Text>
+          </TouchableOpacity>
+          <Text style={styles.exitHeaderTitle}>Process visitor exit</Text>
+          <View style={styles.exitHeaderRightSpace} />
+        </View>
 
       {/*
         CameraView must NOT be inside ScrollView on Android Fabric — causes
@@ -659,6 +664,7 @@ export default function ExitScanScreen() {
             </View>
           </View>
         </ScrollView>
+      </View>
       </View>
     </SafeAreaView>
   );
@@ -965,7 +971,11 @@ const styles = StyleSheet.create({
   },
   gh_safe_area: {
     flex: 1,
-    backgroundColor: '#F4F6F8',
+    backgroundColor: '#0A4DB3',
+  },
+  gh_layout: {
+    flex: 1,
+    backgroundColor: '#0A4DB3',
   },
   gh_container: {
     flex: 1,
@@ -976,12 +986,11 @@ const styles = StyleSheet.create({
   },
   gh_header: {
     backgroundColor: '#0A4DB3',
-    paddingTop: 12,
     paddingBottom: 24,
     paddingHorizontal: 16,
     borderBottomLeftRadius: 24,
     borderBottomRightRadius: 24,
-    overflow: 'visible',
+    overflow: 'hidden',
     position: 'relative',
   },
   gh_header_bg_icon_left: {
@@ -1009,14 +1018,13 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '800',
     textAlign: 'center',
-    marginTop: -42,
   },
   gh_main_wrapper: {
-    marginTop: -10,
+    marginTop: 0,
     backgroundColor: '#F4F6F8',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    paddingTop: 12,
+    paddingTop: 16,
     paddingHorizontal: 12,
   },
   gh_success_card: {
@@ -1269,7 +1277,11 @@ const styles = StyleSheet.create({
   },
   exitSafeArea: {
     flex: 1,
-    backgroundColor: '#F4F7FB',
+    backgroundColor: '#064AA5',
+  },
+  exitLayout: {
+    flex: 1,
+    backgroundColor: '#064AA5',
   },
   exitMainColumn: {
     flex: 1,
@@ -1282,16 +1294,11 @@ const styles = StyleSheet.create({
     paddingBottom: 24,
   },
   exitHeader: {
-    height: 82,
     backgroundColor: '#064AA5',
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 14,
-    shadowColor: '#0B2E5E',
-    shadowOffset: { width: 0, height: 5 },
-    shadowOpacity: 0.18,
-    shadowRadius: 10,
-    elevation: 5,
+    paddingBottom: 14,
   },
   exitBackButton: {
     flexDirection: 'row',

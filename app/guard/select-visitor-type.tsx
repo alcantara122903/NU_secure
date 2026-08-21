@@ -13,7 +13,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
 
 type VisitorType = 'enrollee' | 'contractor' | 'normal_visitor';
@@ -128,6 +128,7 @@ function NormalVisitorIcon({
 
 export default function SelectVisitorTypeScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
 
   const handleBack = () => {
     router.back();
@@ -141,15 +142,11 @@ export default function SelectVisitorTypeScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={['bottom', 'left', 'right']}>
       <StatusBar barStyle="light-content" backgroundColor="#0648A8" />
 
-      <ScrollView
-        style={styles.container}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.header}>
+      <View style={styles.layout}>
+        <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
           <HeaderPattern />
 
           <TouchableOpacity
@@ -168,6 +165,12 @@ export default function SelectVisitorTypeScreen() {
           </View>
         </View>
 
+        <ScrollView
+          style={styles.container}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          overScrollMode="never"
+        >
         <View style={styles.contentPanel}>
           {visitorOptions.map((option) => (
             <VisitorTypeCard
@@ -205,6 +208,7 @@ export default function SelectVisitorTypeScreen() {
           </View>
         </View>
       </ScrollView>
+      </View>
     </SafeAreaView>
   );
 }
@@ -291,6 +295,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#0648A8',
   },
 
+  layout: {
+    flex: 1,
+    backgroundColor: '#0648A8',
+  },
+
   container: {
     flex: 1,
     backgroundColor: '#F4F7FB',
@@ -302,9 +311,7 @@ const styles = StyleSheet.create({
 
   header: {
     backgroundColor: '#0648A8',
-    minHeight: 202,
     paddingHorizontal: 18,
-    paddingTop: 28,
     paddingBottom: 22,
     position: 'relative',
     overflow: 'hidden',
@@ -343,7 +350,7 @@ const styles = StyleSheet.create({
 
   contentPanel: {
     backgroundColor: '#F8FAFC',
-    marginTop: -10,
+    marginTop: 0,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     paddingHorizontal: 14,

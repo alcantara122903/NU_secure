@@ -44,7 +44,7 @@ import {
     TouchableOpacity,
     View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Circle, Path } from "react-native-svg";
 
 type PrivacyPendingAction = "captureId" | "uploadId" | "captureFace" | null;
@@ -168,6 +168,7 @@ export default function RegisterVisitorScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme || "light"];
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const params = useLocalSearchParams();
   const visitorType = params.visitorType as string;
 
@@ -1658,55 +1659,57 @@ export default function RegisterVisitorScreen() {
   if (step === 1) {
     return (
       <View style={{ flex: 1 }}>
-        <SafeAreaView style={captureStepStyles.safeArea}>
+        <SafeAreaView style={captureStepStyles.safeArea} edges={["bottom", "left", "right"]}>
           <StatusBar barStyle="light-content" backgroundColor="#0648A8" />
 
-        <ScrollView
-          style={captureStepStyles.captureScroll}
-          contentContainerStyle={captureStepStyles.scrollContent}
-          showsVerticalScrollIndicator={false}
-        >
-          <View style={captureStepStyles.header}>
-            <CaptureIdHeaderPattern />
+          <View style={captureStepStyles.layout}>
+            <View style={[captureStepStyles.header, { paddingTop: insets.top + 12 }]}>
+              <CaptureIdHeaderPattern />
 
-            <View style={captureStepStyles.headerTop}>
-              <TouchableOpacity
-                style={captureStepStyles.captureBackButton}
-                onPress={handleBack}
-              >
-                <ArrowLeft size={20} color="#FFFFFF" strokeWidth={2.8} />
-                <Text style={captureStepStyles.backText}>Back</Text>
-              </TouchableOpacity>
-              <View style={captureStepStyles.headerTopSpacer} />
-            </View>
+              <View style={captureStepStyles.headerTop}>
+                <TouchableOpacity
+                  style={captureStepStyles.captureBackButton}
+                  onPress={handleBack}
+                >
+                  <ArrowLeft size={20} color="#FFFFFF" strokeWidth={2.8} />
+                  <Text style={captureStepStyles.backText}>Back</Text>
+                </TouchableOpacity>
+                <View style={captureStepStyles.headerTopSpacer} />
+              </View>
 
-            <View style={captureStepStyles.visitorBadgeWrapper}>
-              <View style={captureStepStyles.visitorBadge}>
-                <View style={captureStepStyles.badgeIconCircle}>
-                  <Text style={captureStepStyles.badgeIconText}>
-                    {visitorTypeInfo.icon}
+              <View style={captureStepStyles.visitorBadgeWrapper}>
+                <View style={captureStepStyles.visitorBadge}>
+                  <View style={captureStepStyles.badgeIconCircle}>
+                    <Text style={captureStepStyles.badgeIconText}>
+                      {visitorTypeInfo.icon}
+                    </Text>
+                  </View>
+                  <Text style={captureStepStyles.visitorBadgeText}>
+                    {visitorTypeInfo.label}
                   </Text>
                 </View>
-                <Text style={captureStepStyles.visitorBadgeText}>
-                  {visitorTypeInfo.label}
-                </Text>
+              </View>
+
+              <Text style={captureStepStyles.stepTitle}>Step 1 of 3</Text>
+
+              <View style={captureStepStyles.progressRow}>
+                <View
+                  style={[
+                    captureStepStyles.progressBar,
+                    captureStepStyles.progressActive,
+                  ]}
+                />
+                <View style={captureStepStyles.progressBar} />
+                <View style={captureStepStyles.progressBar} />
               </View>
             </View>
 
-            <Text style={captureStepStyles.stepTitle}>Step 1 of 3</Text>
-
-            <View style={captureStepStyles.progressRow}>
-              <View
-                style={[
-                  captureStepStyles.progressBar,
-                  captureStepStyles.progressActive,
-                ]}
-              />
-              <View style={captureStepStyles.progressBar} />
-              <View style={captureStepStyles.progressBar} />
-            </View>
-          </View>
-
+            <ScrollView
+              style={captureStepStyles.captureScroll}
+              contentContainerStyle={captureStepStyles.scrollContent}
+              showsVerticalScrollIndicator={false}
+              overScrollMode="never"
+            >
           <View style={captureStepStyles.contentPanel}>
             {!idPhotoPreview ? (
               <>
@@ -1862,6 +1865,7 @@ export default function RegisterVisitorScreen() {
             )}
           </View>
         </ScrollView>
+          </View>
       </SafeAreaView>
         <DataPrivacyNoticeModal
           visible={showPrivacyModal}
@@ -2576,6 +2580,10 @@ const captureStepStyles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#0648A8",
   },
+  layout: {
+    flex: 1,
+    backgroundColor: "#0648A8",
+  },
   captureScroll: {
     flex: 1,
     backgroundColor: "#F4F7FB",
@@ -2586,7 +2594,6 @@ const captureStepStyles = StyleSheet.create({
   header: {
     backgroundColor: "#0648A8",
     paddingHorizontal: 16,
-    paddingTop: 22,
     paddingBottom: 24,
     position: "relative",
     overflow: "hidden",
@@ -2680,7 +2687,7 @@ const captureStepStyles = StyleSheet.create({
   },
   contentPanel: {
     backgroundColor: "#F8FAFC",
-    marginTop: -14,
+    marginTop: 0,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     paddingHorizontal: 14,

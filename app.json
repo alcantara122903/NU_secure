@@ -32,7 +32,24 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.anonymous.Nu_secure"
+      "package": "com.anonymous.Nu_secure",
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": false,
+          "data": [
+            {
+              "scheme": "nusecure",
+              "host": "reset-password"
+            },
+            {
+              "scheme": "nusecure",
+              "pathPrefix": "/reset-password"
+            }
+          ],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
+      ]
     },
     "web": {
       "output": "single",

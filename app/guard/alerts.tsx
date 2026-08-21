@@ -15,7 +15,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 const PAGE_SIZE = 5;
@@ -45,6 +45,7 @@ type CompletedRow = {
 
 export default function MonitorVisitorActivitiesScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
 
   const [wrongDestinationVisitCount, setWrongDestinationVisitCount] = useState(0);
   const [readyToExitCount, setReadyToExitCount] = useState(0);
@@ -138,23 +139,25 @@ export default function MonitorVisitorActivitiesScreen() {
   }, [completedRows, completedPage]);
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={['bottom', 'left', 'right']}>
       <StatusBar barStyle="light-content" backgroundColor={BLUE} />
 
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backCircle} activeOpacity={0.8} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={28} color="#FFFFFF" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Monitor visitor activities and alerts</Text>
-        <View style={styles.headerSpacer} />
-      </View>
+      <View style={styles.layout}>
+        <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
+          <TouchableOpacity style={styles.backCircle} activeOpacity={0.8} onPress={() => router.back()}>
+            <Ionicons name="arrow-back" size={28} color="#FFFFFF" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Monitor visitor activities and alerts</Text>
+          <View style={styles.headerSpacer} />
+        </View>
 
-      <ScrollView
-        style={styles.container}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={BLUE} />}
-      >
+        <ScrollView
+          style={styles.container}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          overScrollMode="never"
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={BLUE} />}
+        >
         <View style={styles.summaryRow}>
           <View style={styles.summaryCard}>
             <View style={styles.summaryTopRow}>
@@ -241,6 +244,7 @@ export default function MonitorVisitorActivitiesScreen() {
           />
         ) : null}
       </ScrollView>
+      </View>
     </SafeAreaView>
   );
 }
@@ -344,28 +348,26 @@ function PaginationRow({
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#F4F7FB',
+    backgroundColor: BLUE,
+  },
+  layout: {
+    flex: 1,
+    backgroundColor: BLUE,
   },
   container: {
     flex: 1,
     backgroundColor: '#F4F7FB',
   },
   scrollContent: {
-    paddingBottom: 20,
+    paddingBottom: 24,
+    paddingTop: 16,
   },
   header: {
-    minHeight: 118,
     backgroundColor: BLUE,
     paddingHorizontal: 12,
-    paddingTop: 32,
-    paddingBottom: 12,
+    paddingBottom: 14,
     flexDirection: 'row',
     alignItems: 'center',
-    shadowColor: '#0B2E5E',
-    shadowOffset: { width: 0, height: 7 },
-    shadowOpacity: 0.18,
-    shadowRadius: 12,
-    elevation: 6,
   },
   backCircle: {
     width: 40,

@@ -9,7 +9,6 @@ import { LogOut } from 'lucide-react-native';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  FlatList,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -17,8 +16,10 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Path } from 'react-native-svg';
+
+const GUARD_BLUE = '#0648A8';
 
 type InsideType = 'all' | 'enrollee' | 'contractor' | 'normal';
 
@@ -89,6 +90,7 @@ function HeaderBackgroundPattern() {
 
 export default function DashboardScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { logout } = useAuth();
 
   const [guardName, setGuardName] = useState(
@@ -268,32 +270,38 @@ export default function DashboardScreen() {
   const timeParts = currentTime.split(' ');
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="light-content" backgroundColor="#003F96" />
+    <SafeAreaView style={styles.safeArea} edges={['bottom', 'left', 'right']}>
+      <StatusBar barStyle="light-content" backgroundColor={GUARD_BLUE} />
 
-      <View style={styles.header}>
-        <HeaderBackgroundPattern />
+      <View style={styles.layout}>
+        <View style={[styles.header, { paddingTop: insets.top + 18 }]}>
+          <HeaderBackgroundPattern />
 
-        <View style={styles.headerContent}>
-          <View>
-            <Text style={styles.headerTitle}>Guard Portal</Text>
+          <View style={styles.headerContent}>
+            <View>
+              <Text style={styles.headerTitle}>Guard Portal</Text>
 
-            <View style={styles.guardRow}>
-              <View style={styles.shieldIcon}>
-                <Text style={styles.shieldText}>✓</Text>
+              <View style={styles.guardRow}>
+                <View style={styles.shieldIcon}>
+                  <Text style={styles.shieldText}>✓</Text>
+                </View>
+                <Text style={styles.headerSubtitle}>{guardName}</Text>
               </View>
-              <Text style={styles.headerSubtitle}>{guardName}</Text>
             </View>
+
+            <TouchableOpacity activeOpacity={0.85} style={styles.logoutButton} onPress={handleLogout}>
+              <LogOut size={22} color="#FFFFFF" strokeWidth={2.6} />
+              <Text style={styles.logoutText}>Logout</Text>
+            </TouchableOpacity>
           </View>
-
-          <TouchableOpacity activeOpacity={0.85} style={styles.logoutButton} onPress={handleLogout}>
-            <LogOut size={22} color="#FFFFFF" strokeWidth={2.6} />
-            <Text style={styles.logoutText}>Logout</Text>
-          </TouchableOpacity>
         </View>
-      </View>
 
-      <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          style={styles.container}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          overScrollMode="never"
+        >
         <View style={styles.content}>
           <View style={styles.statsRow}>
             <View style={styles.statCard}>
@@ -426,16 +434,12 @@ export default function DashboardScreen() {
             </View>
           ) : null}
 
-          <FlatList
-            data={pagedInsideVisitors}
-            keyExtractor={(item) => item.id.toString()}
-            scrollEnabled={false}
-            contentContainerStyle={styles.visitorList}
-            renderItem={({ item }) => {
+          <View style={styles.visitorList}>
+            {pagedInsideVisitors.map((item) => {
               const isReadyToExit = item.status === 'Ready to Exit';
 
               return (
-                <View style={styles.visitorCard}>
+                <View key={item.id} style={styles.visitorCard}>
                   <View style={styles.avatarCircle}>
                     <MaterialIcons name="person" size={24} color="#0648A8" />
                   </View>
@@ -460,8 +464,8 @@ export default function DashboardScreen() {
                   </View>
                 </View>
               );
-            }}
-          />
+            })}
+          </View>
 
           {!isLoadingInside && filteredInsideVisitors.length > INSIDE_PAGE_SIZE ? (
             <View style={styles.paginationRow}>
@@ -490,6 +494,7 @@ export default function DashboardScreen() {
           ) : null}
         </View>
       </ScrollView>
+      </View>
     </SafeAreaView>
   );
 }
@@ -497,19 +502,22 @@ export default function DashboardScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#003F96',
+    backgroundColor: GUARD_BLUE,
+  },
+  layout: {
+    flex: 1,
+    backgroundColor: GUARD_BLUE,
   },
   container: {
     flex: 1,
     backgroundColor: '#F4F7FB',
   },
   scrollContent: {
-    paddingBottom: 20,
+    paddingBottom: 28,
   },
   header: {
-    backgroundColor: '#0648A8',
-    paddingTop: 34,
-    paddingBottom: 34,
+    backgroundColor: GUARD_BLUE,
+    paddingBottom: 28,
     overflow: 'hidden',
     position: 'relative',
   },
@@ -570,7 +578,7 @@ const styles = StyleSheet.create({
   },
   content: {
     paddingHorizontal: 14,
-    paddingTop: 16,
+    paddingTop: 18,
   },
   statsRow: {
     flexDirection: 'row',

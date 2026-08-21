@@ -210,6 +210,61 @@ class AuthService {
     }
   }
 
+  async forgotPassword(email: string): Promise<{ success: boolean; message: string }> {
+    try {
+      const data = await apiClient.post<{ success?: boolean; message?: string }>(
+        API_ENDPOINTS.FORGOT_PASSWORD,
+        { email: email.toLowerCase().trim() },
+        { auth: false },
+      );
+
+      return {
+        success: data?.success !== false,
+        message:
+          data?.message?.trim() ||
+          'If an account exists for this email, password reset instructions have been sent.',
+      };
+    } catch (error) {
+      throw this.handleError(error);
+    }
+  }
+
+  async resetPassword(input: {
+    email: string;
+    token: string;
+    password: string;
+    passwordConfirmation: string;
+  }): Promise<{ success: boolean; message: string }> {
+    try {
+      const data = await apiClient.post<{ success?: boolean; message?: string }>(
+        API_ENDPOINTS.RESET_PASSWORD,
+        {
+          email: input.email.toLowerCase().trim(),
+          token: input.token,
+          password: input.password,
+          password_confirmation: input.passwordConfirmation,
+        },
+        { auth: false },
+      );
+
+      if (data?.success === false) {
+        throw new AuthError(
+          'RESET_FAILED',
+          data.message?.trim() || 'Unable to reset password. Please try again.',
+        );
+      }
+
+      return {
+        success: true,
+        message:
+          data?.message?.trim() ||
+          'Your password has been reset successfully. You can now sign in using your new password.',
+      };
+    } catch (error) {
+      throw this.handleError(error);
+    }
+  }
+
   private async revokeTokenQuietly(token: string): Promise<void> {
     try {
       await apiClient.post(

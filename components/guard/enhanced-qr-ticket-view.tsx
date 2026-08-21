@@ -26,7 +26,7 @@ import {
     View,
 } from "react-native";
 import QRCode from "react-native-qrcode-svg";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Circle, Path } from "react-native-svg";
 
 export type EnhancedQrRouteOffice = {
@@ -143,6 +143,7 @@ export function EnhancedQrTicketView({
   isDownloading = false,
   isPrinting = false,
 }: EnhancedQrTicketViewProps) {
+  const insets = useSafeAreaInsets();
   const isEnrollee = visitorTypeLabel === 'Enrollee';
   const qrSize = useMemo(() => {
     const w = Dimensions.get('window').width;
@@ -155,31 +156,33 @@ export function EnhancedQrTicketView({
   const progressUrlHint = isEnrollee && /^https?:\/\//i.test(qrValue) ? qrValue : null;
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={["bottom", "left", "right"]}>
       <StatusBar barStyle="light-content" backgroundColor="#0648A8" />
 
-      <View style={styles.header}>
-        <HeaderPattern />
+      <View style={styles.layout}>
+        <View style={[styles.header, { paddingTop: insets.top + 14 }]}>
+          <HeaderPattern />
 
-        <TouchableOpacity
-          activeOpacity={0.85}
-          style={styles.backButton}
-          onPress={onBack}
+          <TouchableOpacity
+            activeOpacity={0.85}
+            style={styles.backButton}
+            onPress={onBack}
+          >
+            <ArrowLeft size={18} color="#FFFFFF" strokeWidth={2.4} />
+          </TouchableOpacity>
+
+          <Text style={styles.headerTitle}>QR Ticket</Text>
+
+          <View style={styles.headerSpacer} />
+        </View>
+
+        <ScrollView
+          style={styles.container}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          overScrollMode="never"
+          removeClippedSubviews={false}
         >
-          <ArrowLeft size={18} color="#FFFFFF" strokeWidth={2.4} />
-        </TouchableOpacity>
-
-        <Text style={styles.headerTitle}>QR Ticket</Text>
-
-        <View style={styles.headerSpacer} />
-      </View>
-
-      <ScrollView
-        style={styles.container}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-        removeClippedSubviews={false}
-      >
         <View style={styles.floatingSheet}>
           <View style={styles.successBanner}>
             <View style={styles.successIconCluster}>
@@ -423,6 +426,7 @@ export function EnhancedQrTicketView({
           </TouchableOpacity>
         </View>
       </ScrollView>
+      </View>
     </SafeAreaView>
   );
 }
@@ -432,12 +436,15 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#0648A8",
   },
+  layout: {
+    flex: 1,
+    backgroundColor: "#0648A8",
+  },
   container: {
     flex: 1,
     backgroundColor: "#F8FAFC",
-    marginTop: -34,
-    borderTopLeftRadius: 34,
-    borderTopRightRadius: 34,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
   },
   scrollContent: {
     flexGrow: 1,
@@ -445,13 +452,12 @@ const styles = StyleSheet.create({
     paddingBottom: 28,
   },
   header: {
-    height: 132,
     backgroundColor: "#0648A8",
     flexDirection: "row",
     alignItems: "flex-start",
     justifyContent: "space-between",
     paddingHorizontal: 20,
-    paddingTop: 30,
+    paddingBottom: 22,
     position: "relative",
     overflow: "hidden",
   },

@@ -5,7 +5,6 @@ import { useRouter } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Platform,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -14,7 +13,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { authSessionService } from "@/services/auth-session";
 import { supabase } from "@/services/database";
@@ -28,6 +27,7 @@ const TEXT_MUTED = "#6B7280";
 
 export default function OfficeCheckInScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [permission, requestPermission] = useCameraPermissions();
   const [phase, setPhase] = useState<Phase>("loading_office");
   const [officeData, setOfficeData] = useState<{ office_id: number; office_name: string } | null>(null);
@@ -181,10 +181,10 @@ export default function OfficeCheckInScreen() {
   const officeName = officeData?.office_name || "Admissions Office";
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={["bottom", "left", "right"]}>
       <StatusBar barStyle="light-content" backgroundColor={BLUE} />
-      <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        <View style={styles.header}>
+      <View style={styles.layout}>
+        <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
           <TouchableOpacity style={styles.headerBackButton} activeOpacity={0.7} onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={28} color="#FFFFFF" />
           </TouchableOpacity>
@@ -194,6 +194,12 @@ export default function OfficeCheckInScreen() {
           <View style={styles.headerCircleTwo} />
         </View>
 
+        <ScrollView
+          style={styles.container}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          overScrollMode="never"
+        >
         <View style={styles.contentWrapper}>
           <TouchableOpacity style={styles.officeCard} activeOpacity={0.85}>
             <View style={styles.officeIconBox}>
@@ -303,22 +309,24 @@ export default function OfficeCheckInScreen() {
             </View>
           )}
         </View>
-      </ScrollView>
+        </ScrollView>
+      </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: "#F4F7FB" },
+  safeArea: { flex: 1, backgroundColor: BLUE },
+  layout: { flex: 1, backgroundColor: BLUE },
   container: { flex: 1, backgroundColor: "#F4F7FB" },
   scrollContent: { paddingBottom: 24 },
   header: {
-    height: 104,
+    minHeight: 64,
     backgroundColor: BLUE,
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 14,
-    paddingTop: Platform.OS === "android" ? (StatusBar.currentHeight ?? 0) / 2 : 0,
+    paddingBottom: 14,
     position: "relative",
     overflow: "hidden",
   },
@@ -327,7 +335,7 @@ const styles = StyleSheet.create({
   headerSpacer: { width: 36, zIndex: 2 },
   headerCircleOne: { position: "absolute", width: 160, height: 160, borderRadius: 80, backgroundColor: "rgba(255,255,255,0.06)", right: -55, top: -65 },
   headerCircleTwo: { position: "absolute", width: 120, height: 120, borderRadius: 60, backgroundColor: "rgba(255,255,255,0.04)", right: 20, top: -45 },
-  contentWrapper: { backgroundColor: "#F4F7FB", marginTop: -2, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingTop: 12 },
+  contentWrapper: { backgroundColor: "#F4F7FB", borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingTop: 12 },
   officeCard: {
     marginHorizontal: 14, backgroundColor: "#FFFFFF", borderRadius: 14, paddingVertical: 12, paddingHorizontal: 12,
     flexDirection: "row", alignItems: "center", borderWidth: 1, borderColor: "#E1E7F0",

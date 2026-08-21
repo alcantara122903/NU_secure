@@ -8,7 +8,6 @@ import React, { useCallback, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Platform,
   RefreshControl,
   ScrollView,
   StatusBar,
@@ -17,7 +16,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "@/contexts/auth-context";
 import {
   loadOfficePortalStats,
@@ -26,6 +25,7 @@ import {
 
 export default function AdmissionsDashboardScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { logout } = useAuth();
   const [stats, setStats] = useState<OfficePortalStats | null>(null);
   const [loadingStats, setLoadingStats] = useState(true);
@@ -82,23 +82,11 @@ export default function AdmissionsDashboardScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={["bottom", "left", "right"]}>
       <StatusBar barStyle="light-content" backgroundColor="#0646A0" />
 
-      <ScrollView
-        style={styles.container}
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={() => void refreshStats({ soft: true })}
-            tintColor="#064AA5"
-            colors={["#064AA5"]}
-          />
-        }
-      >
-        <View style={styles.header}>
+      <View style={styles.layout}>
+        <View style={[styles.header, { paddingTop: insets.top + 18 }]}>
           <View style={styles.headerContent}>
             <View style={styles.officeIconBox}>
               <MaterialCommunityIcons name="office-building" size={34} color="#FFD21E" />
@@ -120,6 +108,21 @@ export default function AdmissionsDashboardScreen() {
           </View>
         </View>
 
+        <ScrollView
+          style={styles.container}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.scrollContent}
+          overScrollMode="never"
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => void refreshStats({ soft: true })}
+              tintColor="#064AA5"
+              colors={["#064AA5"]}
+              progressBackgroundColor="#FFFFFF"
+            />
+          }
+        >
         <View style={[styles.card, styles.profileCard]}>
           <View style={styles.avatarCircle}>
             <Ionicons name="person-outline" size={38} color="#064AA5" />
@@ -221,7 +224,8 @@ export default function AdmissionsDashboardScreen() {
             <FontAwesome5 name="user-friends" size={36} color="#D7E4FF" />
           </View>
         </View>
-      </ScrollView>
+        </ScrollView>
+      </View>
     </SafeAreaView>
   );
 }
@@ -240,7 +244,12 @@ function TipItem({ text }: { text: string }) {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: "#F4F7FB",
+    backgroundColor: "#0646A0",
+  },
+
+  layout: {
+    flex: 1,
+    backgroundColor: "#0646A0",
   },
 
   container: {
@@ -254,11 +263,8 @@ const styles = StyleSheet.create({
 
   header: {
     backgroundColor: "#0646A0",
-    paddingTop: Platform.OS === "android" ? (StatusBar.currentHeight ?? 0) + 18 : 26,
-    paddingBottom: 48,
+    paddingBottom: 40,
     paddingHorizontal: 16,
-    borderBottomLeftRadius: 0,
-    borderBottomRightRadius: 0,
   },
 
   headerContent: {
@@ -325,7 +331,7 @@ const styles = StyleSheet.create({
   },
 
   profileCard: {
-    marginTop: -32,
+    marginTop: 16,
     padding: 14,
     flexDirection: "row",
     alignItems: "center",

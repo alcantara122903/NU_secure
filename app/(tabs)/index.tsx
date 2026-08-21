@@ -84,8 +84,8 @@ export default function LoginScreen() {
 
   const isLoading = status === "loading";
   const handleForgotPassword = useCallback(() => {
-    Alert.alert("Forgot Password", "Feature coming soon");
-  }, []);
+    router.push("/forgot-password");
+  }, [router]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
