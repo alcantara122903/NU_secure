@@ -13,7 +13,7 @@ This document maps common threats to Nu Secure controls. Severity reflects impac
 | T5 | PII embedded in QR code | Medium | Token-only payload design | **Implemented** (by design) |
 | T6 | Public progress page mutates database | Medium | Removed sync writes on public load | **Implemented** |
 | T7 | Session token theft from device | Medium | expo-secure-store | **Implemented** (native) |
-| T8 | OCR API key extracted from app bundle | High | Move OCR to Laravel proxy | Planned — see LIMITATIONS.md |
+| T8 | OCR API key extracted from app bundle | High | Supabase Edge Function `ocr-parse` | **Implemented** — deploy + remove mobile key |
 | T9 | Role bypass via tampered local profile | High | RLS by role; periodic `/api/user` verify | Partial |
 | T10 | Secrets in application logs | Medium | Removed QR token logs; `__DEV__` gating | **Implemented** |
 | T11 | Edge function trusts client `scannedByUserId` | Critical | Verify Laravel token server-side | Planned |
@@ -115,7 +115,7 @@ This document maps common threats to Nu Secure controls. Severity reflects impac
 ## Items documented but not fully implemented (see LIMITATIONS.md)
 
 - T1/T2/T9: Per-user Supabase JWT from Laravel + role-based RLS
-- T8: OCR proxy on Laravel
+- T8: OCR edge function deployed; remove mobile key from production builds
 - T11: Edge function caller authentication
 - T12: Private storage bucket with signed URLs
 

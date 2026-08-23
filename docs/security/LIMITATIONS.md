@@ -30,13 +30,11 @@ The app authenticates with **Laravel Sanctum** but the Supabase JS client is cre
 
 ### 3. OCR API key in mobile bundle
 
-`EXPO_PUBLIC_OCR_API_KEY` is embedded in the Expo build. Anyone can extract it from the APK/IPA.
+**Update:** Mobile now prefers Supabase Edge Function `ocr-parse` (`services/ocr/ocr-client.ts`). Set `OCR_SPACE_API_KEY` in Supabase secrets and deploy the function. Remove `EXPO_PUBLIC_OCR_API_KEY` from `.env.local` for production builds.
 
-**Implication:** OCR quota/billing abuse.
+**Remaining gap:** Direct OCR fallback still works if `EXPO_PUBLIC_OCR_API_KEY` is set (local dev). Edge function should be deployed before defense demo.
 
-**Future work:** `POST /api/ocr/parse` on Laravel with Sanctum auth; rotate mobile key after migration.
-
-**Note:** Laravel web uses a separate `OCR_SPACE_API_KEY` server-side — unaffected by mobile changes.
+**Setup:** See `docs/security/OCR_EDGE_FUNCTION.md`.
 
 ---
 

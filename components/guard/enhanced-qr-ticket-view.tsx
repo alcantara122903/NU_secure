@@ -16,8 +16,10 @@ import {
 import React, { useMemo } from "react";
 import {
     ActivityIndicator,
+    Alert,
     Dimensions,
     Image,
+    Linking,
     ScrollView,
     StatusBar,
     StyleSheet,
@@ -155,6 +157,25 @@ export function EnhancedQrTicketView({
 
   const progressUrlHint = isEnrollee && /^https?:\/\//i.test(qrValue) ? qrValue : null;
 
+  const openProgressUrl = async (url: string) => {
+    try {
+      const canOpen = await Linking.canOpenURL(url);
+      if (!canOpen) {
+        Alert.alert(
+          "Cannot open link",
+          "Your device could not open the progress page. Scan the QR code or copy the link manually.",
+        );
+        return;
+      }
+      await Linking.openURL(url);
+    } catch {
+      Alert.alert(
+        "Cannot open link",
+        "Something went wrong opening the progress page. Please scan the QR code instead.",
+      );
+    }
+  };
+
   return (
     <SafeAreaView style={styles.safeArea} edges={["bottom", "left", "right"]}>
       <StatusBar barStyle="light-content" backgroundColor="#0648A8" />
@@ -277,9 +298,25 @@ export function EnhancedQrTicketView({
 
                 <Text style={styles.qrFooter}>at each stop on your route.</Text>
                 {progressUrlHint ? (
-                  <Text style={styles.qrUrlHint} numberOfLines={3}>
-                    {progressUrlHint}
-                  </Text>
+                  <View style={styles.progressLinkBlock}>
+                    <Text style={styles.progressLinkDescription}>
+                      View your enrollment progress online (which offices you’ve completed
+                      and what’s next):
+                    </Text>
+                    <TouchableOpacity
+                      activeOpacity={0.75}
+                      accessibilityRole="link"
+                      accessibilityLabel="Open enrollee progress page"
+                      accessibilityHint="Opens your visit route progress in the browser"
+                      onPress={() => openProgressUrl(progressUrlHint)}
+                      style={styles.progressLinkButton}
+                    >
+                      <Text style={styles.qrUrlLink} numberOfLines={4}>
+                        {progressUrlHint}
+                      </Text>
+                      <Text style={styles.progressLinkCta}>Tap to open progress page</Text>
+                    </TouchableOpacity>
+                  </View>
                 ) : null}
               </View>
             </View>
@@ -718,13 +755,41 @@ const styles = StyleSheet.create({
     marginTop: 6,
     textAlign: "center",
   },
-  qrUrlHint: {
+  progressLinkBlock: {
+    marginTop: 6,
+    width: "100%",
+    paddingHorizontal: 2,
+  },
+  progressLinkDescription: {
+    color: "#6B7280",
+    fontSize: 9,
+    fontWeight: "500",
+    lineHeight: 13,
+    textAlign: "center",
+    marginBottom: 4,
+  },
+  progressLinkButton: {
+    alignItems: "center",
+    paddingVertical: 6,
+    paddingHorizontal: 4,
+    borderRadius: 8,
+    backgroundColor: "#EFF6FF",
+    borderWidth: 1,
+    borderColor: "#BED4F6",
+  },
+  qrUrlLink: {
     color: "#0648A8",
     fontSize: 8,
-    fontWeight: "600",
+    fontWeight: "700",
+    textAlign: "center",
+    textDecorationLine: "underline",
+  },
+  progressLinkCta: {
+    color: "#0648A8",
+    fontSize: 9,
+    fontWeight: "700",
     marginTop: 4,
     textAlign: "center",
-    paddingHorizontal: 2,
   },
   bottomInfoBox: {
     borderTopWidth: 1,
