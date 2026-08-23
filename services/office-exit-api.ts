@@ -488,12 +488,12 @@ export const officeExitApiService = {
   async processExitScan(payload: ExitScanRequest): Promise<ExitScanResult> {
     const method = 'POST';
 
-    console.log('\n📡 === OFFICE EXIT SCAN REQUEST ===\n');
-    console.log(`   Method: ${method}`);
-    console.log(`   Function: ${OFFICE_EXIT_SCAN_FUNCTION}`);
-    console.log(`   Body: ${JSON.stringify(payload, null, 2)}`);
-    console.log(`   Raw QR Value: ${payload.rawQrValue}`);
-    console.log(`   Parsed QR Value: ${payload.qrToken}`);
+    if (__DEV__) {
+      console.log('\n📡 === OFFICE EXIT SCAN REQUEST ===\n');
+      console.log(`   Method: ${method}`);
+      console.log(`   Function: ${OFFICE_EXIT_SCAN_FUNCTION}`);
+      console.log(`   Scanner context: ${payload.scannerContext ?? 'office'}`);
+    }
 
     if (payload.scannerContext === 'guard') {
       return resolveScanByDatabase(payload);

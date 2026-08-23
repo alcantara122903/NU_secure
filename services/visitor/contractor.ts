@@ -3,6 +3,7 @@
  * Handles contractor registration with ID verification and QR ticket generation
  */
 
+import { generateQRToken } from '@/lib/generate-qr-token';
 import { toSupabaseTimestampPh } from '@/lib/supabase-timestamp-ph';
 import type { VisitorRegistrationData } from '@/types/visitor';
 import { addressService, type AddressData } from '../address';
@@ -13,16 +14,6 @@ import {
   resolveDefaultEntryExitStatusId,
   resolveLoggedInGuardUserId,
 } from './resolve-guard-user';
-
-/**
- * Generate a QR token compatible with web + mobile exit scan.
- * Always use `QR-` prefix — web manual entry often rejects tokens without it.
- */
-function generateQRToken(): string {
-  const timestamp = Date.now().toString(36);
-  const random = Math.random().toString(36).substring(2, 9);
-  return `QR-${timestamp}-${random}`.toUpperCase();
-}
 
 /** Generate ID format: YYYY-XXXXXX */
 function generateYearSixCode(): string {
@@ -214,7 +205,7 @@ export const contractorService = {
 
       // STEP 3: Create visit record (contractor row needs visit_id)
       console.log('\n📝 STEP 3: Creating visit record...');
-      const qrToken = generateQRToken();
+      const qrToken = await generateQRToken();
 
       let visitData: any = null;
       let visitError: any = null;
@@ -250,7 +241,7 @@ export const contractorService = {
         console.log(`   ⚠️ Attempt ${attempt} failed: ${visitError.message}`);
 
         if (attempt === 3) {
-          console.log('   📝 Trying to fetch existing visit by qr_token...');
+          console.log('   📝 Trying to fetch existing visit after insert conflict...');
           const { data: existing } = await supabase
             .from('visit')
             .select('visit_id')
@@ -281,7 +272,7 @@ export const contractorService = {
         return null;
       }
 
-      console.log(`✅ Visit created: visit_id=${visitId}, qr_token=${qrToken}`);
+      console.log(`✅ Visit created: visit_id=${visitId}`);
 
       // STEP 4: Contractor table — contractor_id, contact_person, visit_id only
       console.log('\n📝 STEP 4: Creating contractor record...');

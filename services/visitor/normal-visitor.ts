@@ -3,6 +3,7 @@
  * Handles QR ticket generation, database operations, and office scanning validation
  */
 
+import { generateQRToken } from '@/lib/generate-qr-token';
 import { toSupabaseTimestampPh } from '@/lib/supabase-timestamp-ph';
 import type { VisitorRegistrationData } from '@/types/visitor';
 import { resolvePendingExpectationStatusId } from '@/services/office-flow/db-status-lookups';
@@ -15,16 +16,6 @@ import {
   resolveDefaultEntryExitStatusId,
   resolveLoggedInGuardUserId,
 } from './resolve-guard-user';
-
-/**
- * Generate a QR token compatible with web + mobile exit scan.
- * Always use `QR-` prefix — web manual entry often rejects tokens without it.
- */
-function generateQRToken(): string {
-  const timestamp = Date.now().toString(36);
-  const random = Math.random().toString(36).substring(2, 9);
-  return `QR-${timestamp}-${random}`.toUpperCase();
-}
 
 /** Generate ID format: YYYY-XXXXXX */
 function generateYearSixCode(): string {
@@ -215,7 +206,7 @@ export const normalVisitorService = {
 
       // STEP 3: Create visit record
       console.log('\n📝 STEP 3: Creating visit record...');
-      const qrToken = generateQRToken();
+      const qrToken = await generateQRToken();
       const primaryOfficeId = usingOthersDestination
         ? null
         : visitorData.selectedOfficeIds[0];
@@ -256,7 +247,7 @@ export const normalVisitorService = {
 
         // On last attempt, try to fetch existing visit by qr_token
         if (attempt === 3) {
-          console.log('   📝 Trying to fetch existing visit by qr_token...');
+          console.log('   📝 Trying to fetch existing visit after insert conflict...');
           const { data: existing } = await supabase
             .from('visit')
             .select('visit_id')
@@ -288,7 +279,7 @@ export const normalVisitorService = {
         return null;
       }
 
-      console.log(`✅ Visit created: visit_id=${visitId}, qr_token=${qrToken}`);
+      console.log(`✅ Visit created: visit_id=${visitId}`);
 
       // STEP 4: Create office_expectation records (skipped for free-text "Others")
       if (usingOthersDestination) {

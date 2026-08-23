@@ -1,10 +1,10 @@
 /**
  * Load enrollee visit progress by qr_token for the public tracker page.
+ * Read-only: no database writes (expectation sync runs only in authenticated guard flows).
  */
 
 import { buildEnrolleeProgressUrl } from '@/lib/enrollee-progress-url';
 import { supabase } from '@/services/database/supabase';
-import { enrolleeService } from '@/services/visitor/enrollee';
 
 export type EnrolleeRouteStepStatus = 'done' | 'current' | 'pending';
 
@@ -76,38 +76,6 @@ export async function loadEnrolleeProgressByQrToken(
   let steps: EnrolleeRouteStep[] = [];
 
   if (enrollee?.enrollee_id) {
-    // Repair when expectation count is wrong (too few OR duplicated 1,1,2,2…).
-    try {
-      const [{ count: progressCount }, { data: expectationRows }] = await Promise.all([
-        supabase
-          .from('enrollee_progress')
-          .select('progress_id', { count: 'exact', head: true })
-          .eq('enrollee_id', enrollee.enrollee_id),
-        supabase
-          .from('office_expectation')
-          .select('expectation_id, expected_order')
-          .eq('visit_id', visit.visit_id),
-      ]);
-      const expectationCount = expectationRows?.length ?? 0;
-      const orderSet = new Set(
-        (expectationRows || []).map((e) => Number(e.expected_order)),
-      );
-      const hasDuplicateOrders =
-        expectationCount > 0 && orderSet.size < expectationCount;
-      if (
-        typeof progressCount === 'number' &&
-        progressCount > 0 &&
-        (expectationCount !== progressCount || hasDuplicateOrders)
-      ) {
-        await enrolleeService.syncOfficeExpectationsForEnrolleeVisit(
-          Number(visit.visit_id),
-          Number(enrollee.enrollee_id),
-        );
-      }
-    } catch (syncErr) {
-      console.warn('[EnrolleeProgress] expectation sync skipped:', syncErr);
-    }
-
     const { data: progressRows } = await supabase
       .from('enrollee_progress')
       .select(

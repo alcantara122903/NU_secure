@@ -309,17 +309,6 @@ const lookupVisitAndVisitor = async (
       .limit(1)
       .maybeSingle();
 
-    if (!visitResult.data && !visitResult.error) {
-      visitResult = await supabase
-        .from('visit')
-        .select(VISIT_EXIT_SELECT)
-        .ilike('qr_token', candidate.value)
-        .is('exit_time', null)
-        .order('entry_time', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-    }
-
     if (visitResult.data && !visitResult.error) {
       const visitorResult = await getVisitor(supabase, visitResult.data.visitor_id);
       return {

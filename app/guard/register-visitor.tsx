@@ -6,6 +6,7 @@ import { Colors } from "@/constants/colors";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { beginIdCapture } from "./id-auto-capture";
 import { buildQRTicketPayloadV1, buildVisitorScanQrJson } from "@/lib/qr-ticket-payload";
+import { generateQRToken } from "@/lib/generate-qr-token";
 import { cameraService, FACE_PHOTO_QUALITY, ID_PHOTO_QUALITY } from "@/services/camera";
 import { supabase } from "@/services/database";
 import { officeService } from "@/services/office";
@@ -1115,7 +1116,7 @@ export default function RegisterVisitorScreen() {
       // ID pass number is manual; control number is auto-generated.
       const pass = passNumber.trim();
       const control = controlNumber || generateYearSixCode();
-      const qrToken = `QR-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      const qrToken = await generateQRToken();
 
       const facePhotoUri =
         photoOpts?.facePhotoUri !== undefined
@@ -1271,12 +1272,13 @@ export default function RegisterVisitorScreen() {
         },
       });
 
-      console.log("✅ Enrollee created with office-route QR");
-      console.log("Enrollee ID:", enrolleeResult.enrollee_id);
-      console.log("QR Token (for office scanning):", qrToken);
-      console.log("Pass Number:", pass);
-      console.log("Control Number:", control);
-      console.log("Visitor ID:", enrolleeResult.visitor_id);
+      if (__DEV__) {
+        console.log("✅ Enrollee created with office-route QR");
+        console.log("Enrollee ID:", enrolleeResult.enrollee_id);
+        console.log("Pass Number:", pass);
+        console.log("Control Number:", control);
+        console.log("Visitor ID:", enrolleeResult.visitor_id);
+      }
       setIsCreatingEnrollee(false);
     } catch (error) {
       console.error("❌ Error creating enrollee:", error);
