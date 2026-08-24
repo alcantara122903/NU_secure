@@ -13,7 +13,7 @@ import { validateAndPrepareImageForOCR } from '@/utils/image-compression';
 
 const OCR_PARSE_FUNCTION = 'ocr-parse';
 
-const OCR_VERBOSE_LOGS = false;
+const OCR_VERBOSE_LOGS = __DEV__;
 
 const logInfo = (...args: unknown[]) => {
   if (OCR_VERBOSE_LOGS) console.log(...args);

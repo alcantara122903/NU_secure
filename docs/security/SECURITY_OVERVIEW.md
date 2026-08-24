@@ -88,6 +88,7 @@ Recent changes documented in `THREATS_AND_MITIGATIONS.md`:
 
 ## Related documents
 
+- [STATIC_SECURITY_FINDINGS.md](./STATIC_SECURITY_FINDINGS.md) — source static review (MobSF-style)
 - [THREATS_AND_MITIGATIONS.md](./THREATS_AND_MITIGATIONS.md)
 - [LIMITATIONS.md](./LIMITATIONS.md)
 - [TEST_RESULTS.md](./TEST_RESULTS.md)

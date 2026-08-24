@@ -13,6 +13,11 @@ import { supabase } from '../database/supabase';
 export const VISITOR_FILES_BUCKET =
   process.env.EXPO_PUBLIC_STORAGE_BUCKET?.trim() || 'visitor-file';
 
+/** Verbose upload traces only in development builds. */
+const logUpload = (...args: unknown[]) => {
+  if (__DEV__) console.log(...args);
+};
+
 /**
  * Upload result interface
  */
@@ -58,8 +63,8 @@ export async function uploadImage(
   imageUri: string
 ): Promise<UploadResult> {
   try {
-    console.log(`\n📤 Starting upload to: ${filePath}`);
-    console.log(`   URI preview: ${imageUri?.substring(0, 80)}...`);
+    logUpload(`\n📤 Starting upload to: ${filePath}`);
+    logUpload(`   URI preview: ${imageUri?.substring(0, 80)}...`);
     
     // Validate inputs
     if (!filePath || !imageUri) {
@@ -70,7 +75,7 @@ export async function uploadImage(
     }
 
     // Extract base64 data
-    console.log('🔄 Extracting base64 data...');
+    logUpload('🔄 Extracting base64 data...');
     let base64Data: string;
     
     if (imageUri.startsWith('data:image')) {
@@ -83,13 +88,13 @@ export async function uploadImage(
         };
       }
       base64Data = parts[1];
-      console.log(`✓ Base64 extracted: ${(base64Data.length / 1024).toFixed(2)} KB`);
+      logUpload(`✓ Base64 extracted: ${(base64Data.length / 1024).toFixed(2)} KB`);
     } else if (imageUri.startsWith('file://') || imageUri.startsWith('content://')) {
-      console.log('📂 Reading file from URI...');
+      logUpload('📂 Reading file from URI...');
       try {
         const file = new File(imageUri);
         base64Data = await file.base64();
-        console.log(`✓ File read: ${(base64Data.length / 1024).toFixed(2)} KB`);
+        logUpload(`✓ File read: ${(base64Data.length / 1024).toFixed(2)} KB`);
       } catch (fileError: any) {
         console.error('❌ File read failed:', fileError.message);
         return {
@@ -106,7 +111,7 @@ export async function uploadImage(
     }
 
     // Decode base64 to binary string, then to bytes
-    console.log('🔄 Converting to upload-ready format...');
+    logUpload('🔄 Converting to upload-ready format...');
     let uploadData: any;
     
     try {
@@ -117,18 +122,18 @@ export async function uploadImage(
         bytes[i] = binaryString.charCodeAt(i);
       }
       uploadData = bytes.buffer; // Use ArrayBuffer instead of Uint8Array
-      console.log(`✓ Converted to ArrayBuffer: ${(uploadData.byteLength / 1024).toFixed(2)} KB`);
+      logUpload(`✓ Converted to ArrayBuffer: ${(uploadData.byteLength / 1024).toFixed(2)} KB`);
     } catch (conversionError: any) {
       console.error('❌ Conversion error:', conversionError.message);
-      console.warn('⚠️ Falling back to base64 string upload');
+      if (__DEV__) console.warn('⚠️ Falling back to base64 string upload');
       uploadData = base64Data;
-      console.log(`✓ Using base64 string: ${(base64Data.length / 1024).toFixed(2)} KB`);
+      logUpload(`✓ Using base64 string: ${(base64Data.length / 1024).toFixed(2)} KB`);
     }
 
-    console.log('📡 Uploading to Supabase...');
-    console.log(`   Bucket: ${VISITOR_FILES_BUCKET}`);
-    console.log(`   Path: ${filePath}`);
-    console.log(`   Data type: ${uploadData instanceof ArrayBuffer ? 'ArrayBuffer' : typeof uploadData}`);
+    logUpload('📡 Uploading to Supabase...');
+    logUpload(`   Bucket: ${VISITOR_FILES_BUCKET}`);
+    logUpload(`   Path: ${filePath}`);
+    logUpload(`   Data type: ${uploadData instanceof ArrayBuffer ? 'ArrayBuffer' : typeof uploadData}`);
 
     try {
       const { data, error } = await supabase.storage
@@ -143,7 +148,7 @@ export async function uploadImage(
         console.error('❌ Supabase upload error:');
         console.error('   Code:', (error as any).statusCode);
         console.error('   Message:', error.message);
-        console.error('   Full error:', JSON.stringify(error));
+        if (__DEV__) console.error('   Full error:', JSON.stringify(error));
         const notFound =
           /bucket not found/i.test(error.message) ||
           String((error as any).statusCode) === '404';
@@ -163,8 +168,8 @@ export async function uploadImage(
         };
       }
 
-      console.log('✅ Upload successful');
-      console.log('   Response path:', data.path);
+      logUpload('✅ Upload successful');
+      logUpload('   Response path:', data.path);
       
       // Construct public URL
       const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
@@ -179,7 +184,7 @@ export async function uploadImage(
       // Use relative path format (bucket/path) instead of full URL
       // This is more portable and matches friend's working format
       const relativeUrl = `${VISITOR_FILES_BUCKET}/${filePath}`;
-      console.log(`✓ Public URL generated: ${relativeUrl}`);
+      logUpload(`✓ Public URL generated: ${relativeUrl}`);
 
       return {
         success: true,
@@ -190,7 +195,7 @@ export async function uploadImage(
       console.error('❌ Upload exception caught:');
       console.error('   Type:', uploadError.constructor.name);
       console.error('   Message:', uploadError.message);
-      console.error('   Full error:', JSON.stringify(uploadError));
+      if (__DEV__) console.error('   Full error:', JSON.stringify(uploadError));
       return {
         success: false,
         error: uploadError.message || 'Unknown upload error',
@@ -212,7 +217,7 @@ export async function uploadImage(
  * @returns Upload result with file path and public URL
  */
 export async function uploadFacePhoto(imageUri: string): Promise<UploadResult> {
-  console.log('\n👤 Uploading face photo...');
+  logUpload('\n👤 Uploading face photo...');
   
   const filename = generatePhotoFilename('jpg');
   const filePath = `Face_ID_Picture/face_${filename}`;
@@ -227,7 +232,7 @@ export async function uploadFacePhoto(imageUri: string): Promise<UploadResult> {
  * @returns Upload result with file path and public URL
  */
 export async function uploadIdPhoto(imageUri: string): Promise<UploadResult> {
-  console.log('\n🆔 Uploading ID photo...');
+  logUpload('\n🆔 Uploading ID photo...');
   
   const filename = generatePhotoFilename('jpg');
   const filePath = `Face_ID_Picture/id_${filename}`;
@@ -242,7 +247,7 @@ export async function uploadIdPhoto(imageUri: string): Promise<UploadResult> {
  */
 export async function deleteStorageFile(filePath: string): Promise<UploadResult> {
   try {
-    console.log(`🗑️  Deleting: ${filePath}`);
+    logUpload(`🗑️  Deleting: ${filePath}`);
     
     const { error } = await supabase.storage
       .from(VISITOR_FILES_BUCKET)
@@ -256,7 +261,7 @@ export async function deleteStorageFile(filePath: string): Promise<UploadResult>
       };
     }
 
-    console.log(`✅ File deleted`);
+    logUpload(`✅ File deleted`);
     return { success: true };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
@@ -346,7 +351,7 @@ export async function resolveVisitorPhotoDisplayUri(
       }
     }
   } catch (err) {
-    console.warn('[resolveVisitorPhotoDisplayUri] signed URL failed:', err);
+    if (__DEV__) console.warn('[resolveVisitorPhotoDisplayUri] signed URL failed:', err);
   }
 
   const { data: publicData } = supabase.storage.from(VISITOR_FILES_BUCKET).getPublicUrl(storagePath);

@@ -96,7 +96,7 @@ Fields such as `guard_user_id`, `scanned_by_user_id`, and timestamps are set by 
 | Supabase Auth migration | User requested custom auth remain |
 | Secret rotation in repo | Operational task for deployer |
 | Private storage migration | Requires Laravel admin changes |
-| Penetration test report | Optional enhancement |
+| Full MobSF IPA binary scan | Needs Mac + IPA (or EAS); see STATIC_SECURITY_FINDINGS.md for source review |
 
 ---
 

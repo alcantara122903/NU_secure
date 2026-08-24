@@ -239,10 +239,12 @@ export function detectIdType(rawOcrText: string): IDTypeDetectionResult {
     confidence = 'low';
   }
 
-  console.log(`\n📋 ID TYPE DETECTION`);
-  console.log(`   Detected: ${detectedType.toUpperCase()}`);
-  console.log(`   Confidence: ${confidence}`);
-  console.log(`   Keywords: ${detectedKeywords.join(', ') || 'none specific'}`);
+  if (__DEV__) {
+    console.log(`\n📋 ID TYPE DETECTION`);
+    console.log(`   Detected: ${detectedType.toUpperCase()}`);
+    console.log(`   Confidence: ${confidence}`);
+    console.log(`   Keywords: ${detectedKeywords.join(', ') || 'none specific'}`);
+  }
 
   return {
     type: detectedType,

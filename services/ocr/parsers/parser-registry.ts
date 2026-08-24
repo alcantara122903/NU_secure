@@ -11,7 +11,7 @@ import { BARANGAY_KEYWORDS, BLACKLIST_KEYWORDS, KNOWN_CITIES, KNOWN_PROVINCES, M
 import type { ParsedIDData } from '@/types/ocr';
 import { detectIdType } from '../id-detector';
 
-const OCR_PARSER_VERBOSE_LOGS = false;
+const OCR_PARSER_VERBOSE_LOGS = __DEV__;
 
 /**
  * Province to Region mapping for Philippines

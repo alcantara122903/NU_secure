@@ -7,7 +7,7 @@
 import { File, Paths } from 'expo-file-system';
 import * as ImageManipulator from 'expo-image-manipulator';
 
-const IMAGE_PREP_VERBOSE_LOGS = false;
+const IMAGE_PREP_VERBOSE_LOGS = __DEV__;
 
 /** Max width for OCR — readable text, much smaller upload */
 export const OCR_MAX_WIDTH = 1200;
