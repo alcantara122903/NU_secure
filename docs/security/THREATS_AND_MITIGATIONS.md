@@ -16,7 +16,7 @@ This document maps common threats to Nu Secure controls. Severity reflects impac
 | T8 | OCR API key extracted from app bundle | High | Supabase Edge Function `ocr-parse` | **Implemented** — deploy + remove mobile key |
 | T9 | Role bypass via tampered local profile | High | RLS by role; periodic `/api/user` verify | Partial |
 | T10 | Secrets in application logs | Medium | Removed QR token logs; `__DEV__` gating (upload/OCR/exit-scan) | **Implemented** |
-| T11 | Edge function trusts client `scannedByUserId` | Critical | Verify Laravel token server-side | Planned |
+| T11 | Edge function trusts client `scannedByUserId` | Critical | Verify Laravel Sanctum via `x-sanctum-token`; server-derived user id | **Implemented** (redeploy `office-exit-scan`) |
 | T12 | Visitor photos publicly accessible | Medium | Private bucket + signed URLs | Planned |
 
 ---

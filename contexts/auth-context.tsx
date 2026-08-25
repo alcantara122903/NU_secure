@@ -5,7 +5,6 @@ import {
   mapLaravelUser,
 } from '@/services/authentication';
 import { authSessionService } from '@/services/auth-session';
-import { ApiClientError } from '@/services/api';
 import { secureAuthStorage } from '@/services/storage/secure-auth';
 import type { DashboardRoute, User, UserProfile } from '@/types/auth';
 import {
@@ -112,33 +111,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
           const mapped = mapLaravelUser(verified);
           applySession(stored.token, mapped.user, mapped.userProfile);
           await secureAuthStorage.saveSession(stored.token, mapped.userProfile);
-        } catch (error) {
+        } catch {
           if (cancelled) {
             return;
           }
 
-          const unauthorized =
-            (error instanceof ApiClientError && error.code === 'UNAUTHORIZED') ||
-            (error instanceof AuthError && error.code === 'UNAUTHORIZED');
-
-          if (unauthorized) {
-            await clearLocalAuth();
-            return;
-          }
-
-          if (stored.userProfile) {
-            const mapped = mapLaravelUser({
-              user_id: stored.userProfile.user_id,
-              first_name: stored.userProfile.first_name,
-              last_name: stored.userProfile.last_name,
-              email: stored.userProfile.email,
-              role_id: stored.userProfile.role_id,
-              status: stored.userProfile.status,
-            });
-            applySession(stored.token, mapped.user, mapped.userProfile);
-          } else {
-            await clearLocalAuth();
-          }
+          // Fail-closed: never trust cached role_id/profile when /api/user cannot verify
+          // (expired token, network error, or server unavailable → re-login).
+          await clearLocalAuth();
         }
       } finally {
         if (!cancelled) {

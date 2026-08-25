@@ -14,9 +14,9 @@
 
 | Severity | Count | Notes |
 |----------|------:|-------|
-| Critical | 1 | Edge function trusts client identity (`scannedByUserId`) — documented future work |
-| High | 2 | Anon-key Supabase access without per-user JWT; client-side role gate |
-| Medium | 4 | Cleartext traffic flag; public progress PII; storage bucket risk; session fail-open offline |
+| Critical | 0* | *Mitigated in safe pack: edge function verifies Laravel Sanctum (`x-sanctum-token`); ignores client `scannedByUserId` as source of truth. **Redeploy required.** |
+| High | 2 | Anon-key Supabase access without per-user JWT; client-side role gate (still future work) |
+| Medium | 2* | *Cleartext flag off; session fail-closed online verify. Remaining: public progress PII; storage bucket risk |
 | Low / Info | 5 | Permissions, residual `Math.random` for non-security IDs, logging hygiene improved |
 
 **Overall (capstone context):** The team applied meaningful hardening (crypto QR tokens, OCR key off-device, read-only public progress, log gating, exact QR match). Remaining issues are mostly **backend authorization** gaps, appropriate to disclose as limitations rather than claim “fully secure.”
@@ -65,16 +65,19 @@
 
 | | |
 |--|--|
-| **Severity** | Critical (server trust) |
+| **Severity** | Critical → **Mitigated for office edge path** |
 | **Category** | Broken access control / spoofable identity |
-| **Status** | Documented; partial QR fix only |
+| **Status** | Safe pack applied (redeployed 2026-08-25) |
 
-**Finding:** `office-exit-scan` and mobile check-in paths accept `scannedByUserId` from the client. Edge function uses service role.
+**Finding (before):** `office-exit-scan` accepted `scannedByUserId` from the client body.
 
-**Impact:** A crafted client could claim another staff user’s ID if the function is reachable without Sanctum verification.
+**Mitigation now:**
+- Mobile sends Laravel Sanctum token in `x-sanctum-token`
+- Edge function calls `GET /api/user` and uses server `user_id`
+- Client-claimed scanner id is not the source of truth
+- HTTP 401 on missing/invalid session (no DB fallback on 401)
 
-**Mitigation today:** Exact `qr_token` match (no `ilike` wildcard).  
-**Recommendation:** Validate Sanctum bearer token server-side; derive user id from server, never from body.
+**Remaining:** Guard exit still uses direct DB path with session user id from the app. Full JWT+RLS still future work.
 
 ---
 
@@ -99,15 +102,14 @@
 
 | | |
 |--|--|
-| **Severity** | Medium |
+| **Severity** | Medium → **Mitigated in config** |
 | **Category** | Cleartext / MITM exposure |
-| **Status** | Config present |
+| **Status** | Safe pack: `usesCleartextTraffic: false` in `app.json` |
 
-**Finding:** `app.json` sets `"usesCleartextTraffic": true` (Android). `.env.example` shows `http://` local API URL for development.
+**Finding (before):** Android allowed cleartext HTTP.
 
-**Impact:** On Android release builds, HTTP (non-TLS) endpoints could be used if misconfigured, enabling network interception.
-
-**Recommendation:** Set `usesCleartextTraffic: false` for production; keep HTTPS (`https://nu-secure.com`) only. iOS App Transport Security is stricter by default — still avoid HTTP API URLs in production env.
+**Mitigation now:** Cleartext disabled. Use HTTPS API (`https://nu-secure.com`). Rebuild native app after config change for release APK/IPA config to pick up.  
+**Note:** Local HTTP Laravel on Android LAN will no longer work unless you temporarily re-enable for dev.
 
 ---
 
@@ -144,15 +146,14 @@
 
 | | |
 |--|--|
-| **Severity** | Medium |
+| **Severity** | Medium → **Mitigated** |
 | **Category** | Session management |
-| **Status** | Optional hardening not done |
+| **Status** | Safe pack: fail-closed |
 
-**Finding:** In `contexts/auth-context.tsx`, if `/api/user` fails for a non-unauthorized reason (e.g. offline), the app may continue with the **cached** profile from SecureStore.
+**Finding (before):** On `/api/user` network failure, app continued with cached SecureStore profile/`role_id`.
 
-**Impact:** Stale or tampered local `role_id` could remain trusted until next successful verify.
-
-**Recommendation:** Fail-closed (force re-login when verify cannot complete). Trade-off: worse offline UX.
+**Mitigation now:** Any verify failure clears local session → user must log in again when the app can reach Laravel.  
+**Trade-off:** Offline reopen requires re-login (by design).
 
 ---
 

@@ -84,7 +84,7 @@ export const API_BASE_URL = resolveApiBaseUrl();
 
 if (!API_BASE_URL) {
   console.error('EXPO_PUBLIC_API_URL is not configured.');
-} else {
+} else if (__DEV__) {
   console.log(`[api] Using ${API_BASE_URL}`);
 }
 

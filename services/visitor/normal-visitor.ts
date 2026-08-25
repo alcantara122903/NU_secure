@@ -17,6 +17,10 @@ import {
   resolveLoggedInGuardUserId,
 } from './resolve-guard-user';
 
+const devLog = (...args: unknown[]) => {
+  if (__DEV__) console.log(...args);
+};
+
 /** Generate ID format: YYYY-XXXXXX */
 function generateYearSixCode(): string {
   const year = new Date().getFullYear();
@@ -46,14 +50,14 @@ export const normalVisitorService = {
     visitId: number;
   } | null> {
     try {
-      console.log('\n💾 === NORMAL VISITOR QR TICKET GENERATION ===\n');
-      console.log('📋 Input data:');
-      console.log(`   firstName: ${visitorData.firstName}`);
-      console.log(`   lastName: ${visitorData.lastName}`);
-      console.log(`   contactNo: ${visitorData.contactNo}`);
+      devLog('\n💾 === NORMAL VISITOR QR TICKET GENERATION ===\n');
+      devLog('📋 Input data:');
+      devLog(`   firstName: ${visitorData.firstName}`);
+      devLog(`   lastName: ${visitorData.lastName}`);
+      devLog(`   contactNo: ${visitorData.contactNo}`);
       const destinationText = visitorData.destinationText?.trim() || '';
       const usingOthersDestination = destinationText.length > 0;
-      console.log(
+      devLog(
         usingOthersDestination
           ? `   destinationText: ${destinationText}`
           : `   selectedOffices: ${visitorData.selectedOfficeIds.length} office(s)`,
@@ -69,7 +73,7 @@ export const normalVisitorService = {
       if (visitorData.addressHouseNo || visitorData.addressStreet || 
           visitorData.addressBarangay || visitorData.addressMunicipality) {
         
-        console.log('\n📝 STEP 1: Creating/checking address record...');
+        devLog('\n📝 STEP 1: Creating/checking address record...');
         const addressData: AddressData = {
           houseNo: visitorData.addressHouseNo || undefined,
           street: visitorData.addressStreet || undefined,
@@ -85,38 +89,38 @@ export const normalVisitorService = {
       }
 
       // STEP 2: Create visitor record with photo uploads
-      console.log('\n📝 STEP 2: Creating visitor record...');
+      devLog('\n📝 STEP 2: Creating visitor record...');
       const passNumber = visitorData.passNumber?.trim();
       const controlNumber = visitorData.controlNumber?.trim() || generateYearSixCode();
       if (!passNumber) {
         console.error('❌ ID Pass Number is required for normal visitor registration');
         return null;
       }
-      console.log(`   pass_number: ${passNumber}, control_number: ${controlNumber}`);
+      devLog(`   pass_number: ${passNumber}, control_number: ${controlNumber}`);
 
       // Upload face photo only
       let visitorPhotoUrl: string | null = null;
       if (visitorData.facePhotoUri) {
-        console.log('\n📤 STEP 2: Uploading face photo...');
+        devLog('\n📤 STEP 2: Uploading face photo...');
         const uploadResult = await uploadFacePhoto(visitorData.facePhotoUri);
         if (uploadResult.success && uploadResult.publicUrl) {
           visitorPhotoUrl = uploadResult.publicUrl;
-          console.log(`   ✅ Face photo uploaded: ${visitorPhotoUrl}`);
+          devLog(`   ✅ Face photo uploaded: ${visitorPhotoUrl}`);
         } else {
           console.warn('   ⚠️ Face photo upload failed');
           console.warn(`      Error: ${uploadResult.error}`);
         }
       } else {
-        console.log('\n📤 STEP 2: No face photo URI provided');
+        devLog('\n📤 STEP 2: No face photo URI provided');
       }
 
       // Get current guard from app session (users.user_id)
-      console.log('\n👤 Fetching current guard user...');
+      devLog('\n👤 Fetching current guard user...');
       const guardUserId = await resolveLoggedInGuardUserId();
       const entryExitStatusId = await resolveDefaultEntryExitStatusId();
 
       // Attempt insert with retry logic for sequence issues
-      console.log('\n👥 CHECKING FOR EXISTING VISITOR RECORD');
+      devLog('\n👥 CHECKING FOR EXISTING VISITOR RECORD');
       let existingVisitor = await visitorLookupService.findExistingVisitor({
         firstName: visitorData.firstName,
         lastName: visitorData.lastName,
@@ -129,8 +133,8 @@ export const normalVisitorService = {
 
       if (existingVisitor) {
         // REUSE: Reuse existing visitor
-        console.log('\n♻️ REUSING EXISTING VISITOR RECORD');
-        console.log(`   Visitor ID: ${existingVisitor.visitor_id}`);
+        devLog('\n♻️ REUSING EXISTING VISITOR RECORD');
+        devLog(`   Visitor ID: ${existingVisitor.visitor_id}`);
         visitorData_db = [{
           visitor_id: existingVisitor.visitor_id,
         }];
@@ -148,13 +152,13 @@ export const normalVisitorService = {
             .update(normalUpdates)
             .eq('visitor_id', existingVisitor.visitor_id);
         }
-        console.log('\n✅ Using existing visitor record - no new record created');
+        devLog('\n✅ Using existing visitor record - no new record created');
       } else {
         // CREATE: New visitor record with retry logic
-        console.log('\n📝 CREATING NEW VISITOR RECORD');
+        devLog('\n📝 CREATING NEW VISITOR RECORD');
         
         for (let attempt = 1; attempt <= 3; attempt++) {
-          console.log(`   Attempt ${attempt}/3...`);
+          devLog(`   Attempt ${attempt}/3...`);
           
           const result = await supabase
             .from('visitor')
@@ -173,11 +177,11 @@ export const normalVisitorService = {
           visitorError = result.error;
 
           if (!visitorError) {
-            console.log(`   ✅ Insert succeeded on attempt ${attempt}`);
+            devLog(`   ✅ Insert succeeded on attempt ${attempt}`);
             break;
           }
 
-          console.log(`   ⚠️ Attempt ${attempt} failed: ${visitorError.message}`);
+          devLog(`   ⚠️ Attempt ${attempt} failed: ${visitorError.message}`);
 
           // Wait before retry
           if (attempt < 3) {
@@ -199,13 +203,13 @@ export const normalVisitorService = {
       }
 
       if (existingVisitor) {
-        console.log(`✅ Visitor record reused: visitor_id=${visitorId}`);
+        devLog(`✅ Visitor record reused: visitor_id=${visitorId}`);
       } else {
-        console.log(`✅ New visitor created: visitor_id=${visitorId}, pass=${passNumber}, control=${controlNumber}${visitorPhotoUrl ? `, photo=${visitorPhotoUrl}` : ''}`);
+        devLog(`✅ New visitor created: visitor_id=${visitorId}, pass=${passNumber}, control=${controlNumber}${visitorPhotoUrl ? `, photo=${visitorPhotoUrl}` : ''}`);
       }
 
       // STEP 3: Create visit record
-      console.log('\n📝 STEP 3: Creating visit record...');
+      devLog('\n📝 STEP 3: Creating visit record...');
       const qrToken = await generateQRToken();
       const primaryOfficeId = usingOthersDestination
         ? null
@@ -216,7 +220,7 @@ export const normalVisitorService = {
       let visitError: any = null;
 
       for (let attempt = 1; attempt <= 3; attempt++) {
-        console.log(`   Attempt ${attempt}/3...`);
+        devLog(`   Attempt ${attempt}/3...`);
 
         const result = await supabase
           .from('visit')
@@ -239,15 +243,15 @@ export const normalVisitorService = {
         visitError = result.error;
 
         if (!visitError) {
-          console.log(`   ✅ Insert succeeded on attempt ${attempt}`);
+          devLog(`   ✅ Insert succeeded on attempt ${attempt}`);
           break;
         }
 
-        console.log(`   ⚠️ Attempt ${attempt} failed: ${(visitError as any)?.message}`);
+        devLog(`   ⚠️ Attempt ${attempt} failed: ${(visitError as any)?.message}`);
 
         // On last attempt, try to fetch existing visit by qr_token
         if (attempt === 3) {
-          console.log('   📝 Trying to fetch existing visit after insert conflict...');
+          devLog('   📝 Trying to fetch existing visit after insert conflict...');
           const { data: existing } = await supabase
             .from('visit')
             .select('visit_id')
@@ -255,7 +259,7 @@ export const normalVisitorService = {
             .single();
 
           if (existing?.visit_id) {
-            console.log(`   ✅ Found existing visit: visit_id=${existing.visit_id}`);
+            devLog(`   ✅ Found existing visit: visit_id=${existing.visit_id}`);
             visitData = [existing] as any;
             visitError = null;
             break;
@@ -279,15 +283,15 @@ export const normalVisitorService = {
         return null;
       }
 
-      console.log(`✅ Visit created: visit_id=${visitId}`);
+      devLog(`✅ Visit created: visit_id=${visitId}`);
 
       // STEP 4: Create office_expectation records (skipped for free-text "Others")
       if (usingOthersDestination) {
-        console.log(
+        devLog(
           '\n📝 STEP 4: Skipping office expectations (Others destination_text only)',
         );
       } else {
-      console.log('\n📝 STEP 4: Creating office expectations...');
+      devLog('\n📝 STEP 4: Creating office expectations...');
       const pendingExpectationStatusId = await resolvePendingExpectationStatusId();
       const expectations = visitorData.selectedOfficeIds.map((officeId, index) => ({
         visit_id: visitId,
@@ -301,7 +305,7 @@ export const normalVisitorService = {
       let expectationError: any = null;
 
       for (let attempt = 1; attempt <= 3; attempt++) {
-        console.log(`   Attempt ${attempt}/3...`);
+        devLog(`   Attempt ${attempt}/3...`);
 
         const result = await supabase
           .from('office_expectation')
@@ -310,11 +314,11 @@ export const normalVisitorService = {
         expectationError = result.error;
 
         if (!expectationError) {
-          console.log(`   ✅ Insert succeeded on attempt ${attempt}`);
+          devLog(`   ✅ Insert succeeded on attempt ${attempt}`);
           break;
         }
 
-        console.log(`   ⚠️ Attempt ${attempt} failed: ${(expectationError as any)?.message}`);
+        devLog(`   ⚠️ Attempt ${attempt} failed: ${(expectationError as any)?.message}`);
 
         // Wait before retry
         if (attempt < 3) {
@@ -326,11 +330,11 @@ export const normalVisitorService = {
         console.error('❌ Office expectation creation failed:', (expectationError as any)?.message);
         console.warn('⚠️ Visitor and visit records were created, but office route could not be set up');
       } else {
-        console.log(`✅ Office expectations created: ${visitorData.selectedOfficeIds.length} office(s) added to route`);
+        devLog(`✅ Office expectations created: ${visitorData.selectedOfficeIds.length} office(s) added to route`);
       }
       }
 
-      console.log('\n✅ === NORMAL VISITOR QR TICKET GENERATED SUCCESSFULLY ===\n');
+      devLog('\n✅ === NORMAL VISITOR QR TICKET GENERATED SUCCESSFULLY ===\n');
 
       return {
         qrToken,

@@ -1,6 +1,7 @@
 import { extractQrTokenFromAnyScan } from '@/lib/enrollee-progress-url';
 import { parseQrTicketRaw } from '@/lib/qr-ticket-payload';
 import { toSupabaseTimestampPh } from '@/lib/supabase-timestamp-ph';
+import { authSessionService } from '@/services/auth-session';
 import { supabase } from '@/services/database/supabase';
 import {
   resolveSkippedExpectationStatusId,
@@ -500,8 +501,14 @@ export const officeExitApiService = {
     }
 
     try {
+      const sanctumToken = authSessionService.getToken();
       const { data, error } = await supabase.functions.invoke<ExitScanResult>(OFFICE_EXIT_SCAN_FUNCTION, {
         body: payload,
+        headers: sanctumToken
+          ? {
+              'x-sanctum-token': sanctumToken,
+            }
+          : {},
       });
 
       if (error) {
@@ -514,16 +521,33 @@ export const officeExitApiService = {
           return await resolveScanByDatabase(payload);
         }
 
-        console.error('❌ Office exit scan function invocation failed', {
-          functionName: OFFICE_EXIT_SCAN_FUNCTION,
-          method,
-          body: payload,
-          errorName: error.name,
-          errorMessage: error.message,
-          status: normalizedStatus,
-          parsedErrorBody,
-          details: error.context,
-        });
+        // Do not fall back on 401/403 — that would bypass Sanctum verification
+        if (normalizedStatus === 401 || normalizedStatus === 403) {
+          return {
+            success: false,
+            message: 'Your session has expired. Please sign in again.',
+            errorCode: 'UNAUTHORIZED',
+            debug: {
+              functionName: OFFICE_EXIT_SCAN_FUNCTION,
+              method,
+              status: normalizedStatus,
+              requestBody: __DEV__ ? payload : undefined,
+            },
+          };
+        }
+
+        if (__DEV__) {
+          console.error('❌ Office exit scan function invocation failed', {
+            functionName: OFFICE_EXIT_SCAN_FUNCTION,
+            method,
+            errorName: error.name,
+            errorMessage: error.message,
+            status: normalizedStatus,
+            parsedErrorBody,
+          });
+        } else {
+          console.error('❌ Office exit scan function invocation failed', error.message);
+        }
 
         if (parsedErrorBody && typeof parsedErrorBody === 'object') {
           const bodyObject = parsedErrorBody as Record<string, unknown>;
@@ -540,10 +564,10 @@ export const officeExitApiService = {
               functionName: OFFICE_EXIT_SCAN_FUNCTION,
               method,
               status: normalizedStatus,
-              requestBody: payload,
+              requestBody: __DEV__ ? payload : undefined,
               rawError: error.message,
               errorName: error.name,
-              rawResponse: parsedErrorBody,
+              rawResponse: __DEV__ ? parsedErrorBody : undefined,
             },
           };
         }
@@ -558,10 +582,9 @@ export const officeExitApiService = {
             functionName: OFFICE_EXIT_SCAN_FUNCTION,
             method,
             status: normalizedStatus,
-            requestBody: payload,
+            requestBody: __DEV__ ? payload : undefined,
             rawError: error.message,
             errorName: error.name,
-            rawResponse: parsedErrorBody || error.context,
           },
         };
       }

@@ -48,14 +48,15 @@ type LookupCandidate =
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers':
+    'authorization, x-client-info, apikey, content-type, x-sanctum-token',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
   'Content-Type': 'application/json',
 };
 
-const jsonResponse = (payload: ExitScanResponse): Response => {
+const jsonResponse = (payload: ExitScanResponse, status = 200): Response => {
   return new Response(JSON.stringify(payload), {
-    status: 200,
+    status,
     headers: corsHeaders,
   });
 };
@@ -445,6 +446,129 @@ const resolveStatusId = async (
   return typeof fallback[field] === 'number' ? (fallback[field] as number) : null;
 };
 
+const getLaravelApiBaseUrl = (): string => {
+  const fromEnv = (Deno.env.get('LARAVEL_API_BASE_URL') || '').trim().replace(/\/+$/, '');
+  return fromEnv || 'https://nu-secure.com';
+};
+
+/**
+ * Resolve scanner user_id from Laravel Sanctum token (x-sanctum-token header).
+ * Never trusts body.scannedByUserId as the source of truth.
+ */
+const resolveScannerUserIdFromSanctum = async (
+  req: Request,
+): Promise<{ userId: number } | { error: ExitScanResponse }> => {
+  const rawHeader =
+    req.headers.get('x-sanctum-token')?.trim() ||
+    req.headers.get('X-Sanctum-Token')?.trim() ||
+    '';
+
+  if (!rawHeader) {
+    return {
+      error: {
+        success: false,
+        message: 'Session not found. Please log in again.',
+        errorCode: 'MISSING_AUTH',
+        data: null,
+      },
+    };
+  }
+
+  const token = rawHeader.replace(/^Bearer\s+/i, '').trim();
+  if (!token) {
+    return {
+      error: {
+        success: false,
+        message: 'Session not found. Please log in again.',
+        errorCode: 'MISSING_AUTH',
+        data: null,
+      },
+    };
+  }
+
+  const apiBase = getLaravelApiBaseUrl();
+  let response: Response;
+  try {
+    response = await fetch(`${apiBase}/api/user`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+      },
+    });
+  } catch (error) {
+    console.error('[office-exit-scan] Laravel /api/user network error', error);
+    return {
+      error: {
+        success: false,
+        message: 'Unable to verify your session. Please try again.',
+        errorCode: 'AUTH_VERIFY_FAILED',
+        data: null,
+      },
+    };
+  }
+
+  if (response.status === 401 || response.status === 403) {
+    return {
+      error: {
+        success: false,
+        message: 'Your session has expired. Please sign in again.',
+        errorCode: 'UNAUTHORIZED',
+        data: null,
+      },
+    };
+  }
+
+  if (!response.ok) {
+    console.error('[office-exit-scan] Laravel /api/user HTTP', response.status);
+    return {
+      error: {
+        success: false,
+        message: 'Unable to verify your session. Please try again.',
+        errorCode: 'AUTH_VERIFY_FAILED',
+        data: null,
+      },
+    };
+  }
+
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    return {
+      error: {
+        success: false,
+        message: 'Unable to verify your session. Please try again.',
+        errorCode: 'AUTH_VERIFY_FAILED',
+        data: null,
+      },
+    };
+  }
+
+  const record =
+    payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : null;
+  const nestedUser =
+    record && record.user && typeof record.user === 'object'
+      ? (record.user as Record<string, unknown>)
+      : record && record.data && typeof record.data === 'object'
+        ? (record.data as Record<string, unknown>)
+        : record;
+  const userId = parseInteger(nestedUser?.user_id ?? nestedUser?.id);
+
+  if (!userId) {
+    return {
+      error: {
+        success: false,
+        message: 'Session not found. Please log in again.',
+        errorCode: 'INVALID_SCANNER',
+        data: null,
+      },
+    };
+  }
+
+  return { userId };
+};
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -464,22 +588,27 @@ Deno.serve(async (req) => {
     });
   }
 
-  console.log('[office-exit-scan] incoming request body', body);
+  console.log('[office-exit-scan] incoming request body', {
+    scannerContext: body.scannerContext,
+    hasQrToken: Boolean(body.qrToken || body.rawQrValue),
+    // Do not log raw tokens or claimed scanner ids
+  });
 
-  const scannedByUserId = parseInteger(body.scannedByUserId);
+  const authResult = await resolveScannerUserIdFromSanctum(req);
+  if ('error' in authResult) {
+    const status =
+      authResult.error.errorCode === 'UNAUTHORIZED' ||
+      authResult.error.errorCode === 'MISSING_AUTH' ||
+      authResult.error.errorCode === 'INVALID_SCANNER'
+        ? 401
+        : 503;
+    return jsonResponse(authResult.error, status);
+  }
+  const scannedByUserId = authResult.userId;
   const lookup = buildLookupCandidates(body);
 
-  console.log('[office-exit-scan] parsed qr details', lookup.normalized);
+  console.log('[office-exit-scan] sanctum user verified', { userId: scannedByUserId });
   console.log('[office-exit-scan] lookup candidates', lookup.candidates);
-
-  if (!scannedByUserId) {
-    return jsonResponse({
-      success: false,
-      message: 'Session not found. Please log in again.',
-      errorCode: 'INVALID_SCANNER',
-      data: null,
-    });
-  }
 
   if (!lookup.candidates.length) {
     return jsonResponse({

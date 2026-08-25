@@ -40,13 +40,14 @@ The app authenticates with **Laravel Sanctum** but the Supabase JS client is cre
 
 ### 4. Edge function authentication
 
-`office-exit-scan` uses the service role key and accepts `scannedByUserId` from the request body without verifying the Laravel session.
+**Update (safe pack):** `office-exit-scan` now requires header `x-sanctum-token` (Laravel Sanctum bearer). The function calls `GET {LARAVEL_API_BASE_URL}/api/user` and uses the **server-returned** `user_id` for `scanned_by_user_id`. Client `scannedByUserId` is no longer trusted as the source of truth.
 
-**Implication:** Caller identity is not cryptographically proven.
+**Deploy:** `supabase functions deploy office-exit-scan --project-ref <your-ref>`  
+**Optional secret:** `LARAVEL_API_BASE_URL` (defaults to `https://nu-secure.com`).
 
-**Future work:** Require `Authorization: Bearer <sanctum_token>`, validate via Laravel, derive user ID server-side.
+**Remaining gap:** Guard exit uses a direct DB path (not this edge function). Full JWT + RLS for all Supabase writes remains future work.
 
-**Partial fix applied:** Removed wildcard QR `ilike` lookup. Function must be redeployed to Supabase.
+**Partial fix applied earlier:** Removed wildcard QR `ilike` lookup.
 
 ---
 

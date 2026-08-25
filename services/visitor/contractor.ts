@@ -15,6 +15,10 @@ import {
   resolveLoggedInGuardUserId,
 } from './resolve-guard-user';
 
+const devLog = (...args: unknown[]) => {
+  if (__DEV__) console.log(...args);
+};
+
 /** Generate ID format: YYYY-XXXXXX */
 function generateYearSixCode(): string {
   const year = new Date().getFullYear();
@@ -47,15 +51,15 @@ export const contractorService = {
     destinationOfficeId: null;
   } | null> {
     try {
-      console.log('\n💾 === CONTRACTOR PASS GENERATION ===\n');
-      console.log('📋 Input data:');
-      console.log(`   firstName: ${contractorData.firstName}`);
-      console.log(`   lastName: ${contractorData.lastName}`);
-      console.log(`   contactNo: ${contractorData.contactNo}`);
-      console.log(`   idPassNumber: ${contractorData.idPassNumber}`);
-      console.log(`   reasonForVisit: ${contractorData.reasonForVisit}`);
-      console.log(`   officeToVisit: ${contractorData.officeToVisit}`);
-      console.log(`   contactPerson: ${contractorData.contactPerson?.trim() || '(derive from visitor name)'}`);
+      devLog('\n💾 === CONTRACTOR PASS GENERATION ===\n');
+      devLog('📋 Input data:');
+      devLog(`   firstName: ${contractorData.firstName}`);
+      devLog(`   lastName: ${contractorData.lastName}`);
+      devLog(`   contactNo: ${contractorData.contactNo}`);
+      devLog(`   idPassNumber: ${contractorData.idPassNumber}`);
+      devLog(`   reasonForVisit: ${contractorData.reasonForVisit}`);
+      devLog(`   officeToVisit: ${contractorData.officeToVisit}`);
+      devLog(`   contactPerson: ${contractorData.contactPerson?.trim() || '(derive from visitor name)'}`);
 
       const officeToVisit = contractorData.officeToVisit.trim();
       if (!officeToVisit) {
@@ -65,14 +69,14 @@ export const contractorService = {
 
       // Contractor destination is always plain text in visit.destination_text only.
       // Never link to office table — primary_office_id is always null.
-      console.log(`   officeToVisit (plain text only): "${officeToVisit}"`);
+      devLog(`   officeToVisit (plain text only): "${officeToVisit}"`);
 
       // STEP 1: Create address record if components provided
       let addressId: number | null = null;
       if (contractorData.addressHouseNo || contractorData.addressStreet ||
           contractorData.addressBarangay || contractorData.addressMunicipality) {
 
-        console.log('\n📝 STEP 1: Creating/checking address record...');
+        devLog('\n📝 STEP 1: Creating/checking address record...');
         const addressData: AddressData = {
           houseNo: contractorData.addressHouseNo || undefined,
           street: contractorData.addressStreet || undefined,
@@ -88,40 +92,40 @@ export const contractorService = {
       }
 
       // STEP 2: Create visitor record with photo upload
-      console.log('\n📝 STEP 2: Creating visitor record...');
+      devLog('\n📝 STEP 2: Creating visitor record...');
       const passNumber = contractorData.idPassNumber?.trim();
       const controlNumber = contractorData.controlNumber?.trim() || generateYearSixCode();
       if (!passNumber) {
         console.error('❌ ID Pass Number is required for contractor registration');
         return null;
       }
-      console.log(`   pass_number: ${passNumber}, control_number: ${controlNumber}`);
+      devLog(`   pass_number: ${passNumber}, control_number: ${controlNumber}`);
 
       // Upload face photo only
       let photoUrl: string | null = null;
       
       if (contractorData.facePhotoUri) {
-        console.log('\n📤 STEP 2: Uploading face photo...');
+        devLog('\n📤 STEP 2: Uploading face photo...');
         const uploadResult = await uploadFacePhoto(contractorData.facePhotoUri);
         if (uploadResult.success && uploadResult.publicUrl) {
           photoUrl = uploadResult.publicUrl;
-          console.log(`   ✅ Face photo uploaded: ${photoUrl}`);
+          devLog(`   ✅ Face photo uploaded: ${photoUrl}`);
         } else {
           console.warn('   ⚠️ Face photo upload failed');
           console.warn(`      Error: ${uploadResult.error}`);
         }
       } else {
-        console.log('\n📤 STEP 2: No face photo URI provided');
+        devLog('\n📤 STEP 2: No face photo URI provided');
       }
 
       // Get current guard from app session (users.user_id)
-      console.log('\n👤 Fetching current guard user...');
+      devLog('\n👤 Fetching current guard user...');
       const guardUserId = await resolveLoggedInGuardUserId();
       const entryExitStatusId = await resolveDefaultEntryExitStatusId();
 
       // ======= VISITOR DEDUPLICATION LOGIC =======
       // Check if visitor already exists to prevent duplicate records
-      console.log('\n👥 CHECKING FOR EXISTING VISITOR RECORD');
+      devLog('\n👥 CHECKING FOR EXISTING VISITOR RECORD');
       let existingVisitor = await visitorLookupService.findExistingVisitor({
         firstName: contractorData.firstName,
         lastName: contractorData.lastName,
@@ -133,8 +137,8 @@ export const contractorService = {
 
       if (existingVisitor) {
         // Visitor already exists - reuse their record
-        console.log('\n♻️ REUSING EXISTING VISITOR RECORD');
-        console.log(`   Visitor ID: ${existingVisitor.visitor_id}`);
+        devLog('\n♻️ REUSING EXISTING VISITOR RECORD');
+        devLog(`   Visitor ID: ${existingVisitor.visitor_id}`);
         
         visitorData_db = [{ visitor_id: existingVisitor.visitor_id }];
         const contractorUpdates: Record<string, string> = {};
@@ -150,15 +154,15 @@ export const contractorService = {
             .update(contractorUpdates)
             .eq('visitor_id', existingVisitor.visitor_id);
         }
-        console.log('\n✅ Using existing visitor record - no new record created');
+        devLog('\n✅ Using existing visitor record - no new record created');
       } else {
         // Visitor doesn't exist - create new record
-        console.log('\n📝 CREATING NEW VISITOR RECORD');
+        devLog('\n📝 CREATING NEW VISITOR RECORD');
 
         let visitorError: any = null;
         
         for (let attempt = 1; attempt <= 3; attempt++) {
-          console.log(`   Attempt ${attempt}/3...`);
+          devLog(`   Attempt ${attempt}/3...`);
           
           const result = await supabase
             .from('visitor')
@@ -177,11 +181,11 @@ export const contractorService = {
           visitorError = result.error;
 
           if (!visitorError) {
-            console.log(`   ✅ Insert succeeded on attempt ${attempt}`);
+            devLog(`   ✅ Insert succeeded on attempt ${attempt}`);
             break;
           }
 
-          console.log(`   ⚠️ Attempt ${attempt} failed: ${visitorError.message}`);
+          devLog(`   ⚠️ Attempt ${attempt} failed: ${visitorError.message}`);
 
           // Wait before retry
           if (attempt < 3) {
@@ -201,17 +205,17 @@ export const contractorService = {
         return null;
       }
 
-      console.log(`✅ Visitor created: visitor_id=${visitorId}, pass=${passNumber}, control=${controlNumber}`);
+      devLog(`✅ Visitor created: visitor_id=${visitorId}, pass=${passNumber}, control=${controlNumber}`);
 
       // STEP 3: Create visit record (contractor row needs visit_id)
-      console.log('\n📝 STEP 3: Creating visit record...');
+      devLog('\n📝 STEP 3: Creating visit record...');
       const qrToken = await generateQRToken();
 
       let visitData: any = null;
       let visitError: any = null;
 
       for (let attempt = 1; attempt <= 3; attempt++) {
-        console.log(`   Attempt ${attempt}/3...`);
+        devLog(`   Attempt ${attempt}/3...`);
 
         const result = await supabase
           .from('visit')
@@ -234,14 +238,14 @@ export const contractorService = {
         visitError = result.error;
 
         if (!visitError) {
-          console.log(`   ✅ Insert succeeded on attempt ${attempt}`);
+          devLog(`   ✅ Insert succeeded on attempt ${attempt}`);
           break;
         }
 
-        console.log(`   ⚠️ Attempt ${attempt} failed: ${visitError.message}`);
+        devLog(`   ⚠️ Attempt ${attempt} failed: ${visitError.message}`);
 
         if (attempt === 3) {
-          console.log('   📝 Trying to fetch existing visit after insert conflict...');
+          devLog('   📝 Trying to fetch existing visit after insert conflict...');
           const { data: existing } = await supabase
             .from('visit')
             .select('visit_id')
@@ -249,7 +253,7 @@ export const contractorService = {
             .single();
 
           if (existing?.visit_id) {
-            console.log(`   ✅ Found existing visit: visit_id=${existing.visit_id}`);
+            devLog(`   ✅ Found existing visit: visit_id=${existing.visit_id}`);
             visitData = [existing];
             visitError = null;
             break;
@@ -272,10 +276,10 @@ export const contractorService = {
         return null;
       }
 
-      console.log(`✅ Visit created: visit_id=${visitId}`);
+      devLog(`✅ Visit created: visit_id=${visitId}`);
 
       // STEP 4: Contractor table — contractor_id, contact_person, visit_id only
-      console.log('\n📝 STEP 4: Creating contractor record...');
+      devLog('\n📝 STEP 4: Creating contractor record...');
       const contactPerson =
         (contractorData.contactPerson && contractorData.contactPerson.trim()) ||
         `${contractorData.firstName} ${contractorData.lastName}`.trim() ||
@@ -286,7 +290,7 @@ export const contractorService = {
       let contractorError: any = null;
 
       for (let attempt = 1; attempt <= 3; attempt++) {
-        console.log(`   Attempt ${attempt}/3...`);
+        devLog(`   Attempt ${attempt}/3...`);
 
         const result = await supabase
           .from('contractor')
@@ -300,11 +304,11 @@ export const contractorService = {
         contractorError = result.error;
 
         if (!contractorError) {
-          console.log(`   ✅ Insert succeeded on attempt ${attempt}`);
+          devLog(`   ✅ Insert succeeded on attempt ${attempt}`);
           break;
         }
 
-        console.log(`   ⚠️ Attempt ${attempt} failed: ${contractorError.message}`);
+        devLog(`   ⚠️ Attempt ${attempt} failed: ${contractorError.message}`);
         if (attempt < 3) {
           await new Promise(resolve => setTimeout(resolve, 500 * attempt));
         }
@@ -318,9 +322,9 @@ export const contractorService = {
       const contractorId = contractorData_db?.[0]?.contractor_id || 0;
 
       // STEP 5: No office_expectation for contractors — destination is free text only
-      console.log('\n📝 STEP 5: Skipping office_expectation (contractor uses destination_text only)');
+      devLog('\n📝 STEP 5: Skipping office_expectation (contractor uses destination_text only)');
 
-      console.log('\n✅ === CONTRACTOR PASS GENERATED SUCCESSFULLY ===\n');
+      devLog('\n✅ === CONTRACTOR PASS GENERATED SUCCESSFULLY ===\n');
 
       return {
         qrToken,
