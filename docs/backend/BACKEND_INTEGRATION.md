@@ -45,8 +45,8 @@ Scan QR code on your phone
 **6. Phone Must Be on Same WiFi Network**
 
 **7. Android HTTP Note:**
-- If your API is plain `http://`, make sure the Android app allows cleartext traffic.
-- This repo now sets `android.usesCleartextTraffic = true` in `app.json`.
+- Production API should use **HTTPS** (`https://www.nu-secure.com`).
+- Local Laravel on `http://` LAN IP works in **debug** builds only (Android debug manifest allows cleartext).
 
 ---
 

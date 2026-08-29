@@ -27,7 +27,7 @@
 
 | Area | Evidence locations |
 |------|--------------------|
-| Secrets / env | `.env.example`, OCR client, Supabase client |
+| Secrets / env | `.env.local` (gitignored), OCR client, Supabase client |
 | Session storage | `services/storage/secure-auth.ts` |
 | Auth / roles | `services/authentication/auth.ts`, `contexts/auth-context.tsx`, `app/guard/_layout.tsx`, `app/office/_layout.tsx` |
 | Network | `config/api.ts`, `app.json` (`usesCleartextTraffic`) |

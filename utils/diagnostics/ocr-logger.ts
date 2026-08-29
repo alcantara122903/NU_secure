@@ -50,16 +50,16 @@ export const runOCRDiagnostics = async (): Promise<DiagnosticResult> => {
       console.log(`   Reason: ${connectionTest.message}`);
 
       recommendations.push(
-        'CRITICAL: Backend service is not running!'
+        'CRITICAL: OCR edge function is not reachable.'
       );
       recommendations.push(
-        '   Run on your PC: node BACKEND_OCR_SERVICE.js'
+        '   Deploy: supabase functions deploy ocr-parse --project-ref YOUR_PROJECT_REF'
       );
       recommendations.push(
-        '   Then verify: curl http://192.168.68.104:3000/health'
+        '   Set OCR_SPACE_API_KEY in Supabase Edge Function secrets'
       );
       recommendations.push(
-        '   Ensure phone and PC are on the same WiFi network'
+        '   See docs/security/OCR_EDGE_FUNCTION.md'
       );
     }
   } catch (error) {

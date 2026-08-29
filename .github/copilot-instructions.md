@@ -74,10 +74,10 @@ npm run reset-project
 
 - **`utils/`** — Utility functions
   - `ocr-diagnostics.ts` — OCR debugging and logging
-  - `ocr-service.ts` — OCR connectivity tests
   - `validation.ts` — Field validation
 
-- **`BACKEND_OCR_SERVICE.js`** — Express backend for OCR processing (optional legacy support)
+- **`docs/`** — Project documentation (schema, backend, security)
+- **`supabase/functions/`** — Edge functions (`ocr-parse`, `office-exit-scan`)
 
 ### Key Services (Domain Logic)
 

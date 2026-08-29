@@ -49,8 +49,16 @@ const expoDevHost = (): string | null => {
   return null;
 };
 
+const normalizeProductionApiUrl = (url: string): string => {
+  // Bare apex domain rejects POST /api/login (405). www and api subdomains work.
+  if (/^https:\/\/nu-secure\.com\/?$/i.test(url)) {
+    return 'https://www.nu-secure.com';
+  }
+  return stripTrailingSlash(url);
+};
+
 const resolveApiBaseUrl = (): string => {
-  const envUrl = stripTrailingSlash(process.env.EXPO_PUBLIC_API_URL?.trim() || '');
+  const envUrl = normalizeProductionApiUrl(process.env.EXPO_PUBLIC_API_URL?.trim() || '');
   const envParts = parseUrlParts(envUrl);
   const protocol = envParts?.protocol ?? 'http';
   const port = envParts?.port && envParts.port !== 80 && envParts.port !== 443
