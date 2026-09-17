@@ -1,5 +1,5 @@
 import { ID_PHOTO_QUALITY } from '@/services/camera';
-import { detectIdInGuide, type Rect } from '@/utils/id-card-presence';
+import { assessIdInGuide, type Rect } from '@/utils/id-card-presence';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImageManipulator from 'expo-image-manipulator';
@@ -17,13 +17,38 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const STABLE_MS = 1400;
-const WARMUP_MS = 900;
-const PROBE_INTERVAL_MS = 900;
-/** Consecutive positive probes required before we treat an ID as present */
-const DETECT_STREAK_NEEDED = 2;
+const STABLE_MS = 1600;
+/** Extra settle time after onCameraReady — iOS photo session lags the preview. */
+const WARMUP_MS = 1800;
+const PROBE_INTERVAL_MS = 1200;
+/** Minimum gap between any two takePictureAsync calls */
+const MIN_TAKE_GAP_MS = 850;
+/** Consecutive clear/readable probes required before auto-capture */
+const READY_STREAK_NEEDED = 3;
 
-type Phase = 'warmup' | 'align' | 'detected' | 'hold' | 'capturing' | 'reading';
+type Phase =
+  | 'warmup'
+  | 'align'
+  | 'blurry'
+  | 'unreadable'
+  | 'detected'
+  | 'hold'
+  | 'capturing'
+  | 'reading';
+
+function isCameraNotReadyError(error: unknown): boolean {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === 'string'
+        ? error
+        : String(error ?? '');
+  return /CameraNotReady|not ready/i.test(message);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 export type IdCaptureResult =
   | { ok: true; uri: string; base64: string }
@@ -115,6 +140,9 @@ export default function IdAutoCaptureScreen() {
   const cameraRef = useRef<CameraView>(null);
   const capturingRef = useRef(false);
   const probingRef = useRef(false);
+  const pictureBusyRef = useRef(false);
+  const lastTakeAtRef = useRef(0);
+  const pendingAutoCaptureRef = useRef(false);
   const finishedRef = useRef(false);
   const idPresentRef = useRef(false);
   const detectStreakRef = useRef(0);
@@ -122,6 +150,7 @@ export default function IdAutoCaptureScreen() {
   const lastMagRef = useRef<number | null>(null);
   const previewRef = useRef({ width: 0, height: 0 });
   const guideRef = useRef<Rect>({ x: 0, y: 0, width: 0, height: 0 });
+  const cameraReadyRef = useRef(false);
   const [permission, requestPermission] = useCameraPermissions();
   const [phase, setPhase] = useState<Phase>('warmup');
   const [cameraReady, setCameraReady] = useState(false);
@@ -144,21 +173,81 @@ export default function IdAutoCaptureScreen() {
     complete({ ok: false, cancelled: true });
   }, [complete]);
 
+  const takePictureSafe = useCallback(
+    async (options: { quality: number }): Promise<{
+      uri: string;
+      width: number;
+      height: number;
+    } | null> => {
+      if (!cameraReadyRef.current || !cameraRef.current || finishedRef.current) {
+        return null;
+      }
+      if (pictureBusyRef.current) {
+        return null;
+      }
+
+      const sinceLast = Date.now() - lastTakeAtRef.current;
+      if (sinceLast < MIN_TAKE_GAP_MS) {
+        await sleep(MIN_TAKE_GAP_MS - sinceLast);
+      }
+      if (!cameraReadyRef.current || !cameraRef.current || finishedRef.current) {
+        return null;
+      }
+      if (pictureBusyRef.current) {
+        return null;
+      }
+
+      pictureBusyRef.current = true;
+      try {
+        // Do not use skipProcessing on iOS — it often triggers CameraNotReadyException
+        // on the next takePictureAsync.
+        const photo = await cameraRef.current.takePictureAsync({
+          quality: options.quality,
+          shutterSound: false,
+        });
+        lastTakeAtRef.current = Date.now();
+        if (!photo?.uri) {
+          return null;
+        }
+        return {
+          uri: photo.uri,
+          width: photo.width,
+          height: photo.height,
+        };
+      } catch (error) {
+        lastTakeAtRef.current = Date.now();
+        if (isCameraNotReadyError(error)) {
+          return null;
+        }
+        throw error;
+      } finally {
+        pictureBusyRef.current = false;
+      }
+    },
+    [],
+  );
+
   const captureNow = useCallback(async () => {
-    if (capturingRef.current || !cameraRef.current) {
+    if (capturingRef.current || !cameraRef.current || !cameraReadyRef.current) {
       return;
     }
+    // Wait until probe releases the camera session.
+    if (probingRef.current || pictureBusyRef.current) {
+      pendingAutoCaptureRef.current = true;
+      return;
+    }
+
     capturingRef.current = true;
+    pendingAutoCaptureRef.current = false;
     setPhase('capturing');
 
     try {
-      const photo = await cameraRef.current.takePictureAsync({
-        quality: 0.7,
-        shutterSound: false,
-      });
+      await sleep(MIN_TAKE_GAP_MS);
+      const photo = await takePictureSafe({ quality: 0.7 });
 
       if (!photo?.uri) {
         capturingRef.current = false;
+        pendingAutoCaptureRef.current = idPresentRef.current;
         setPhase(idPresentRef.current ? 'detected' : 'align');
         return;
       }
@@ -181,12 +270,15 @@ export default function IdAutoCaptureScreen() {
 
       complete({ ok: true, uri: cropped.uri, base64: cropped.base64 });
     } catch (error) {
-      console.error('[IdAutoCapture]', error);
+      if (!isCameraNotReadyError(error)) {
+        console.error('[IdAutoCapture]', error);
+      }
       capturingRef.current = false;
+      pendingAutoCaptureRef.current = idPresentRef.current;
       setPhase(idPresentRef.current ? 'detected' : 'align');
       stableSinceRef.current = null;
     }
-  }, [complete]);
+  }, [complete, takePictureSafe]);
 
   const captureNowRef = useRef(captureNow);
   captureNowRef.current = captureNow;
@@ -195,6 +287,7 @@ export default function IdAutoCaptureScreen() {
     idPresentRef.current = false;
     detectStreakRef.current = 0;
     stableSinceRef.current = null;
+    pendingAutoCaptureRef.current = false;
     if (!capturingRef.current) {
       setPhase((prev) => (prev === 'warmup' ? prev : 'align'));
     }
@@ -219,6 +312,7 @@ export default function IdAutoCaptureScreen() {
     setPhase('warmup');
     clearDetection();
     lastMagRef.current = null;
+    pendingAutoCaptureRef.current = false;
 
     let sensorSub: { remove: () => void } | null = null;
     let cancelled = false;
@@ -228,9 +322,16 @@ export default function IdAutoCaptureScreen() {
         cancelled ||
         capturingRef.current ||
         probingRef.current ||
+        pictureBusyRef.current ||
         !cameraRef.current ||
+        !cameraReadyRef.current ||
         finishedRef.current
       ) {
+        return;
+      }
+
+      if (pendingAutoCaptureRef.current) {
+        void captureNowRef.current();
         return;
       }
 
@@ -240,24 +341,19 @@ export default function IdAutoCaptureScreen() {
         return;
       }
 
-      // Need a laid-out guide before analyzing.
       if (guideRef.current.width < 8 || previewRef.current.width < 8) {
         return;
       }
 
       probingRef.current = true;
       try {
-        const photo = await cameraRef.current.takePictureAsync({
-          quality: 0.2,
-          shutterSound: false,
-          skipProcessing: true,
-        });
+        const photo = await takePictureSafe({ quality: 0.45 });
 
         if (!photo?.uri || cancelled || capturingRef.current) {
           return;
         }
 
-        const present = await detectIdInGuide({
+        const assessment = await assessIdInGuide({
           uri: photo.uri,
           photoWidth: photo.width,
           photoHeight: photo.height,
@@ -269,9 +365,9 @@ export default function IdAutoCaptureScreen() {
           return;
         }
 
-        if (present) {
+        if (assessment.ready) {
           detectStreakRef.current += 1;
-          if (detectStreakRef.current >= DETECT_STREAK_NEEDED) {
+          if (detectStreakRef.current >= READY_STREAK_NEEDED) {
             idPresentRef.current = true;
             if (stableSinceRef.current == null) {
               stableSinceRef.current = Date.now();
@@ -280,22 +376,48 @@ export default function IdAutoCaptureScreen() {
               const heldFor = Date.now() - stableSinceRef.current;
               if (heldFor >= STABLE_MS) {
                 setPhase('hold');
-                void captureNowRef.current();
+                // Defer final shot until this probe releases the camera.
+                pendingAutoCaptureRef.current = true;
               } else {
                 setPhase('hold');
               }
             }
           } else {
-            setPhase('align');
+            setPhase('detected');
           }
+          return;
+        }
+
+        idPresentRef.current = false;
+        detectStreakRef.current = 0;
+        stableSinceRef.current = null;
+        pendingAutoCaptureRef.current = false;
+
+        if (assessment.reason === 'blurry') {
+          setPhase('blurry');
+        } else if (
+          assessment.reason === 'unreadable' ||
+          assessment.reason === 'glare' ||
+          assessment.reason === 'dark'
+        ) {
+          setPhase('unreadable');
         } else {
-          // No ID in frame — never auto-capture.
-          clearDetection();
+          setPhase('align');
         }
       } catch (error) {
-        console.warn('[IdAutoCapture] probe failed', error);
+        if (!isCameraNotReadyError(error)) {
+          console.warn('[IdAutoCapture] probe failed', error);
+        }
       } finally {
         probingRef.current = false;
+        if (
+          pendingAutoCaptureRef.current &&
+          !cancelled &&
+          !capturingRef.current &&
+          !finishedRef.current
+        ) {
+          void captureNowRef.current();
+        }
       }
     };
 
@@ -303,10 +425,9 @@ export default function IdAutoCaptureScreen() {
       void probeForId();
     }, PROBE_INTERVAL_MS);
 
-    // First probe shortly after warmup.
     const firstProbe = setTimeout(() => {
       void probeForId();
-    }, WARMUP_MS + 150);
+    }, WARMUP_MS + 250);
 
     void (async () => {
       if (Platform.OS === 'web') {
@@ -336,7 +457,6 @@ export default function IdAutoCaptureScreen() {
             return;
           }
           if (Math.abs(mag - prev) / Math.max(mag, 0.5) > 0.08) {
-            // Motion resets hold timer, but keeps detection streak if ID still present.
             stableSinceRef.current = idPresentRef.current ? Date.now() : null;
             if (!capturingRef.current && idPresentRef.current) {
               setPhase('detected');
@@ -354,7 +474,7 @@ export default function IdAutoCaptureScreen() {
       clearTimeout(firstProbe);
       sensorSub?.remove();
     };
-  }, [cameraReady, clearDetection]);
+  }, [cameraReady, clearDetection, takePictureSafe]);
 
   const instruction =
     phase === 'reading'
@@ -362,18 +482,22 @@ export default function IdAutoCaptureScreen() {
       : phase === 'capturing'
         ? 'Capturing…'
         : phase === 'hold'
-          ? 'ID detected — hold still…'
+          ? 'Clear ID — hold still…'
           : phase === 'detected'
-            ? 'ID detected — keep it in the frame…'
-            : phase === 'warmup'
-              ? 'Starting camera…'
-              : 'Place your ID inside the frame to capture.';
+            ? 'ID looks clear — keep holding…'
+            : phase === 'blurry'
+              ? 'Too blurry — hold steady and move closer'
+              : phase === 'unreadable'
+                ? 'Text not clear yet — improve lighting / fill the frame'
+                : phase === 'warmup'
+                  ? 'Starting camera…'
+                  : 'Place your ID inside the frame';
 
+  const cornersReady = phase === 'hold' || phase === 'detected';
   const showBusy =
     phase === 'capturing' || phase === 'reading' || phase === 'hold';
   const canManualCapture =
     cameraReady &&
-    !capturingRef.current &&
     phase !== 'capturing' &&
     phase !== 'reading' &&
     phase !== 'warmup';
@@ -414,7 +538,10 @@ export default function IdAutoCaptureScreen() {
           style={StyleSheet.absoluteFill}
           facing="back"
           mode="picture"
-          onCameraReady={() => setCameraReady(true)}
+          onCameraReady={() => {
+            cameraReadyRef.current = true;
+            setCameraReady(true);
+          }}
         />
 
         <View style={styles.overlay} pointerEvents="box-none">
@@ -438,28 +565,32 @@ export default function IdAutoCaptureScreen() {
                 style={[
                   styles.corner,
                   styles.tl,
-                  (phase === 'hold' || phase === 'detected') && styles.cornerReady,
+                  cornersReady && styles.cornerReady,
+                  (phase === 'blurry' || phase === 'unreadable') && styles.cornerWarn,
                 ]}
               />
               <View
                 style={[
                   styles.corner,
                   styles.tr,
-                  (phase === 'hold' || phase === 'detected') && styles.cornerReady,
+                  cornersReady && styles.cornerReady,
+                  (phase === 'blurry' || phase === 'unreadable') && styles.cornerWarn,
                 ]}
               />
               <View
                 style={[
                   styles.corner,
                   styles.bl,
-                  (phase === 'hold' || phase === 'detected') && styles.cornerReady,
+                  cornersReady && styles.cornerReady,
+                  (phase === 'blurry' || phase === 'unreadable') && styles.cornerWarn,
                 ]}
               />
               <View
                 style={[
                   styles.corner,
                   styles.br,
-                  (phase === 'hold' || phase === 'detected') && styles.cornerReady,
+                  cornersReady && styles.cornerReady,
+                  (phase === 'blurry' || phase === 'unreadable') && styles.cornerWarn,
                 ]}
               />
             </View>
@@ -478,7 +609,13 @@ export default function IdAutoCaptureScreen() {
       </TouchableOpacity>
 
       <View style={[styles.hintWrap, { bottom: insets.bottom + 28 }]}>
-        <View style={styles.hintCard}>
+        <View
+          style={[
+            styles.hintCard,
+            (phase === 'blurry' || phase === 'unreadable') && styles.hintCardWarn,
+            cornersReady && styles.hintCardReady,
+          ]}
+        >
           {showBusy && (
             <ActivityIndicator color="#FFFFFF" style={{ marginRight: 10 }} />
           )}
@@ -549,6 +686,9 @@ const styles = StyleSheet.create({
   cornerReady: {
     borderColor: '#22C55E',
   },
+  cornerWarn: {
+    borderColor: '#F59E0B',
+  },
   tl: {
     top: 0,
     left: 0,
@@ -602,6 +742,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     borderRadius: 14,
     maxWidth: 360,
+  },
+  hintCardWarn: {
+    backgroundColor: 'rgba(180, 83, 9, 0.94)',
+  },
+  hintCardReady: {
+    backgroundColor: 'rgba(21, 128, 61, 0.94)',
   },
   hintText: {
     color: '#FFFFFF',

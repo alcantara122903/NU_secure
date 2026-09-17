@@ -1,7 +1,7 @@
 /**
- * Lightweight "is there an ID card in the guide?" heuristic.
- * Uses luminance variance + edge density on a tiny JPEG crop.
- * Not ML — good enough to avoid empty-frame auto-capture in Expo Go.
+ * ID guide assessment for auto-capture gating.
+ * Requires: card present + sharp (not blurry) + enough text-like detail to be readable.
+ * Heuristic only (no OCR) — suitable for Expo Go.
  */
 
 import * as FileSystem from 'expo-file-system/legacy';
@@ -9,6 +9,17 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import jpeg from 'jpeg-js';
 
 export type Rect = { x: number; y: number; width: number; height: number };
+
+export type IdGuideRejectReason = 'empty' | 'blurry' | 'unreadable' | 'glare' | 'dark';
+
+export type IdGuideAssessment = {
+  /** True only when auto-capture is allowed */
+  ready: boolean;
+  hasCard: boolean;
+  isSharp: boolean;
+  isReadable: boolean;
+  reason: IdGuideRejectReason | 'ready';
+};
 
 function base64ToUint8Array(base64: string): Uint8Array {
   const pure = base64.includes(',') ? base64.split(',')[1] : base64;
@@ -62,29 +73,43 @@ function computeGuideCrop(params: {
   };
   if (crop.originX + crop.width > photoWidth) crop.width = photoWidth - crop.originX;
   if (crop.originY + crop.height > photoHeight) crop.height = photoHeight - crop.originY;
-  if (crop.width < 16 || crop.height < 16) return null;
+  if (crop.width < 24 || crop.height < 24) return null;
   return crop;
 }
 
+function reject(
+  reason: IdGuideRejectReason,
+  partial?: Partial<IdGuideAssessment>,
+): IdGuideAssessment {
+  return {
+    ready: false,
+    hasCard: false,
+    isSharp: false,
+    isReadable: false,
+    reason,
+    ...partial,
+  };
+}
+
 /**
- * Returns true when the guide region looks like a plastic ID card
- * (enough texture/edges), false for empty desk/wall/blurry nothing.
+ * Assess whether the guide region has a clear, readable ID ready for capture.
  */
-export async function detectIdInGuide(params: {
+export async function assessIdInGuide(params: {
   uri: string;
   photoWidth: number;
   photoHeight: number;
   preview: { width: number; height: number };
   guide: Rect;
-}): Promise<boolean> {
+}): Promise<IdGuideAssessment> {
   const crop = computeGuideCrop(params);
-  if (!crop) return false;
+  if (!crop) return reject('empty');
 
+  // Higher res than presence-only check so blur/text detail is measurable.
   const resized = await ImageManipulator.manipulateAsync(
     params.uri,
-    [{ crop }, { resize: { width: 96 } }],
+    [{ crop }, { resize: { width: 180 } }],
     {
-      compress: 0.55,
+      compress: 0.7,
       format: ImageManipulator.SaveFormat.JPEG,
       base64: true,
     },
@@ -94,59 +119,142 @@ export async function detectIdInGuide(params: {
   if (!b64 && resized.uri) {
     b64 = await FileSystem.readAsStringAsync(resized.uri, { encoding: 'base64' });
   }
-  if (!b64) return false;
+  if (!b64) return reject('empty');
 
   let decoded: { width: number; height: number; data: Uint8Array };
   try {
     decoded = jpeg.decode(base64ToUint8Array(b64), { useTArray: true });
   } catch {
-    return false;
+    return reject('empty');
   }
 
   const { width, height, data } = decoded;
-  if (width < 8 || height < 8) return false;
+  if (width < 24 || height < 24) return reject('empty');
 
-  const luminances: number[] = [];
-  let edgeSum = 0;
-  let edgeCount = 0;
-
+  const luminances = new Float32Array(width * height);
+  let mean = 0;
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const i = (y * width + x) * 4;
       const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-      luminances.push(lum);
-
-      if (x + 1 < width && y + 1 < height) {
-        const right = (y * width + (x + 1)) * 4;
-        const down = ((y + 1) * width + x) * 4;
-        const lumR = 0.299 * data[right] + 0.587 * data[right + 1] + 0.114 * data[right + 2];
-        const lumD = 0.299 * data[down] + 0.587 * data[down + 1] + 0.114 * data[down + 2];
-        edgeSum += Math.abs(lum - lumR) + Math.abs(lum - lumD);
-        edgeCount += 2;
-      }
+      luminances[y * width + x] = lum;
+      mean += lum;
     }
   }
+  const n = width * height;
+  mean /= n;
 
-  const n = luminances.length;
-  if (n < 64) return false;
-
-  const mean = luminances.reduce((a, b) => a + b, 0) / n;
   let variance = 0;
-  for (const lum of luminances) {
-    const d = lum - mean;
+  for (let i = 0; i < n; i++) {
+    const d = luminances[i] - mean;
     variance += d * d;
   }
   variance /= n;
 
-  const edgeAvg = edgeCount > 0 ? edgeSum / edgeCount : 0;
+  // Focus on the inner content area (ignore outer border) for text readability.
+  const x0 = Math.floor(width * 0.08);
+  const x1 = Math.ceil(width * 0.92);
+  const y0 = Math.floor(height * 0.12);
+  const y1 = Math.ceil(height * 0.88);
 
-  // Empty wall/desk: low variance + low edges.
-  // ID card (text/photo/borders): higher variance + edges.
-  // Too dark / blown-out glare also tends to fail these thresholds.
-  const hasTexture = variance >= 280;
-  const hasEdges = edgeAvg >= 9.5;
-  const notTooDark = mean >= 28;
-  const notBlownOut = mean <= 235;
+  let edgeSum = 0;
+  let edgeCount = 0;
+  let strongEdgeCount = 0;
+  let laplacianSumSq = 0;
+  let laplacianCount = 0;
+  let localContrastHits = 0;
+  let localContrastSamples = 0;
 
-  return hasTexture && hasEdges && notTooDark && notBlownOut;
+  for (let y = y0 + 1; y < y1 - 1; y++) {
+    for (let x = x0 + 1; x < x1 - 1; x++) {
+      const idx = y * width + x;
+      const c = luminances[idx];
+      const l = luminances[idx - 1];
+      const r = luminances[idx + 1];
+      const u = luminances[idx - width];
+      const d = luminances[idx + width];
+
+      const dx = Math.abs(c - r);
+      const dy = Math.abs(c - d);
+      const edge = dx + dy;
+      edgeSum += edge;
+      edgeCount += 1;
+      if (edge >= 28) strongEdgeCount += 1;
+
+      // Discrete Laplacian — sharp images have higher variance of this response.
+      const lap = Math.abs(4 * c - l - r - u - d);
+      laplacianSumSq += lap * lap;
+      laplacianCount += 1;
+
+      // Local contrast in a tiny neighborhood (text strokes create peaks).
+      const maxN = Math.max(c, l, r, u, d);
+      const minN = Math.min(c, l, r, u, d);
+      localContrastSamples += 1;
+      if (maxN - minN >= 32) localContrastHits += 1;
+    }
+  }
+
+  if (edgeCount < 100 || laplacianCount < 100) {
+    return reject('empty');
+  }
+
+  const edgeAvg = edgeSum / edgeCount;
+  const strongEdgeRatio = strongEdgeCount / edgeCount;
+  const laplacianVar = laplacianSumSq / laplacianCount;
+  const localContrastRatio = localContrastHits / Math.max(localContrastSamples, 1);
+
+  // Lighting gates
+  if (mean < 32) {
+    return reject('dark', { hasCard: variance >= 220 });
+  }
+  if (mean > 232) {
+    return reject('glare', { hasCard: variance >= 220 });
+  }
+
+  // Presence: enough overall structure for a card in frame
+  const hasCard = variance >= 320 && edgeAvg >= 11;
+  if (!hasCard) {
+    return reject('empty');
+  }
+
+  // Sharpness: blurry frames smear edges → low Laplacian energy
+  const isSharp = laplacianVar >= 420 && edgeAvg >= 14;
+  if (!isSharp) {
+    return reject('blurry', { hasCard: true, isSharp: false });
+  }
+
+  // Readability: enough strong local edges / contrast to imply text & photo detail
+  const isReadable =
+    strongEdgeRatio >= 0.085 &&
+    localContrastRatio >= 0.12 &&
+    laplacianVar >= 520 &&
+    edgeAvg >= 16;
+
+  if (!isReadable) {
+    return reject('unreadable', {
+      hasCard: true,
+      isSharp: true,
+      isReadable: false,
+    });
+  }
+
+  return {
+    ready: true,
+    hasCard: true,
+    isSharp: true,
+    isReadable: true,
+    reason: 'ready',
+  };
+}
+
+/** @deprecated Prefer assessIdInGuide — kept for any older imports */
+export async function detectIdInGuide(params: {
+  uri: string;
+  photoWidth: number;
+  photoHeight: number;
+  preview: { width: number; height: number };
+  guide: Rect;
+}): Promise<boolean> {
+  const result = await assessIdInGuide(params);
+  return result.ready;
 }
