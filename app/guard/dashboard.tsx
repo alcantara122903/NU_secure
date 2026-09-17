@@ -3,7 +3,7 @@ import { authSessionService } from '@/services/auth-session';
 import { supabase } from '@/services/database';
 import { fetchReadyToExitVisitors } from '@/services/guard-alerts-dashboard';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect } from "expo-router/react-navigation";
 import { useRouter } from 'expo-router';
 import { LogOut } from 'lucide-react-native';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';

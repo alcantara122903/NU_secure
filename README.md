@@ -1,6 +1,6 @@
 # NU-SECURE Mobile App
 
-Smart visitor monitoring system for **Guard** and **Office Staff** — built with Expo (React Native), Laravel Sanctum auth, and Supabase.
+Smart visitor monitoring system for **Guard** and **Office Staff** — built with Expo SDK 57 (React Native), Laravel Sanctum auth, and Supabase.
 
 ## Quick start
 

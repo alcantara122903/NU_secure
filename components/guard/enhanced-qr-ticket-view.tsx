@@ -35,6 +35,8 @@ export type EnhancedQrRouteOffice = {
   id: number;
   /** Office / destination name shown as primary line */
   name: string;
+  /** Floor from office table (e.g. "5th Floor") */
+  floor?: string;
   /** Enrollee step description shown under the office name */
   stepName?: string;
   /** Optional progress status for resume tickets */
@@ -239,6 +241,14 @@ export function EnhancedQrTicketView({
                       source={{ uri: photoUri }}
                       style={styles.visitorPhoto}
                       resizeMode="cover"
+                      onError={() => {
+                        if (__DEV__) {
+                          console.warn(
+                            "[EnhancedQrTicketView] failed to load face photo:",
+                            photoUri,
+                          );
+                        }
+                      }}
                     />
                   ) : (
                     <View style={styles.photoPlaceholder}>
@@ -383,6 +393,11 @@ export function EnhancedQrTicketView({
                   </View>
                   <View style={styles.routeTextWrapper}>
                     <Text style={styles.routeOfficeText}>{office.name}</Text>
+                    {office.floor ? (
+                      <Text style={styles.routeFloorText} numberOfLines={1}>
+                        {office.floor}
+                      </Text>
+                    ) : null}
                     {office.stepName ? (
                       <Text style={styles.routeStepText} numberOfLines={3}>
                         {office.stepName}
@@ -915,6 +930,12 @@ const styles = StyleSheet.create({
     color: "#0648A8",
     fontSize: 13,
     fontWeight: "800",
+  },
+  routeFloorText: {
+    color: "#0F766E",
+    fontSize: 12,
+    fontWeight: "700",
+    marginTop: 2,
   },
   routeStepText: {
     color: "#4B5563",

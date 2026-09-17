@@ -1,9 +1,10 @@
 import { ID_PHOTO_QUALITY } from '@/services/camera';
+import { detectIdInGuide, type Rect } from '@/utils/id-card-presence';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { useNavigation, useRouter } from 'expo-router';
-import { X } from 'lucide-react-native';
+import { Camera, X } from 'lucide-react-native';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -16,12 +17,13 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const STABLE_MS = 1600;
+const STABLE_MS = 1400;
 const WARMUP_MS = 900;
-const MOTION_THRESHOLD = 0.12;
+const PROBE_INTERVAL_MS = 900;
+/** Consecutive positive probes required before we treat an ID as present */
+const DETECT_STREAK_NEEDED = 2;
 
-type Phase = 'warmup' | 'align' | 'hold' | 'capturing' | 'reading';
-type Rect = { x: number; y: number; width: number; height: number };
+type Phase = 'warmup' | 'align' | 'detected' | 'hold' | 'capturing' | 'reading';
 
 export type IdCaptureResult =
   | { ok: true; uri: string; base64: string }
@@ -112,7 +114,10 @@ export default function IdAutoCaptureScreen() {
   const insets = useSafeAreaInsets();
   const cameraRef = useRef<CameraView>(null);
   const capturingRef = useRef(false);
+  const probingRef = useRef(false);
   const finishedRef = useRef(false);
+  const idPresentRef = useRef(false);
+  const detectStreakRef = useRef(0);
   const stableSinceRef = useRef<number | null>(null);
   const lastMagRef = useRef<number | null>(null);
   const previewRef = useRef({ width: 0, height: 0 });
@@ -154,7 +159,7 @@ export default function IdAutoCaptureScreen() {
 
       if (!photo?.uri) {
         capturingRef.current = false;
-        setPhase('align');
+        setPhase(idPresentRef.current ? 'detected' : 'align');
         return;
       }
 
@@ -178,13 +183,22 @@ export default function IdAutoCaptureScreen() {
     } catch (error) {
       console.error('[IdAutoCapture]', error);
       capturingRef.current = false;
-      setPhase('align');
+      setPhase(idPresentRef.current ? 'detected' : 'align');
       stableSinceRef.current = null;
     }
   }, [complete]);
 
   const captureNowRef = useRef(captureNow);
   captureNowRef.current = captureNow;
+
+  const clearDetection = useCallback(() => {
+    idPresentRef.current = false;
+    detectStreakRef.current = 0;
+    stableSinceRef.current = null;
+    if (!capturingRef.current) {
+      setPhase((prev) => (prev === 'warmup' ? prev : 'align'));
+    }
+  }, []);
 
   useEffect(() => {
     const sub = navigation.addListener('beforeRemove', () => {
@@ -203,27 +217,96 @@ export default function IdAutoCaptureScreen() {
 
     const warmupAt = Date.now();
     setPhase('warmup');
-    stableSinceRef.current = null;
+    clearDetection();
     lastMagRef.current = null;
 
     let sensorSub: { remove: () => void } | null = null;
-    const tick = setInterval(() => {
-      if (capturingRef.current) {
+    let cancelled = false;
+
+    const probeForId = async () => {
+      if (
+        cancelled ||
+        capturingRef.current ||
+        probingRef.current ||
+        !cameraRef.current ||
+        finishedRef.current
+      ) {
         return;
       }
+
       const now = Date.now();
       if (now - warmupAt < WARMUP_MS) {
         setPhase('warmup');
         return;
       }
-      if (stableSinceRef.current == null) {
-        stableSinceRef.current = now;
+
+      // Need a laid-out guide before analyzing.
+      if (guideRef.current.width < 8 || previewRef.current.width < 8) {
+        return;
       }
-      setPhase('hold');
-      if (now - stableSinceRef.current >= STABLE_MS) {
-        void captureNowRef.current();
+
+      probingRef.current = true;
+      try {
+        const photo = await cameraRef.current.takePictureAsync({
+          quality: 0.2,
+          shutterSound: false,
+          skipProcessing: true,
+        });
+
+        if (!photo?.uri || cancelled || capturingRef.current) {
+          return;
+        }
+
+        const present = await detectIdInGuide({
+          uri: photo.uri,
+          photoWidth: photo.width,
+          photoHeight: photo.height,
+          preview: previewRef.current,
+          guide: guideRef.current,
+        });
+
+        if (cancelled || capturingRef.current) {
+          return;
+        }
+
+        if (present) {
+          detectStreakRef.current += 1;
+          if (detectStreakRef.current >= DETECT_STREAK_NEEDED) {
+            idPresentRef.current = true;
+            if (stableSinceRef.current == null) {
+              stableSinceRef.current = Date.now();
+              setPhase('detected');
+            } else {
+              const heldFor = Date.now() - stableSinceRef.current;
+              if (heldFor >= STABLE_MS) {
+                setPhase('hold');
+                void captureNowRef.current();
+              } else {
+                setPhase('hold');
+              }
+            }
+          } else {
+            setPhase('align');
+          }
+        } else {
+          // No ID in frame — never auto-capture.
+          clearDetection();
+        }
+      } catch (error) {
+        console.warn('[IdAutoCapture] probe failed', error);
+      } finally {
+        probingRef.current = false;
       }
-    }, 200);
+    };
+
+    const probeTick = setInterval(() => {
+      void probeForId();
+    }, PROBE_INTERVAL_MS);
+
+    // First probe shortly after warmup.
+    const firstProbe = setTimeout(() => {
+      void probeForId();
+    }, WARMUP_MS + 150);
 
     void (async () => {
       if (Platform.OS === 'web') {
@@ -253,22 +336,25 @@ export default function IdAutoCaptureScreen() {
             return;
           }
           if (Math.abs(mag - prev) / Math.max(mag, 0.5) > 0.08) {
-            stableSinceRef.current = null;
-            if (!capturingRef.current) {
-              setPhase('align');
+            // Motion resets hold timer, but keeps detection streak if ID still present.
+            stableSinceRef.current = idPresentRef.current ? Date.now() : null;
+            if (!capturingRef.current && idPresentRef.current) {
+              setPhase('detected');
             }
           }
         });
       } catch {
-        // Timer still auto-captures after hold.
+        // Detection probe still gates capture without accelerometer.
       }
     })();
 
     return () => {
-      clearInterval(tick);
+      cancelled = true;
+      clearInterval(probeTick);
+      clearTimeout(firstProbe);
       sensorSub?.remove();
     };
-  }, [cameraReady]);
+  }, [cameraReady, clearDetection]);
 
   const instruction =
     phase === 'reading'
@@ -276,8 +362,21 @@ export default function IdAutoCaptureScreen() {
       : phase === 'capturing'
         ? 'Capturing…'
         : phase === 'hold'
-          ? 'Hold still…'
-          : 'Position your ID inside the frame.';
+          ? 'ID detected — hold still…'
+          : phase === 'detected'
+            ? 'ID detected — keep it in the frame…'
+            : phase === 'warmup'
+              ? 'Starting camera…'
+              : 'Place your ID inside the frame to capture.';
+
+  const showBusy =
+    phase === 'capturing' || phase === 'reading' || phase === 'hold';
+  const canManualCapture =
+    cameraReady &&
+    !capturingRef.current &&
+    phase !== 'capturing' &&
+    phase !== 'reading' &&
+    phase !== 'warmup';
 
   if (!permission) {
     return <View style={styles.black} />;
@@ -335,10 +434,34 @@ export default function IdAutoCaptureScreen() {
                 };
               }}
             >
-              <View style={[styles.corner, styles.tl, phase === 'hold' && styles.cornerReady]} />
-              <View style={[styles.corner, styles.tr, phase === 'hold' && styles.cornerReady]} />
-              <View style={[styles.corner, styles.bl, phase === 'hold' && styles.cornerReady]} />
-              <View style={[styles.corner, styles.br, phase === 'hold' && styles.cornerReady]} />
+              <View
+                style={[
+                  styles.corner,
+                  styles.tl,
+                  (phase === 'hold' || phase === 'detected') && styles.cornerReady,
+                ]}
+              />
+              <View
+                style={[
+                  styles.corner,
+                  styles.tr,
+                  (phase === 'hold' || phase === 'detected') && styles.cornerReady,
+                ]}
+              />
+              <View
+                style={[
+                  styles.corner,
+                  styles.bl,
+                  (phase === 'hold' || phase === 'detected') && styles.cornerReady,
+                ]}
+              />
+              <View
+                style={[
+                  styles.corner,
+                  styles.br,
+                  (phase === 'hold' || phase === 'detected') && styles.cornerReady,
+                ]}
+              />
             </View>
             <View style={styles.maskSide} />
           </View>
@@ -356,11 +479,22 @@ export default function IdAutoCaptureScreen() {
 
       <View style={[styles.hintWrap, { bottom: insets.bottom + 28 }]}>
         <View style={styles.hintCard}>
-          {(phase === 'capturing' || phase === 'reading' || phase === 'hold') && (
+          {showBusy && (
             <ActivityIndicator color="#FFFFFF" style={{ marginRight: 10 }} />
           )}
           <Text style={styles.hintText}>{instruction}</Text>
         </View>
+
+        {canManualCapture ? (
+          <TouchableOpacity
+            style={styles.manualBtn}
+            activeOpacity={0.9}
+            onPress={() => void captureNow()}
+          >
+            <Camera size={18} color="#FFFFFF" strokeWidth={2.4} />
+            <Text style={styles.manualBtnText}>Capture manually</Text>
+          </TouchableOpacity>
+        ) : null}
       </View>
     </View>
   );
@@ -380,7 +514,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   overlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     justifyContent: 'center',
   },
   maskTop: {
@@ -458,6 +592,7 @@ const styles = StyleSheet.create({
     left: 20,
     right: 20,
     alignItems: 'center',
+    gap: 12,
   },
   hintCard: {
     flexDirection: 'row',
@@ -474,6 +609,22 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textAlign: 'center',
     flexShrink: 1,
+  },
+  manualBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(15, 23, 42, 0.88)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.28)',
+    paddingVertical: 12,
+    paddingHorizontal: 18,
+    borderRadius: 14,
+  },
+  manualBtnText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
   },
   permTitle: {
     color: '#FFFFFF',

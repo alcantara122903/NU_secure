@@ -1,7 +1,7 @@
 import { AlertModalProvider } from '@/components/ui/alert-modal-context';
 import { AuthProvider, useAuth } from '@/contexts/auth-context';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
+import { DarkTheme, DefaultTheme, ThemeProvider } from "expo-router/react-navigation";
 import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
@@ -74,7 +74,7 @@ function AuthNavigationGate({ children }: { children: ReactNode }) {
     <View style={styles.flex}>
       {children}
       {showRestoreOverlay ? (
-        <View style={StyleSheet.absoluteFillObject}>
+        <View style={StyleSheet.absoluteFill}>
           <SessionRestoreScreen />
         </View>
       ) : null}

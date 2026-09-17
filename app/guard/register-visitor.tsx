@@ -1,5 +1,9 @@
 import { DataPrivacyNoticeModal } from "@/components/guard/data-privacy-notice-modal";
 import { FaceCaptureStepScreen } from "@/components/guard/face-capture-step";
+import {
+  PhotoCaptureConsentModal,
+  type PhotoCaptureConsentKind,
+} from "@/components/guard/photo-capture-consent-modal";
 import { ReturningVisitorModal } from "@/components/guard/returning-visitor-modal";
 import { VisitorInformationStepScreen } from "@/components/guard/visitor-information-step";
 import { Colors } from "@/constants/colors";
@@ -7,6 +11,10 @@ import { useColorScheme } from "@/hooks/use-color-scheme";
 import { beginIdCapture } from "./id-auto-capture";
 import { buildQRTicketPayloadV1, buildVisitorScanQrJson } from "@/lib/qr-ticket-payload";
 import { generateQRToken } from "@/lib/generate-qr-token";
+import {
+  persistTicketFacePhotoUri,
+  setPendingVisitorTicket,
+} from "@/lib/visitor-ticket-handoff";
 import { cameraService, FACE_PHOTO_QUALITY, ID_PHOTO_QUALITY } from "@/services/camera";
 import { supabase } from "@/services/database";
 import { officeService } from "@/services/office";
@@ -47,6 +55,24 @@ import {
     View,
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+
+/** Prefer memory handoff + cached face URI over huge Expo Router params. */
+async function navigateToQrTicket(
+  router: ReturnType<typeof useRouter>,
+  ticketData: Record<string, unknown>,
+): Promise<void> {
+  const facePhotoUri = await persistTicketFacePhotoUri(
+    typeof ticketData.facePhotoUri === "string"
+      ? ticketData.facePhotoUri
+      : undefined,
+  );
+  const payload = { ...ticketData, facePhotoUri };
+  setPendingVisitorTicket(payload);
+  router.replace({
+    pathname: "/guard/qr-ticket",
+    params: { handoff: "1" },
+  });
+}
 import Svg, { Circle, Path } from "react-native-svg";
 
 type PrivacyPendingAction = "captureId" | "uploadId" | "captureFace" | null;
@@ -188,6 +214,11 @@ export default function RegisterVisitorScreen() {
   const [showOfficeModal, setShowOfficeModal] = useState(false);
   const [showPrivacyModal, setShowPrivacyModal] = useState(false);
   const [privacyConsentGiven, setPrivacyConsentGiven] = useState(false);
+  const [showPhotoConsentModal, setShowPhotoConsentModal] = useState(false);
+  const [photoConsentKind, setPhotoConsentKind] =
+    useState<PhotoCaptureConsentKind>("face");
+  const [facePhotoConsentGiven, setFacePhotoConsentGiven] = useState(false);
+  const [idPhotoConsentGiven, setIdPhotoConsentGiven] = useState(false);
   const [privacyPendingAction, setPrivacyPendingAction] =
     useState<PrivacyPendingAction>(null);
 
@@ -403,7 +434,8 @@ export default function RegisterVisitorScreen() {
 
       console.log("✅ Photo captured successfully");
       setCapturedFacePhoto(result.base64 || null);
-      setPhotoPreview(result.uri || null);
+      const stablePreviewUri = await persistTicketFacePhotoUri(result.uri);
+      setPhotoPreview(stablePreviewUri || result.uri || null);
     } catch (error) {
       console.error("❌ Error capturing photo:", error);
       Alert.alert("Error", "Failed to capture photo. Please try again.");
@@ -412,24 +444,7 @@ export default function RegisterVisitorScreen() {
     }
   };
 
-  const requestPrivacyThen = (action: Exclude<PrivacyPendingAction, null>) => {
-    // Clear any stuck spinner from a previous hung camera/gallery open.
-    setIsCapturingIdPhoto(false);
-    setIsUploadingIdPhoto(false);
-    setIsCapturingPhoto(false);
-
-    if (privacyConsentGiven) {
-      runPendingPrivacyAction(action);
-      return;
-    }
-
-    setPrivacyPendingAction(action);
-    setShowPrivacyModal(true);
-  };
-
-  const handlePrivacyDecline = () => {
-    setShowPrivacyModal(false);
-    setPrivacyPendingAction(null);
+  const clearCaptureSpinners = () => {
     setIsCapturingIdPhoto(false);
     setIsUploadingIdPhoto(false);
     setIsCapturingPhoto(false);
@@ -447,20 +462,86 @@ export default function RegisterVisitorScreen() {
     }
   };
 
+  const continueAfterPrivacy = (
+    action: Exclude<PrivacyPendingAction, null>,
+  ) => {
+    // Gallery upload only needs the privacy notice.
+    if (action === "uploadId") {
+      runPendingPrivacyAction(action);
+      return;
+    }
+
+    const alreadyConsented =
+      action === "captureFace" ? facePhotoConsentGiven : idPhotoConsentGiven;
+
+    if (alreadyConsented) {
+      runPendingPrivacyAction(action);
+      return;
+    }
+
+    setPrivacyPendingAction(action);
+    setPhotoConsentKind(action === "captureFace" ? "face" : "id");
+    setShowPhotoConsentModal(true);
+  };
+
+  const requestPrivacyThen = (action: Exclude<PrivacyPendingAction, null>) => {
+    // Clear any stuck spinner from a previous hung camera/gallery open.
+    clearCaptureSpinners();
+
+    if (privacyConsentGiven) {
+      continueAfterPrivacy(action);
+      return;
+    }
+
+    setPrivacyPendingAction(action);
+    setShowPrivacyModal(true);
+  };
+
+  const handlePrivacyDecline = () => {
+    setShowPrivacyModal(false);
+    setPrivacyPendingAction(null);
+    clearCaptureSpinners();
+  };
+
   const handlePrivacyAgree = () => {
     const action = privacyPendingAction;
     setPrivacyConsentGiven(true);
     setShowPrivacyModal(false);
     setPrivacyPendingAction(null);
-    setIsCapturingIdPhoto(false);
-    setIsUploadingIdPhoto(false);
-    setIsCapturingPhoto(false);
+    clearCaptureSpinners();
 
     if (!action) {
       return;
     }
 
-    // Overlay is already gone (not RN Modal), so camera can open right away.
+    // Overlay is already gone (not RN Modal), so next step can open right away.
+    requestAnimationFrame(() => {
+      continueAfterPrivacy(action);
+    });
+  };
+
+  const handlePhotoConsentDecline = () => {
+    setShowPhotoConsentModal(false);
+    setPrivacyPendingAction(null);
+    clearCaptureSpinners();
+  };
+
+  const handlePhotoConsentAgree = () => {
+    const action = privacyPendingAction;
+    setShowPhotoConsentModal(false);
+    setPrivacyPendingAction(null);
+    clearCaptureSpinners();
+
+    if (action === "captureFace") {
+      setFacePhotoConsentGiven(true);
+    } else if (action === "captureId") {
+      setIdPhotoConsentGiven(true);
+    }
+
+    if (!action || action === "uploadId") {
+      return;
+    }
+
     requestAnimationFrame(() => {
       runPendingPrivacyAction(action);
     });
@@ -554,10 +635,7 @@ export default function RegisterVisitorScreen() {
             ],
           };
 
-          router.replace({
-            pathname: "/guard/qr-ticket",
-            params: { data: JSON.stringify(ticketData) },
-          });
+          await navigateToQrTicket(router, ticketData);
         } else {
           Alert.alert(
             "Error",
@@ -620,10 +698,20 @@ export default function RegisterVisitorScreen() {
 
           const ticketOffices = usingOthersDestination
             ? [{ id: 0, name: otherDestination }]
-            : selectedDestinationOffices.map((name, index) => ({
-                id: selectedOfficeIds[index] || index,
-                name,
-              }));
+            : await (async () => {
+                const allOffices = await officeService.fetchOffices();
+                const byName = new Map(
+                  allOffices.map((o) => [o.office_name, o]),
+                );
+                return selectedDestinationOffices.map((name, index) => {
+                  const matched = byName.get(name);
+                  return {
+                    id: selectedOfficeIds[index] || matched?.office_id || index,
+                    name: matched?.office_name || name,
+                    floor: matched?.floor?.trim() || undefined,
+                  };
+                });
+              })();
 
           const ticketData = {
             type: "normal" as const,
@@ -645,10 +733,7 @@ export default function RegisterVisitorScreen() {
               : undefined,
           };
 
-          router.replace({
-            pathname: "/guard/qr-ticket",
-            params: { data: JSON.stringify(ticketData) },
-          });
+          await navigateToQrTicket(router, ticketData);
         } else {
           Alert.alert("Error", "Failed to register visitor. Please try again.");
         }
@@ -674,6 +759,7 @@ export default function RegisterVisitorScreen() {
     console.log("🔄 Retaking photo");
     setCapturedFacePhoto(null);
     setPhotoPreview(null);
+    requestPrivacyThen("captureFace");
   };
 
   const handleCaptureIdPhoto = async () => {
@@ -1183,12 +1269,23 @@ export default function RegisterVisitorScreen() {
         officeIds.length > 0
           ? await supabase
               .from("office")
-              .select("office_id, office_name")
+              .select("office_id, office_name, floor")
               .in("office_id", officeIds)
-          : { data: [] as { office_id: number; office_name: string }[] };
-      const nameMap = new Map(
-        (officeRows || []).map((o) => [o.office_id, o.office_name]),
-      );
+          : {
+              data: [] as {
+                office_id: number;
+                office_name: string;
+                floor?: string | null;
+              }[],
+            };
+      type OfficeTicketInfo = { name: string; floor: string };
+      const officeMap = new Map<number, OfficeTicketInfo>();
+      for (const row of officeRows || []) {
+        officeMap.set(Number(row.office_id), {
+          name: String(row.office_name ?? "").trim(),
+          floor: String(row.floor ?? "").trim(),
+        });
+      }
 
       let qrPayload: string | undefined;
       if (enrolleeResult.visit_id && steps && steps.length > 0) {
@@ -1196,14 +1293,18 @@ export default function RegisterVisitorScreen() {
           (
             s: { office_id: number; step_order?: number; step_name?: string },
             i: number,
-          ) => ({
-            order: s.step_order ?? i + 1,
-            office_id: s.office_id,
-            office_name:
-              (nameMap.get(s.office_id) as string) ||
-              s.step_name ||
-              `Office ${s.office_id}`,
-          }),
+          ) => {
+            const office = officeMap.get(s.office_id);
+            return {
+              order: s.step_order ?? i + 1,
+              office_id: s.office_id,
+              office_name:
+                office?.name ||
+                s.step_name ||
+                `Office ${s.office_id}`,
+              floor: office?.floor || undefined,
+            };
+          },
         );
         qrPayload = buildQRTicketPayloadV1({
           kind: "enrollee",
@@ -1218,6 +1319,7 @@ export default function RegisterVisitorScreen() {
       const ticketOffices: {
         id: number;
         name: string;
+        floor?: string;
         stepName: string;
         stepOrder?: number;
         status: "done" | "current" | "pending";
@@ -1230,12 +1332,13 @@ export default function RegisterVisitorScreen() {
             status?: string;
             completed_at?: string | null;
           }) => {
+            const office = officeMap.get(s.office_id);
             const officeName =
-              (nameMap.get(s.office_id) as string) ||
-              `Office ${s.office_id ?? ""}`;
+              office?.name || `Office ${s.office_id ?? ""}`;
             return {
               id: s.office_id,
               name: officeName,
+              floor: office?.floor || undefined,
               stepName: s.step_name || `Step ${s.step_order ?? ""}`,
               stepOrder: s.step_order,
               status: (s.status === "completed" || s.completed_at
@@ -1251,10 +1354,7 @@ export default function RegisterVisitorScreen() {
         ticketOffices[firstPendingIdx].status = "current";
       }
 
-      router.replace({
-        pathname: "/guard/qr-ticket",
-        params: {
-          data: JSON.stringify({
+      await navigateToQrTicket(router, {
             type: "enrollee",
             qrToken,
             qrPayload,
@@ -1268,9 +1368,7 @@ export default function RegisterVisitorScreen() {
             facePhotoUri: facePhotoUriForTicket,
             offices: ticketOffices,
             enrolleeId: enrolleeResult.enrollee_id,
-          }),
-        },
-      });
+          });
 
       if (__DEV__) {
         console.log("✅ Enrollee created with office-route QR");
@@ -1703,6 +1801,12 @@ export default function RegisterVisitorScreen() {
           onAgree={handlePrivacyAgree}
           onDecline={handlePrivacyDecline}
         />
+        <PhotoCaptureConsentModal
+          visible={showPhotoConsentModal}
+          kind={photoConsentKind}
+          onAgree={handlePhotoConsentAgree}
+          onDecline={handlePhotoConsentDecline}
+        />
       </View>
     );
   }
@@ -1922,6 +2026,12 @@ export default function RegisterVisitorScreen() {
           visible={showPrivacyModal}
           onAgree={handlePrivacyAgree}
           onDecline={handlePrivacyDecline}
+        />
+        <PhotoCaptureConsentModal
+          visible={showPhotoConsentModal}
+          kind={photoConsentKind}
+          onAgree={handlePhotoConsentAgree}
+          onDecline={handlePhotoConsentDecline}
         />
         <ReturningVisitorModal
           visible={showReturningModal}

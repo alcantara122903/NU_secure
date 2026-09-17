@@ -138,6 +138,28 @@ export async function getOfficeIds(officeNames: string[]): Promise<number[]> {
 }
 
 /**
+ * Display label: "Admissions Office · 2nd Floor"
+ */
+export function formatOfficeWithFloor(
+  officeName: string,
+  floor?: string | null,
+): string {
+  const name = String(officeName ?? "").trim();
+  const fl = String(floor ?? "").trim();
+  if (!name) return fl || "—";
+  if (!fl) return name;
+  return `${name} · ${fl}`;
+}
+
+/**
+ * Get office by ID (uses cache)
+ */
+export async function getOfficeById(officeId: number): Promise<Office | null> {
+  const offices = await fetchOffices();
+  return offices.find((o) => o.office_id === officeId) || null;
+}
+
+/**
  * Refresh office cache
  */
 export function clearOfficeCache(): void {
@@ -148,7 +170,9 @@ export const officeService = {
   fetchOffices,
   getOfficeIdByName,
   getOfficeNameById,
+  getOfficeById,
   getOfficeIds,
   resolveOfficeFromUserInput,
+  formatOfficeWithFloor,
   clearOfficeCache,
 };

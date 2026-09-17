@@ -13,7 +13,6 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
-  InteractionManager,
   Platform,
   ScrollView,
   StatusBar,
@@ -231,17 +230,16 @@ export default function ExitScanScreen() {
       };
 
       setExitCameraSuppressed(true);
-      InteractionManager.runAfterInteractions(() => {
-        if (Platform.OS === 'android') {
-          requestAnimationFrame(() => {
-            setTimeout(showResult, 450);
-          });
-        } else {
-          requestAnimationFrame(() => {
-            requestAnimationFrame(showResult);
-          });
-        }
-      });
+      // Defer result UI until after the current frame so camera teardown stays smooth.
+      if (Platform.OS === 'android') {
+        requestAnimationFrame(() => {
+          setTimeout(showResult, 450);
+        });
+      } else {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(showResult);
+        });
+      }
     } catch (err) {
       console.error('❌ Error scanning QR:', err);
       setScanState({
@@ -513,14 +511,14 @@ export default function ExitScanScreen() {
           <View style={styles.exitCameraBox} collapsable={false}>
             {hasCameraPermission && !exitCameraSuppressed ? (
               <CameraView
-                style={StyleSheet.absoluteFillObject}
+                style={StyleSheet.absoluteFill}
                 facing="back"
                 barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
                 onBarcodeScanned={scanState.type === 'idle' ? (event) => void onQRCodeScanned(event.data) : undefined}
               />
             ) : hasCameraPermission && exitCameraSuppressed ? (
               <View
-                style={[StyleSheet.absoluteFillObject, styles.exitCameraPlaceholder]}
+                style={[StyleSheet.absoluteFill, styles.exitCameraPlaceholder]}
                 pointerEvents="none"
               >
                 <ActivityIndicator size="large" color="#FFFFFF" />
@@ -745,10 +743,10 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   camera: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   overlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: 'rgba(0,0,0,0.25)',
@@ -1350,7 +1348,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   exitCameraOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0,0,0,0.12)',
     zIndex: 1,
   },

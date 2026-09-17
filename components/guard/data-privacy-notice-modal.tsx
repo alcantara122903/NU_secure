@@ -137,7 +137,7 @@ export function DataPrivacyNoticeModal({
 
 const styles = StyleSheet.create({
   backdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 1000,
     elevation: 1000,
     backgroundColor: "rgba(15, 23, 42, 0.45)",

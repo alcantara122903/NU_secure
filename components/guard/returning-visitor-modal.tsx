@@ -249,7 +249,7 @@ const styles = StyleSheet.create({
     height: 200,
   },
   photoLoadingOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(15, 23, 42, 0.35)",

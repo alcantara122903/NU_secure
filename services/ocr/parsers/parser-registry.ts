@@ -11,7 +11,7 @@ import { BARANGAY_KEYWORDS, BLACKLIST_KEYWORDS, KNOWN_CITIES, KNOWN_PROVINCES, M
 import type { ParsedIDData } from '@/types/ocr';
 import { detectIdType } from '../id-detector';
 
-const OCR_PARSER_VERBOSE_LOGS = __DEV__;
+const OCR_PARSER_VERBOSE_LOGS = typeof __DEV__ !== 'undefined' ? __DEV__ : false;
 
 /**
  * Province to Region mapping for Philippines
@@ -25,6 +25,7 @@ const PROVINCE_TO_REGION: Record<string, string> = {
   'RIZAL': 'CALABARZON',
   'BULACAN': 'NCR/CALABARZON',
   'NEW ECIJA': 'CENTRAL LUZON',
+  'NUEVA ECIJA': 'CENTRAL LUZON',
   'PAMPANGA': 'CENTRAL LUZON',
   'TARLAC': 'CENTRAL LUZON',
   'PANGASINAN': 'ILOCOS',
@@ -185,6 +186,12 @@ function normalizeAddressToken(token: string): string {
 function normalizeCityMunicipalityText(text: string): string {
   if (!text) return '';
   let normalized = normalizeAddressToken(cleanField(text));
+  normalized = normalized
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/\([^)]*$/g, ' ')
+    .replace(/\bCAPITAL\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 
   // Final pass for City of Lipa OCR variants that slip through token normalization
   normalized = normalized.replace(/\bCITY\s+OF\s+L[^\s,]{2,5}\b/gi, (match) => {
@@ -484,10 +491,17 @@ function hasCorruptedCityKeyword(text: string): boolean {
  * Identify if text is likely a city or municipality
  */
 function isLikelyCityOrMunicipality(text: string): boolean {
-  const upper = text.toUpperCase();
+  const upper = normalizeForMatch(normalizeAddressToken(text));
   // Reject very short text (city/municipality names should be at least 3-4 characters)
   if (text.length < 3) {
     console.log(`[City] ❌ Text too short (${text.length} chars): "${upper}"`);
+    return false;
+  }
+  // Exact province tokens are provinces, not cities ("BATANGAS" alone)
+  if (
+    KNOWN_PROVINCES.some((prov) => prov === upper) ||
+    Object.prototype.hasOwnProperty.call(PROVINCE_TO_REGION, upper)
+  ) {
     return false;
   }
   // Check for explicit keywords first
@@ -496,7 +510,7 @@ function isLikelyCityOrMunicipality(text: string): boolean {
     return true;
   }
   // Check against known cities
-  if (KNOWN_CITIES.some(city => upper.includes(city))) {
+  if (KNOWN_CITIES.some(city => upper.includes(city) || city.includes(upper))) {
     console.log(`[City] ✅ Known city match found in "${upper}"`); 
     return true;
   }
@@ -539,6 +553,7 @@ function parseAddressComponents(addressString: string): Partial<ParsedIDData> {
   
   let normalized = addressString
     .replace(/\.|;/g, ',')
+    .replace(/\([^)]*\)/g, ' ')
     .replace(/\r\n/g, ',')
     .replace(/\n/g, ',')
     .replace(/\s+,/g, ',');
@@ -577,6 +592,9 @@ function parseAddressComponents(addressString: string): Partial<ParsedIDData> {
       }
     } else if (isValidHouseNumber(part)) {
       type = 'houseNo';
+    } else if (isLikelyProvince(part) && !hasCorruptedCityKeyword(part)) {
+      // Prefer province over city when token is a bare province name
+      type = 'province';
     } else if (isLikelyCityOrMunicipality(part)) {
       type = 'municipality';
     } else if (isLikelyProvince(part)) {
@@ -691,19 +709,39 @@ function getPrimaryFirstName(fullGivenName: string): string {
 }
 
 function getPhilSysFullGivenName(rawGivenName: string): string {
-  const cleaned = sanitizePersonName(rawGivenName);
-  if (!cleaned) return '';
+  // Keep OCR tokens as-is. Do not invent expansions (e.g. JO → JOHN),
+  // which can permanently corrupt real given names.
+  return sanitizePersonName(rawGivenName);
+}
 
-  const tokens = cleaned.split(/\s+/).filter(Boolean);
-  if (tokens.length === 0) return '';
+/**
+ * If city is "BATANGAS CITY" / "LIPA CITY" style, infer the province when missing.
+ */
+function inferProvinceFromCity(city: string): string {
+  const upper = normalizeForMatch(normalizeAddressToken(city));
+  if (!upper) return '';
 
-  // PhilSys OCR often truncates "JOHN" to "JO" when the first token is split.
-  // If we have additional given-name tokens, safely expand the leading "JO".
-  if (tokens[0].toUpperCase() === 'JO' && tokens.length >= 2) {
-    tokens[0] = 'JOHN';
+  if (/\bCITY\s+OF\s+LIPA\b/.test(upper) || /\bLIPA\s+CITY\b/.test(upper)) {
+    return 'BATANGAS';
   }
 
-  return tokens.join(' ');
+  const cityOfMatch = upper.match(/\bCITY\s+OF\s+([A-Z][A-Z\s]+)$/);
+  if (cityOfMatch) {
+    const base = cityOfMatch[1].trim();
+    if (PROVINCE_TO_REGION[base] || KNOWN_PROVINCES.some((p) => p === base)) {
+      return base;
+    }
+  }
+
+  const citySuffixMatch = upper.match(/^([A-Z][A-Z\s]+?)\s+CITY$/);
+  if (citySuffixMatch) {
+    const base = citySuffixMatch[1].trim();
+    if (PROVINCE_TO_REGION[base] || KNOWN_PROVINCES.some((p) => p === base)) {
+      return base;
+    }
+  }
+
+  return '';
 }
 
 /**
@@ -903,7 +941,12 @@ function extractPhilSysAddress(lines: string[]): string {
     if (upper.includes('DIGITAL') && upper.includes('NUMBER')) return false;
     const commaCount = (s.match(/,/g) || []).length;
     const hasPlaceWord = /[A-Za-z]{3,}/.test(s);
-    return commaCount >= 2 && hasPlaceWord;
+    const hasGeoHint =
+      /BARANGAY|BRGY|CITY|MUNICIPALITY|PROVINCE|PUROK|SITIO|BATANGAS|LAGUNA|CAVITE|QUEZON|RIZAL|MANILA|PHILIPPINES/i.test(
+        s,
+      );
+    // Prefer classic multi-comma addresses; also accept single-comma geo lines.
+    return hasPlaceWord && (commaCount >= 2 || (commaCount >= 1 && hasGeoHint));
   };
 
   let anchor = -1;
@@ -1115,6 +1158,7 @@ function parseUmidID(lines: string[]): Partial<ParsedIDData> {
         if (isLikelyLabelLineForUmid(line)) return false;
         if (/\d/.test(line)) return false;
         if (upper.includes('MALE') || upper.includes('FEMALE')) return false;
+        if (upper === 'M' || upper === 'F') return false;
         if (upper.includes('CITY') || upper.includes('BRGY') || upper.includes('BARANGAY')) return false;
         return /^[A-Za-z][A-Za-z\s.'-]{1,40}$/.test(line);
       });
@@ -1192,7 +1236,8 @@ function parseUmidID(lines: string[]): Partial<ParsedIDData> {
       }
       const barangayTail = line
         .replace(/\b\d{1,6}[A-Za-z-]?\b/g, ' ')
-        .replace(/\b(BRGY\.?|BARANGAY)\b/gi, ' ')
+        .replace(/BRGY\.?|BARANGAY/gi, ' ')
+        .replace(/[^\w\s-]/g, ' ')
         .replace(/\s+/g, ' ')
         .trim();
       if (!umidBarangay && barangayTail) {
@@ -1292,6 +1337,166 @@ function parseUmidID(lines: string[]): Partial<ParsedIDData> {
   };
 }
 
+function isLikelyLabelLineForDriversLicense(line: string): boolean {
+  const upper = normalizeForMatch(line);
+  return (
+    upper.includes('REPUBLIC OF THE PHILIPPINES') ||
+    upper.includes('DEPARTMENT OF TRANSPORTATION') ||
+    upper.includes('LAND TRANSPORTATION') ||
+    upper.includes("DRIVER'S LICENSE") ||
+    upper.includes('DRIVERS LICENSE') ||
+    upper.includes('DRIVER LICENSE') ||
+    upper.includes('LICENSE NO') ||
+    upper.includes('LICENCE NO') ||
+    upper.includes('EXPIRATION') ||
+    upper.includes('DATE OF BIRTH') ||
+    upper.includes('NATIONALITY') ||
+    upper.includes('RESTRICTION') ||
+    upper.includes('CONDITIONS') ||
+    upper.includes('AGENCY CODE') ||
+    upper.includes('BLOOD TYPE') ||
+    upper.includes('EYES') ||
+    upper.includes('HAIR') ||
+    upper.includes('WEIGHT') ||
+    upper.includes('HEIGHT') ||
+    upper.includes('SEX') ||
+    upper.includes('SIGNATURE') ||
+    upper === 'LTO'
+  );
+}
+
+/**
+ * Parser optimized for Philippine Driver's License (LTO)
+ * Typical OCR: LAST, FIRST MIDDLE then barangay/city then province/zip.
+ */
+function parseDriversLicense(lines: string[]): Partial<ParsedIDData> {
+  const cleanedLines = lines.map((line) => cleanField(line)).filter(Boolean);
+
+  let firstName = '';
+  let lastName = '';
+
+  // 1) Comma format is the most reliable on PH licenses: LASTNAME, FIRSTNAME MIDDLE
+  for (const line of cleanedLines) {
+    if (!line.includes(',')) continue;
+    if (isLikelyLabelLineForDriversLicense(line)) continue;
+    if (isHeaderOrMetadataLine(line)) continue;
+    if (/\d{4,}/.test(line)) continue; // skip dates / license nos / zip lines
+    const letterPct = (line.match(/[A-Za-z]/g) || []).length / Math.max(line.length, 1);
+    if (letterPct < 0.7) continue;
+    const upper = normalizeForMatch(line);
+    if (upper.includes('CITY') || upper.includes('BARANGAY') || upper.includes('PROVINCE')) {
+      continue;
+    }
+
+    // Keep comma intact for LAST, FIRST parsing — sanitize after split
+    const parsed = parseNameValue(line);
+    if (parsed.firstName && parsed.lastName) {
+      firstName = sanitizePersonName(parsed.firstName);
+      lastName = sanitizePersonName(parsed.lastName);
+      break;
+    }
+  }
+
+  // 2) Labeled extraction
+  if (!firstName || !lastName) {
+    const rawLast =
+      extractAfterLabel(cleanedLines, ['LAST NAME', 'SURNAME']) ||
+      findValueAfterAnyLabel(cleanedLines, ['LAST NAME', 'SURNAME']);
+    const rawFirst =
+      extractAfterLabel(cleanedLines, ['FIRST NAME', 'GIVEN NAME', 'GIVEN NAMES']) ||
+      findValueAfterAnyLabel(cleanedLines, ['FIRST NAME', 'GIVEN NAME', 'GIVEN NAMES']);
+    firstName = firstName || sanitizePersonName(rawFirst);
+    lastName = lastName || sanitizePersonName(rawLast);
+  }
+
+  const birthday = extractBirthdayFromLines(cleanedLines);
+
+  // Address: prefer non-name geo lines (barangay/city/province)
+  const nameComma = firstName && lastName ? normalizeForMatch(`${lastName}, ${firstName}`) : '';
+  const nameSpace = firstName && lastName ? normalizeForMatch(`${firstName} ${lastName}`) : '';
+  const addressLines = cleanedLines.filter((line) => {
+    if (!line || line.length < 5) return false;
+    if (isLikelyLabelLineForDriversLicense(line)) return false;
+    if (isHeaderOrMetadataLine(line)) return false;
+    const upper = normalizeForMatch(line);
+    if (nameComma && upper === nameComma) return false;
+    if (nameSpace && upper === nameSpace) return false;
+    if (lastName && firstName && upper.startsWith(normalizeForMatch(lastName) + ',')) return false;
+    if (normalizeBirthdayToIso(line)) return false;
+    if (/\bD\d{2}-\d{2}-\d{6}\b/i.test(line)) return false;
+    return (
+      line.includes(',') ||
+      line.includes('.') ||
+      /BARANGAY|BRGY|CITY|MUNICIPALITY|PROVINCE|BATANGAS|LAGUNA|CAVITE|QUEZON|RIZAL|CAPITAL/i.test(
+        upper,
+      )
+    );
+  });
+
+  let address = addressLines.join(', ');
+  // Normalize period separators commonly used by LTO OCR ("GULOD ITAAS. BATANGAS CITY")
+  address = address
+    .replace(/\./g, ',')
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/\([^)]*$/g, ' ')
+    .replace(/,+/g, ',')
+    .replace(/\s+,/g, ',')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const parsedAddress = parseAddressComponents(address);
+  let city = parsedAddress.addressCityMunicipality || '';
+  let province = parsedAddress.addressProvince || '';
+  let region = parsedAddress.addressRegion || '';
+
+  if (!province && city) {
+    province = inferProvinceFromCity(city);
+    if (province) {
+      region = PROVINCE_TO_REGION[normalizeForMatch(province)] || region;
+    }
+  }
+
+  // Generic fallback only for missing pieces (safe merge)
+  if (!firstName || !lastName || !address) {
+    const generic = parseGenericID(lines);
+    firstName = firstName || generic.firstName || '';
+    lastName = lastName || generic.lastName || '';
+    address = address || generic.address || '';
+    city = city || generic.addressCityMunicipality || '';
+    province = province || generic.addressProvince || '';
+    region = region || generic.addressRegion || '';
+    if (!parsedAddress.addressBarangay && generic.addressBarangay) {
+      parsedAddress.addressBarangay = generic.addressBarangay;
+    }
+    if (!parsedAddress.addressHouseNo && generic.addressHouseNo) {
+      parsedAddress.addressHouseNo = generic.addressHouseNo;
+    }
+    if (!parsedAddress.addressStreet && generic.addressStreet) {
+      parsedAddress.addressStreet = generic.addressStreet;
+    }
+  }
+
+  if (!province && city) {
+    province = inferProvinceFromCity(city);
+    if (province) {
+      region = PROVINCE_TO_REGION[normalizeForMatch(province)] || region;
+    }
+  }
+
+  return {
+    firstName,
+    lastName,
+    birthday: birthday || extractBirthdayFromLines(lines),
+    address,
+    addressHouseNo: parsedAddress.addressHouseNo || '',
+    addressStreet: parsedAddress.addressStreet || '',
+    addressBarangay: parsedAddress.addressBarangay || '',
+    addressCityMunicipality: city || '',
+    addressProvince: province || '',
+    addressRegion: region || '',
+  };
+}
+
 function isLikelyLabelLineForSeniorId(line: string): boolean {
   const upper = normalizeForMatch(line);
   return (
@@ -1317,21 +1522,37 @@ function parseSeniorCitizenID(lines: string[]): Partial<ParsedIDData> {
   let lastName = '';
 
   const nameLabelIdx = findLabelIndex(cleanedLines, ['NAME']);
+  // OSCA cards often place the value ABOVE the "NAME" label: "DELA CRUZ, JUAN"
   if (nameLabelIdx > 0) {
-    const candidate = sanitizePersonName(cleanedLines[nameLabelIdx - 1]);
-    const parsed = parseNameValue(candidate);
-    firstName = parsed.firstName || '';
-    lastName = parsed.lastName || '';
+    const above = cleanField(cleanedLines[nameLabelIdx - 1]);
+    if (above && !isLikelyLabelLineForSeniorId(above)) {
+      const parsed = parseNameValue(above);
+      firstName = sanitizePersonName(parsed.firstName || '');
+      lastName = sanitizePersonName(parsed.lastName || '');
+    }
+  }
+
+  // Also try value AFTER the label
+  if (!firstName || !lastName) {
+    const after =
+      extractAfterLabel(cleanedLines, ['NAME', 'FULL NAME']) ||
+      findValueAfterAnyLabel(cleanedLines, ['NAME', 'FULL NAME']);
+    if (after) {
+      const parsed = parseNameValue(sanitizePersonName(after));
+      firstName = firstName || parsed.firstName || '';
+      lastName = lastName || parsed.lastName || '';
+    }
   }
 
   if (!firstName || !lastName) {
     const nameLine = cleanedLines.find((line) => {
       const upper = normalizeForMatch(line);
       if (isLikelyLabelLineForSeniorId(line)) return false;
-      if (upper.includes('CITY')) return false;
+      if (upper.includes('CITY') && !line.includes(',')) return false;
       if (!/[A-Za-z]{3,}/.test(line)) return false;
       if (/\d/.test(line)) return false;
-      return line.split(/\s+/).length >= 2 && line.split(/\s+/).length <= 5;
+      if (upper.includes('OSCA') || upper.includes('SENIOR')) return false;
+      return line.split(/\s+/).length >= 2 && line.split(/\s+/).length <= 6;
     });
 
     if (nameLine) {
@@ -1347,8 +1568,15 @@ function parseSeniorCitizenID(lines: string[]): Partial<ParsedIDData> {
   const addressLabelIdx = findLabelIndex(cleanedLines, ['ADDRESS']);
   if (addressLabelIdx > 0) {
     const before = cleanField(cleanedLines[addressLabelIdx - 1]);
-    if (before && !isLikelyLabelLineForSeniorId(before)) {
+    if (before && !isLikelyLabelLineForSeniorId(before) && /[A-Za-z]{3,}/.test(before)) {
       address = before;
+    }
+  }
+
+  if (!address && addressLabelIdx >= 0) {
+    const after = extractAfterLabel(cleanedLines, ['ADDRESS']);
+    if (after && /[A-Za-z]{3,}/.test(after)) {
+      address = after;
     }
   }
 
@@ -1365,6 +1593,14 @@ function parseSeniorCitizenID(lines: string[]): Partial<ParsedIDData> {
   }
 
   const parsedAddress = parseAddressComponents(address);
+  if (!parsedAddress.addressProvince && parsedAddress.addressCityMunicipality) {
+    const inferred = inferProvinceFromCity(parsedAddress.addressCityMunicipality);
+    if (inferred) {
+      parsedAddress.addressProvince = inferred;
+      parsedAddress.addressRegion =
+        PROVINCE_TO_REGION[normalizeForMatch(inferred)] || parsedAddress.addressRegion || '';
+    }
+  }
 
   return {
     firstName,
@@ -1429,7 +1665,9 @@ function parseVotersID(lines: string[]): Partial<ParsedIDData> {
   if (!firstName || !lastName) {
     // Common Voter's ID layout:
     // <SURNAME>\n<GIVEN NAME>\n<MIDDLE NAME>\nDate of Birth
-    const dobIndex = cleanedLines.findIndex((line) => /DATE OF BIRTH/i.test(normalizeForMatch(line)));
+    const dobIndex = cleanedLines.findIndex((line) =>
+      /DATE OF BIRTH|BIRTH DATE|DOB/i.test(normalizeForMatch(line)),
+    );
     if (dobIndex > 1) {
       const window = cleanedLines.slice(Math.max(0, dobIndex - 4), dobIndex);
       const nameTokens = window.filter((line) => {
@@ -1437,7 +1675,15 @@ function parseVotersID(lines: string[]): Partial<ParsedIDData> {
         if (/\d/.test(line)) return false;
         if (line.includes(',')) return false; // avoid city/province like "LIPA CITY, BATANGAS"
         const upper = normalizeForMatch(line);
-        if (upper.includes('CITY') || upper.includes('BARANGAY') || upper.includes('PROVINCE')) return false;
+        if (
+          upper.includes('CITY') ||
+          upper.includes('BARANGAY') ||
+          upper.includes('PROVINCE') ||
+          upper.includes('PRECINCT') ||
+          upper.includes('COMELEC')
+        ) {
+          return false;
+        }
         return /^[A-Za-z][A-Za-z\s.'-]{1,40}$/.test(line);
       });
 
@@ -1585,8 +1831,8 @@ function parseNameValue(nameValue: string): {
       .map(p => p.trim());
     if (lastPart && firstPart) {
       // Keep full surname and full given-name block (supports multi-word names).
-      let lastName = lastPart.replace(/[^A-Za-z\s-']/g, ' ').replace(/\s+/g, ' ').trim();
-      let firstName = firstPart.replace(/[^A-Za-z\s-']/g, ' ').replace(/\s+/g, ' ').trim();
+      let lastName = lastPart.replace(/[^A-Za-z\s'-]/g, ' ').replace(/\s+/g, ' ').trim();
+      let firstName = firstPart.replace(/[^A-Za-z\s'-]/g, ' ').replace(/\s+/g, ' ').trim();
       
       if (lastName && firstName) {
         console.log(`[ParseName] ✅ Found name: firstName="${firstName}", lastName="${lastName}"`);
@@ -1597,12 +1843,14 @@ function parseNameValue(nameValue: string): {
 
   const words = cleaned.split(/\s+/).filter(w => w && w.length >= 2);
   if (words.length >= 2) {
-    let firstName = words[0];
-    let lastName = words.slice(1).join(' ');
-    
-    // Extra cleanup
-    firstName = firstName.replace(/[^A-Za-z-']/g, '').trim();
-    lastName = lastName.replace(/[^A-Za-z-']/g, '').trim();
+    let firstName = words[0].replace(/[^A-Za-z'-]/g, '').trim();
+    // Preserve spaces in multi-word surnames / given-name tails
+    let lastName = words
+      .slice(1)
+      .map((w) => w.replace(/[^A-Za-z'-]/g, '').trim())
+      .filter(Boolean)
+      .join(' ')
+      .trim();
     
     if (firstName && lastName) {
       console.log(`[ParseName] ✅ Found name (space-separated): firstName="${firstName}", lastName="${lastName}"`);
@@ -2246,25 +2494,53 @@ export function parseIDText(rawOcrText: string): ParsedIDData {
     const normalizedRaw = normalizeForMatch(rawOcrText);
     const looksLikePhilSys =
       normalizedRaw.includes('PHILIPPINE NATIONAL ID') ||
+      normalizedRaw.includes('PHILIPPINE IDENTIFICATION') ||
       normalizedRaw.includes('PAMBANSANG') ||
       normalizedRaw.includes('PAGKAKAKILAN') ||
-      (normalizedRaw.includes('GIVEN NAMES') && normalizedRaw.includes('DATE OF BIRTH'));
+      normalizedRaw.includes('PHILSYS') ||
+      (normalizedRaw.includes('APELYIDO') && normalizedRaw.includes('MGA PANGALAN')) ||
+      (normalizedRaw.includes('DIGITAL ID') && normalizedRaw.includes('NUMBER'));
     const looksLikeUmid =
       normalizedRaw.includes('UNIFIED MULTI-PURPOSE ID') ||
+      normalizedRaw.includes('UMID') ||
       (normalizedRaw.includes('UNIFIED') && normalizedRaw.includes('MULTI-PURPOSE') && normalizedRaw.includes('ID'));
     const looksLikeSenior =
       normalizedRaw.includes('OFFICE FOR SENIOR') ||
       normalizedRaw.includes('SENIOR CITIZENS AFFAIRS') ||
-      normalizedRaw.includes('DATE OF BIRTH / AGE');
+      normalizedRaw.includes('SENIOR CITIZEN') ||
+      normalizedRaw.includes('DATE OF BIRTH / AGE') ||
+      normalizedRaw.includes('OSCA');
     const looksLikeVoters =
       normalizedRaw.includes('COMELEC') ||
       normalizedRaw.includes('COMMISSION ON ELECTIONS') ||
-      (normalizedRaw.includes('VOTER') && normalizedRaw.includes('ADDRESS'));
+      (normalizedRaw.includes('VOTER') &&
+        (normalizedRaw.includes('ADDRESS') || normalizedRaw.includes('CERTIFICATE')));
+    const looksLikeDrivers =
+      normalizedRaw.includes("DRIVER'S LICENSE") ||
+      normalizedRaw.includes('DRIVERS LICENSE') ||
+      normalizedRaw.includes('DRIVER LICENSE') ||
+      normalizedRaw.includes('LAND TRANSPORTATION OFFICE') ||
+      (normalizedRaw.includes('LTO') &&
+        (normalizedRaw.includes('LICENSE') || normalizedRaw.includes('DRIVER')));
 
     const usePhilSysParser = detectionResult.type === 'philsys' || looksLikePhilSys;
-    const useUmidParser = detectionResult.type === 'umid' || looksLikeUmid;
-    const useSeniorParser = detectionResult.type === 'senior_citizen' || looksLikeSenior;
-    const useVotersParser = detectionResult.type === 'voters' || looksLikeVoters;
+    const useUmidParser =
+      !usePhilSysParser && (detectionResult.type === 'umid' || looksLikeUmid);
+    const useSeniorParser =
+      !usePhilSysParser &&
+      !useUmidParser &&
+      (detectionResult.type === 'senior_citizen' || looksLikeSenior);
+    const useVotersParser =
+      !usePhilSysParser &&
+      !useUmidParser &&
+      !useSeniorParser &&
+      (detectionResult.type === 'voters' || looksLikeVoters);
+    const useDriversParser =
+      !usePhilSysParser &&
+      !useUmidParser &&
+      !useSeniorParser &&
+      !useVotersParser &&
+      (detectionResult.type === 'drivers_license' || looksLikeDrivers);
     let parserResult: Partial<ParsedIDData>;
     if (usePhilSysParser) {
       const philsysResult = parsePhilSysID(lines);
@@ -2346,6 +2622,8 @@ export function parseIDText(rawOcrText: string): ParsedIDData {
         addressProvince: votersResult.addressProvince || genericResult?.addressProvince || '',
         addressRegion: votersResult.addressRegion || genericResult?.addressRegion || '',
       };
+    } else if (useDriversParser) {
+      parserResult = parseDriversLicense(lines);
     } else {
       parserResult = parseGenericID(lines);
     }
@@ -2382,6 +2660,18 @@ export function parseIDText(rawOcrText: string): ParsedIDData {
       addressComponents.addressCityMunicipality = fallback.addressCityMunicipality || addressComponents.addressCityMunicipality || '';
       addressComponents.addressProvince = fallback.addressProvince || addressComponents.addressProvince || '';
       addressComponents.addressRegion = fallback.addressRegion || addressComponents.addressRegion || '';
+    }
+
+    // Infer province from city when OCR omitted it (e.g. "BATANGAS CITY" → BATANGAS)
+    if (!addressComponents.addressProvince && addressComponents.addressCityMunicipality) {
+      const inferredProvince = inferProvinceFromCity(addressComponents.addressCityMunicipality);
+      if (inferredProvince) {
+        addressComponents.addressProvince = inferredProvince;
+        addressComponents.addressRegion =
+          PROVINCE_TO_REGION[normalizeForMatch(inferredProvince)] ||
+          addressComponents.addressRegion ||
+          '';
+      }
     }
     
     // STEP 5: Determine confidence

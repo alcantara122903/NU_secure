@@ -12,6 +12,8 @@ export type QRRouteStopV1 = {
   order: number;
   office_id: number;
   office_name: string;
+  /** Floor label from `office.floor` (e.g. "5th Floor") */
+  floor?: string | null;
 };
 
 export type QRTicketPayloadV1 = {

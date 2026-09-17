@@ -41,21 +41,32 @@ export function detectIdType(rawOcrText: string): IDTypeDetectionResult {
     unknown: 0,
   };
 
-  // PhilSys ID detection
+  // PhilSys / National ID detection (prefer strong bilingual card markers)
   if (
     upperText.includes('PHILIPPINE IDENTIFICATION') ||
     upperText.includes('PHILIPPINE IDENTIFICATION CARD') ||
+    upperText.includes('PHILIPPINE NATIONAL ID') ||
     upperText.includes('PHILSYS') ||
-    upperText.includes('PSN') ||
     upperText.includes('PAMBANSANG PAGKAKAKILANLAN') ||
     upperText.includes('PAGKAKAKILANLAN') ||
-    (upperText.includes('NATIONAL ID') && upperText.includes('PHILIPPINES')) ||
-    (upperText.includes('REPUBLIKA NG PILIPINAS') && upperText.includes('PILIPINAS')) ||
+    (upperText.includes('NATIONAL ID') &&
+      (upperText.includes('PHILIPPINE') || upperText.includes('PILIPINAS'))) ||
     (upperText.includes('APELYIDO') && upperText.includes('MGA PANGALAN')) ||
-    (upperText.includes('LAST NAME') && upperText.includes('GIVEN NAMES'))
+    (upperText.includes('DIGITAL ID') && upperText.includes('NUMBER'))
   ) {
     typeScores.philsys += 3;
     detectedKeywords.push('PhilSys keywords found');
+  } else if (
+    // Weak signal only — many IDs have LAST/GIVEN labels; do not overpower other types
+    upperText.includes('LAST NAME') &&
+    upperText.includes('GIVEN NAMES') &&
+    (upperText.includes('TIRAHAN') || upperText.includes('PETSA NG KAPANGANAKAN'))
+  ) {
+    typeScores.philsys += 2;
+    detectedKeywords.push('PhilSys label pair found');
+  } else if (/\bPSN\b/.test(upperText) || upperText.includes('PSN:')) {
+    typeScores.philsys += 2;
+    detectedKeywords.push('PSN found');
   }
 
   // Passport detection
@@ -68,15 +79,27 @@ export function detectIdType(rawOcrText: string): IDTypeDetectionResult {
     detectedKeywords.push('Passport keywords found');
   }
 
-  // Driver's License detection
+  // Driver's License detection — never score on bare "LTO" alone
   if (
     upperText.includes("DRIVER'S LICENSE") ||
     upperText.includes('DRIVERS LICENSE') ||
-    upperText.includes('LAND TRANSPORTATION OFFICE') ||
-    upperText.includes('LTO')
+    upperText.includes('DRIVER LICENSE') ||
+    upperText.includes('LAND TRANSPORTATION OFFICE')
   ) {
     typeScores.drivers_license += 3;
-    detectedKeywords.push('Driver\'s License keywords found');
+    detectedKeywords.push("Driver's License keywords found");
+  } else if (
+    upperText.includes('LTO') &&
+    (upperText.includes('LICENSE') ||
+      upperText.includes('DRIVER') ||
+      upperText.includes('TRANSPORTATION'))
+  ) {
+    typeScores.drivers_license += 3;
+    detectedKeywords.push('LTO license keywords found');
+  } else if (/\bD\d{2}-\d{2}-\d{6}\b/.test(upperText)) {
+    // Typical PH license number shape: D01-23-456789
+    typeScores.drivers_license += 2;
+    detectedKeywords.push('DL number pattern found');
   }
 
   // UMID detection
@@ -88,6 +111,9 @@ export function detectIdType(rawOcrText: string): IDTypeDetectionResult {
   ) {
     typeScores.umid += 3;
     detectedKeywords.push('UMID keywords found');
+  } else if (/\bCRN\b/.test(upperText) && upperText.includes('SSS')) {
+    typeScores.umid += 2;
+    detectedKeywords.push('UMID CRN/SSS markers found');
   }
 
   // PRC ID detection
@@ -99,11 +125,12 @@ export function detectIdType(rawOcrText: string): IDTypeDetectionResult {
     detectedKeywords.push('PRC keywords found');
   }
 
-  // TIN ID detection
+  // TIN ID detection — avoid matching substrings inside BIRTH / FEBRUARY
   if (
     upperText.includes('BUREAU OF INTERNAL REVENUE') ||
-    upperText.includes('BIR') ||
-    (upperText.includes('TIN') && upperText.includes('TAXPAYER'))
+    (/\bBIR\b/.test(upperText) &&
+      (upperText.includes('TAXPAYER') || upperText.includes('TIN'))) ||
+    (/\bTIN\b/.test(upperText) && upperText.includes('TAXPAYER'))
   ) {
     typeScores.tin += 3;
     detectedKeywords.push('TIN keywords found');
@@ -122,10 +149,12 @@ export function detectIdType(rawOcrText: string): IDTypeDetectionResult {
   // Voter's ID detection
   if (
     upperText.includes('COMELEC') ||
-    (upperText.includes('VOTER') && upperText.includes('CERTIFICATE'))
+    upperText.includes('COMMISSION ON ELECTIONS') ||
+    (upperText.includes('VOTER') &&
+      (upperText.includes('CERTIFICATE') || upperText.includes("VOTER'S ID") || upperText.includes('VOTERS ID')))
   ) {
     typeScores.voters += 3;
-    detectedKeywords.push('Voter\'s ID keywords found');
+    detectedKeywords.push("Voter's ID keywords found");
   }
 
   // Senior Citizen ID detection
@@ -138,6 +167,9 @@ export function detectIdType(rawOcrText: string): IDTypeDetectionResult {
   ) {
     typeScores.senior_citizen += 3;
     detectedKeywords.push('Senior Citizen ID keywords found');
+  } else if (upperText.includes('DATE OF BIRTH / AGE') || upperText.includes('DATE OF BIRTH/AGE')) {
+    typeScores.senior_citizen += 2;
+    detectedKeywords.push('Senior DOB/Age label found');
   }
 
   // PWD ID detection
@@ -239,7 +271,7 @@ export function detectIdType(rawOcrText: string): IDTypeDetectionResult {
     confidence = 'low';
   }
 
-  if (__DEV__) {
+  if (typeof __DEV__ !== 'undefined' && __DEV__) {
     console.log(`\n📋 ID TYPE DETECTION`);
     console.log(`   Detected: ${detectedType.toUpperCase()}`);
     console.log(`   Confidence: ${confidence}`);

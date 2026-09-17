@@ -315,16 +315,24 @@ export function FaceCaptureStepScreen({
               <View style={styles.captureCard}>
                 <View style={styles.faceFrame}>
                   <Image
-                    source={{ uri: photoPreview }}
+                    source={{ uri: photoPreview ?? undefined }}
                     style={styles.previewImage}
                     resizeMode="cover"
                   />
                 </View>
 
-                <Text style={styles.captureTitle}>Photo preview</Text>
+                <Text style={styles.captureTitle}>Review your photo</Text>
                 <Text style={styles.captureSubtitle}>
-                  Review the captured face photo, then confirm or retake
+                  Are you satisfied with this photo for visitor verification?
                 </Text>
+
+                <View style={styles.consentNote}>
+                  <Text style={styles.consentNoteText}>
+                    By confirming, you agree that this photo may be used on your
+                    visitor ticket and by authorized staff for identification
+                    during your visit.
+                  </Text>
+                </View>
 
                 <TouchableOpacity
                   activeOpacity={0.9}
@@ -340,7 +348,7 @@ export function FaceCaptureStepScreen({
                     )}
                   </View>
                   <Text style={[styles.captureButtonText, styles.confirmButtonText]}>
-                    {isCreatingEnrollee ? 'Processing…' : 'Confirm photo'}
+                    {isCreatingEnrollee ? "Processing…" : "Yes, use this photo"}
                   </Text>
                   {!isCreatingEnrollee ? (
                     <ChevronRight size={22} color="#FFFFFF" strokeWidth={2.6} />
@@ -353,13 +361,17 @@ export function FaceCaptureStepScreen({
                   activeOpacity={0.9}
                   style={[styles.captureButton, styles.retakeButton]}
                   onPress={onRetakePhoto}
-                  disabled={isCreatingEnrollee}
+                  disabled={isCreatingEnrollee || isCapturingPhoto}
                 >
                   <View style={[styles.captureIconBox, styles.retakeIconBox]}>
-                    <RefreshCw size={20} color="#C2410C" strokeWidth={2.4} />
+                    {isCapturingPhoto ? (
+                      <ActivityIndicator size="small" color="#C2410C" />
+                    ) : (
+                      <RefreshCw size={20} color="#C2410C" strokeWidth={2.4} />
+                    )}
                   </View>
                   <Text style={[styles.captureButtonText, styles.retakeButtonText]}>
-                    Retake photo
+                    {isCapturingPhoto ? "Opening camera…" : "Recapture photo"}
                   </Text>
                   <ChevronRight size={22} color="#FFFFFF" strokeWidth={2.6} />
                 </TouchableOpacity>
@@ -370,13 +382,15 @@ export function FaceCaptureStepScreen({
                   <View style={[styles.instructionsIconCircle, styles.successIconCircle]}>
                     <CheckCircle2 size={18} color="#15803D" strokeWidth={2.2} />
                   </View>
-                  <Text style={[styles.instructionsTitle, styles.successTitle]}>Face captured</Text>
+                  <Text style={[styles.instructionsTitle, styles.successTitle]}>
+                    Ready to confirm
+                  </Text>
                 </View>
                 <View style={styles.divider} />
                 <Text style={styles.successBody}>
                   {isCreatingEnrollee
-                    ? 'Processing registration…'
-                    : 'This photo will be used for visitor verification. Ensure the face is clearly visible and well-lit.'}
+                    ? "Processing registration…"
+                    : "If the face is unclear, blurred, or poorly lit, tap Recapture photo before continuing."}
                 </Text>
               </View>
             </>
@@ -578,6 +592,23 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 4,
     marginBottom: 12,
+  },
+  consentNote: {
+    width: '100%',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 12,
+  },
+  consentNoteText: {
+    color: '#475569',
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '500',
+    textAlign: 'center',
   },
   captureButton: {
     width: '100%',

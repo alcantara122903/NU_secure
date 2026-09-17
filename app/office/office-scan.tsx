@@ -1,4 +1,4 @@
-import { useFocusEffect } from "@react-navigation/native";
+import { useFocusEffect } from "expo-router/react-navigation";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { useRouter } from "expo-router";
@@ -213,7 +213,7 @@ export default function OfficeCheckInScreen() {
             <View style={styles.cameraPreview}>
               {cameraPermissionGranted ? (
                 <CameraView
-                  style={StyleSheet.absoluteFillObject}
+                  style={StyleSheet.absoluteFill}
                   facing="back"
                   barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
                   onBarcodeScanned={phase === "ready" ? handleBarcodeScanned : undefined}
@@ -348,7 +348,7 @@ const styles = StyleSheet.create({
     shadowColor: "#0B2E5E", shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.12, shadowRadius: 14, elevation: 5,
   },
   cameraPreview: { height: 320, borderRadius: 16, overflow: "hidden", backgroundColor: "#111827", justifyContent: "center", alignItems: "center", position: "relative" },
-  cameraOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.12)", zIndex: 1 },
+  cameraOverlay: { ...StyleSheet.absoluteFill, backgroundColor: "rgba(0,0,0,0.12)", zIndex: 1 },
   cameraPermissionBox: { flex: 1, width: "100%", backgroundColor: "#111827", justifyContent: "center", alignItems: "center", paddingHorizontal: 24 },
   permissionTitle: { color: "#FFFFFF", fontSize: 16, fontWeight: "800", marginTop: 12, textAlign: "center" },
   permissionSubtitle: { color: "#D1D5DB", fontSize: 13, fontWeight: "500", textAlign: "center", lineHeight: 18, marginTop: 8 },

@@ -9,7 +9,9 @@ import { Colors } from "@/constants/colors";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { buildEnrolleeProgressUrl } from "@/lib/enrollee-progress-url";
 import { buildVisitorScanQrJson } from "@/lib/qr-ticket-payload";
+import { takePendingVisitorTicket } from "@/lib/visitor-ticket-handoff";
 import { supabase } from "@/services/database/supabase";
+import { formatOfficeWithFloor } from "@/services/office";
 
 /** Enrollee → progress URL; normal/contractor → scan JSON (not a URL). */
 function resolveTicketQrValue(ticket: {
@@ -39,7 +41,6 @@ import * as Sharing from "expo-sharing";
 import { useEffect, useState } from "react";
 import {
     Alert,
-    InteractionManager,
     Modal,
     Platform,
     ScrollView,
@@ -67,6 +68,8 @@ interface VisitorQRTicketData {
   offices: {
     id: number;
     name: string;
+    /** From `office.floor` — shown so visitors know where to go */
+    floor?: string;
     stepName?: string;
     stepOrder?: number;
     status?: "done" | "current" | "pending";
@@ -105,18 +108,28 @@ export default function QRTicketScreen() {
 
   const paramsDataKey =
     typeof params.data === "string" ? params.data : (params.data?.[0] ?? "");
+  const hasHandoff =
+    params.handoff === "1" ||
+    (Array.isArray(params.handoff) && params.handoff[0] === "1");
 
   useEffect(() => {
-    if (!paramsDataKey) {
-      setIsGenerating(false);
-      return;
-    }
-
     let cancelled = false;
 
     (async () => {
       try {
-        const data = JSON.parse(paramsDataKey) as VisitorQRTicketData;
+        const fromHandoff = takePendingVisitorTicket();
+        let data = (fromHandoff as VisitorQRTicketData | null) ?? null;
+
+        if (!data && paramsDataKey) {
+          data = JSON.parse(paramsDataKey) as VisitorQRTicketData;
+        }
+
+        if (!data) {
+          if (!cancelled) {
+            setIsGenerating(false);
+          }
+          return;
+        }
 
         // Enrollee route must come from enrollee_progress (steps 1–9).
         // Admissions appears at step 1 and step 9 — both must show.
@@ -135,12 +148,23 @@ export default function QRTicketScreen() {
               officeIds.length > 0
                 ? await supabase
                     .from("office")
-                    .select("office_id, office_name")
+                    .select("office_id, office_name, floor")
                     .in("office_id", officeIds)
-                : { data: [] as { office_id: number; office_name: string }[] };
-            const nameMap = new Map(
-              (officeRows || []).map((o) => [o.office_id, o.office_name]),
-            );
+                : {
+                    data: [] as {
+                      office_id: number;
+                      office_name: string;
+                      floor?: string | null;
+                    }[],
+                  };
+            type OfficeTicketInfo = { name: string; floor: string };
+            const officeMap = new Map<number, OfficeTicketInfo>();
+            for (const row of officeRows || []) {
+              officeMap.set(Number(row.office_id), {
+                name: String(row.office_name ?? "").trim(),
+                floor: String(row.floor ?? "").trim(),
+              });
+            }
 
             const ticketOffices = steps.map(
               (s: {
@@ -149,17 +173,21 @@ export default function QRTicketScreen() {
                 step_order?: number;
                 status?: string;
                 completed_at?: string | null;
-              }) => ({
-                id: s.office_id,
-                name:
-                  (nameMap.get(s.office_id) as string) ||
-                  `Office ${s.office_id ?? ""}`,
-                stepName: s.step_name || `Step ${s.step_order ?? ""}`,
-                stepOrder: s.step_order,
-                status: (s.status === "completed" || s.completed_at
-                  ? "done"
-                  : "pending") as "done" | "current" | "pending",
-              }),
+              }) => {
+                const office = officeMap.get(s.office_id);
+                return {
+                  id: s.office_id,
+                  name:
+                    office?.name ||
+                    `Office ${s.office_id ?? ""}`,
+                  floor: office?.floor || undefined,
+                  stepName: s.step_name || `Step ${s.step_order ?? ""}`,
+                  stepOrder: s.step_order,
+                  status: (s.status === "completed" || s.completed_at
+                    ? "done"
+                    : "pending") as "done" | "current" | "pending",
+                };
+              },
             );
             const firstPendingIdx = ticketOffices.findIndex(
               (o) => o.status !== "done",
@@ -195,7 +223,7 @@ export default function QRTicketScreen() {
     return () => {
       cancelled = true;
     };
-  }, [paramsDataKey, router]);
+  }, [paramsDataKey, hasHandoff, router]);
 
   useEffect(() => {
     if (!ticketData) {
@@ -203,11 +231,34 @@ export default function QRTicketScreen() {
       return;
     }
     setNativeContentReady(false);
-    const task = InteractionManager.runAfterInteractions(() => {
-      setNativeContentReady(true);
-    });
+
+    let cancelled = false;
+    const markReady = () => {
+      if (!cancelled) {
+        setNativeContentReady(true);
+      }
+    };
+
+    let idleHandle: number | undefined;
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+
+    if (typeof globalThis.requestIdleCallback === "function") {
+      idleHandle = globalThis.requestIdleCallback(() => markReady());
+    } else {
+      timeoutHandle = setTimeout(markReady, 0);
+    }
+
     return () => {
-      task.cancel?.();
+      cancelled = true;
+      if (
+        idleHandle != null &&
+        typeof globalThis.cancelIdleCallback === "function"
+      ) {
+        globalThis.cancelIdleCallback(idleHandle);
+      }
+      if (timeoutHandle != null) {
+        clearTimeout(timeoutHandle);
+      }
     };
   }, [ticketData]);
 
@@ -216,7 +267,9 @@ export default function QRTicketScreen() {
     const visitorName = `${ticketData.firstName} ${ticketData.lastName}`.trim();
     const destination =
       ticketData.offices?.length > 0
-        ? ticketData.offices.map((o) => o.name).join(", ")
+        ? ticketData.offices
+            .map((o) => formatOfficeWithFloor(o.name, o.floor))
+            .join(", ")
         : "—";
     const qrData = resolveTicketQrValue(ticketData);
 
@@ -312,7 +365,12 @@ export default function QRTicketScreen() {
       setIsDownloading(true);
       const visitorName = `${ticketData.firstName} ${ticketData.lastName}`;
       const officesList = ticketData.offices
-        .map((o, i) => `${i + 1}. ${o.name}`)
+        .map(
+          (o, i) =>
+            `${i + 1}. ${formatOfficeWithFloor(o.name, o.floor)}${
+              o.stepName ? ` — ${o.stepName}` : ""
+            }`,
+        )
         .join("<br/>");
 
       // Build type-specific content
@@ -580,13 +638,16 @@ export default function QRTicketScreen() {
 
   const destinationText =
     ticketData.offices?.length > 0
-      ? ticketData.offices.map((o) => o.name).join(", ")
+      ? ticketData.offices
+          .map((o) => formatOfficeWithFloor(o.name, o.floor))
+          .join(", ")
       : "—";
 
   // Keep stepOrder/status so Admissions step 1 and step 9 both render distinctly.
   const visitRoute = (ticketData.offices ?? []).map((o, index) => ({
     id: o.id,
     name: o.name,
+    floor: o.floor,
     stepName: o.stepName,
     stepOrder: o.stepOrder ?? index + 1,
     status: o.status,

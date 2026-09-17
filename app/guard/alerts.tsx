@@ -3,7 +3,7 @@ import {
   type ReadyToExitVisitor,
   type UnresolvedWrongDestinationAlert,
 } from '@/services/guard-alerts-dashboard';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect } from "expo-router/react-navigation";
 import { useRouter } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
