@@ -8,6 +8,7 @@ export {
 export { visitorService } from './visitor';
 export {
   visitorLookupService,
+  maskVisitorContact,
   type ReturningVisitorMatch,
   type ReturningVisitorType,
 } from './visitor-lookup';

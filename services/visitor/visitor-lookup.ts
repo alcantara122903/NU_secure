@@ -186,6 +186,142 @@ async function loadLatestVisitPassControl(visitorId: number): Promise<{
   };
 }
 
+/** Mask contact for multi-match UI: 0995*****71 */
+export function maskVisitorContact(contact: string | null | undefined): string {
+  const digits = String(contact ?? '').replace(/\D/g, '');
+  if (digits.length < 6) {
+    const raw = String(contact ?? '').trim();
+    return raw || '—';
+  }
+  const stars = '*'.repeat(Math.max(5, digits.length - 6));
+  return `${digits.slice(0, 4)}${stars}${digits.slice(-2)}`;
+}
+
+async function buildReturningMatchForVisitorRow(params: {
+  visitor: any;
+  fallbackFirstName: string;
+  fallbackLastName: string;
+  birthday: string;
+  buildEnrolleeProgress: (
+    enrolleeId: number,
+  ) => Promise<ReturningVisitorMatch['progress']>;
+}): Promise<ReturningVisitorMatch> {
+  const {
+    visitor,
+    fallbackFirstName,
+    fallbackLastName,
+    birthday,
+    buildEnrolleeProgress,
+  } = params;
+  const visitorId = Number(visitor.visitor_id);
+
+  let visitTypeId: number = VISIT_TYPE.NORMAL;
+  let progress: ReturningVisitorMatch['progress'] = null;
+  let lastVisitSummary: string | null = null;
+
+  const { data: enrolleeRow } = await supabase
+    .from('enrollee')
+    .select('enrollee_id, updated_at')
+    .eq('visitor_id', visitorId)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (enrolleeRow?.enrollee_id != null) {
+    progress = await buildEnrolleeProgress(enrolleeRow.enrollee_id);
+    visitTypeId = VISIT_TYPE.ENROLLEE;
+    if (progress) {
+      lastVisitSummary = progress.allCompleted
+        ? `Enrollment complete · ${progress.completedSteps}/${progress.totalSteps} steps`
+        : `Enrollment in progress · ${progress.completedSteps}/${progress.totalSteps} done`;
+    } else {
+      lastVisitSummary = 'Previously registered as Enrollee';
+    }
+  }
+
+  const { data: latestVisit } = await supabase
+    .from('visit')
+    .select(
+      `
+      visit_id,
+      visit_type_id,
+      purpose_reason,
+      entry_time,
+      visit_type(visit_type_name),
+      primary_office:office(office_name)
+    `,
+    )
+    .eq('visitor_id', visitorId)
+    .order('entry_time', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (latestVisit) {
+    const latestTypeId = Number(latestVisit.visit_type_id) || VISIT_TYPE.NORMAL;
+    if (visitTypeId !== VISIT_TYPE.ENROLLEE) {
+      visitTypeId = latestTypeId;
+    }
+    const typeName =
+      (latestVisit.visit_type as any)?.visit_type_name ||
+      visitTypeToKey(latestTypeId);
+    const officeName = (latestVisit.primary_office as any)?.office_name;
+    if (!lastVisitSummary) {
+      lastVisitSummary = officeName
+        ? `Last visit: ${typeName} · ${officeName}`
+        : `Last visit: ${typeName}`;
+    }
+  }
+
+  let addressParts = {
+    houseNo: '',
+    street: '',
+    barangay: '',
+    cityMunicipality: '',
+    province: '',
+    region: '',
+  };
+  let addressText = '';
+  if (visitor.address_id) {
+    const addr = await addressService.getAddress(visitor.address_id);
+    if (addr) {
+      addressParts = {
+        houseNo: addr.houseNo || '',
+        street: addr.street || '',
+        barangay: addr.barangay || '',
+        cityMunicipality: addr.cityMunicipality || '',
+        province: addr.province || '',
+        region: addr.region || '',
+      };
+      addressText = formatAddressText(addressParts);
+    }
+  }
+
+  const rawPhoto =
+    typeof visitor.visitor_photo_with_id_url === 'string' &&
+    visitor.visitor_photo_with_id_url.trim().length > 0
+      ? visitor.visitor_photo_with_id_url.trim()
+      : null;
+  const photoUrl = await resolvePhotoUri(rawPhoto);
+  const passControl = await loadLatestVisitPassControl(visitorId);
+
+  return {
+    visitorId,
+    firstName: visitor.first_name || fallbackFirstName,
+    lastName: visitor.last_name || fallbackLastName,
+    contactNo: String(visitor.contact_no ?? ''),
+    birthday,
+    addressText,
+    addressParts,
+    photoUrl,
+    visitorType: visitTypeToKey(visitTypeId),
+    visitTypeId,
+    progress,
+    lastVisitSummary,
+    passNumber: passControl.passNumber,
+    controlNumber: passControl.controlNumber,
+  };
+}
+
 export const visitorLookupService = {
   /**
    * Find existing visitor by first name, last name, and optional contact / birthday.
@@ -271,26 +407,22 @@ export const visitorLookupService = {
   },
 
   /**
-   * After ID OCR: match by first name + last name + birthday and build
-   * a returning-visitor payload (type, photo, address, enrollee progress).
+   * After ID OCR / manual check: return ALL visitors matching name + birthday
+   * so the guard can pick the correct duplicate when more than one exists.
    */
-  async findReturningByNameAndBirthday(criteria: {
+  async findAllReturningByNameAndBirthday(criteria: {
     firstName: string;
     lastName: string;
     birthday: string;
-  }): Promise<ReturningVisitorMatch | null> {
+  }): Promise<ReturningVisitorMatch[]> {
     try {
       const firstName = normalizeName(criteria.firstName);
       const lastName = normalizeName(criteria.lastName);
       const birthday = normalizeBirthday(criteria.birthday);
 
       if (!firstName || !lastName || !birthday) {
-        console.log('⏭️ Skipping returning lookup — need name + birthday');
-        return null;
+        return [];
       }
-
-      console.log('\n🔎 Returning visitor lookup (name + birthday)...');
-      console.log(`   ${firstName} ${lastName} · ${birthday}`);
 
       const { data: candidates, error } = await supabase
         .from('visitor')
@@ -300,8 +432,8 @@ export const visitorLookupService = {
         .order('created_at', { ascending: false });
 
       if (error) {
-        console.error('❌ Returning lookup error:', error);
-        return null;
+        console.error('❌ Returning multi-lookup error:', error);
+        return [];
       }
 
       const matches = (candidates ?? []).filter(
@@ -309,203 +441,66 @@ export const visitorLookupService = {
       );
 
       if (matches.length === 0) {
-        console.log('✅ No returning visitor with same name + birthday');
-        return null;
+        return [];
       }
 
-      // Prefer a row that already has a validation photo saved
+      // Prefer rows with validation photos first in the list
       matches.sort((a, b) => {
         const aPhoto = String(a.visitor_photo_with_id_url ?? '').trim() ? 1 : 0;
         const bPhoto = String(b.visitor_photo_with_id_url ?? '').trim() ? 1 : 0;
         return bPhoto - aPhoto;
       });
 
-      const visitorIds = matches.map((v) => v.visitor_id as number);
-
-      // Prefer unfinished enrollee progress; otherwise still treat as returning enrollee
-      // even when steps 1–9 are already complete (modal should still appear).
-      const { data: enrolleeRows } = await supabase
-        .from('enrollee')
-        .select('enrollee_id, visitor_id, updated_at')
-        .in('visitor_id', visitorIds)
-        .order('updated_at', { ascending: false });
-
-      let chosen = matches[0];
-      let enrolleeId: number | null = null;
-      let visitTypeId: number = VISIT_TYPE.NORMAL;
-      let progress: ReturningVisitorMatch['progress'] = null;
-      let lastVisitSummary: string | null = null;
-
-      let incompleteEnrollee: {
-        visitor: (typeof matches)[0];
-        enrolleeId: number;
-        progress: NonNullable<ReturningVisitorMatch['progress']>;
-      } | null = null;
-      let completedEnrollee: {
-        visitor: (typeof matches)[0];
-        enrolleeId: number;
-        progress: NonNullable<ReturningVisitorMatch['progress']>;
-      } | null = null;
-
-      for (const row of enrolleeRows ?? []) {
-        const summary = await this.buildEnrolleeProgress(row.enrollee_id);
-        if (!summary) continue;
-        const visitor = matches.find(
-          (v) => Number(v.visitor_id) === Number(row.visitor_id),
-        );
-        if (!visitor || row.enrollee_id == null) continue;
-
-        if (!summary.allCompleted && !incompleteEnrollee) {
-          incompleteEnrollee = {
+      const built = await Promise.all(
+        matches.map((visitor) =>
+          buildReturningMatchForVisitorRow({
             visitor,
-            enrolleeId: row.enrollee_id,
-            progress: summary,
-          };
-          break; // prefer first unfinished (most recently updated)
-        }
-        if (summary.allCompleted && !completedEnrollee) {
-          completedEnrollee = {
-            visitor,
-            enrolleeId: row.enrollee_id,
-            progress: summary,
-          };
-        }
-      }
-
-      const enrolleePick = incompleteEnrollee || completedEnrollee;
-      if (enrolleePick) {
-        chosen = enrolleePick.visitor;
-        enrolleeId = enrolleePick.enrolleeId;
-        visitTypeId = VISIT_TYPE.ENROLLEE;
-        progress = enrolleePick.progress;
-        lastVisitSummary = progress.allCompleted
-          ? `Enrollment complete · ${progress.completedSteps}/${progress.totalSteps} steps`
-          : `Enrollment in progress · ${progress.completedSteps}/${progress.totalSteps} done`;
-      }
-
-      // If no enrollee row at all, use most recent visit type
-      if (visitTypeId !== VISIT_TYPE.ENROLLEE || !progress) {
-        const { data: recentVisits } = await supabase
-          .from('visit')
-          .select(
-            `
-            visit_id,
-            visit_type_id,
-            purpose_reason,
-            entry_time,
-            visitor_id,
-            visit_type(visit_type_name),
-            primary_office:office(office_name)
-          `,
-          )
-          .in('visitor_id', visitorIds)
-          .order('entry_time', { ascending: false })
-          .limit(5);
-
-        const latest = (recentVisits ?? []).find((v) =>
-          visitorIds.includes(v.visitor_id),
-        );
-
-        if (latest) {
-          const visitor = matches.find(
-            (v) => Number(v.visitor_id) === Number(latest.visitor_id),
-          );
-          if (visitor) chosen = visitor;
-          visitTypeId = Number(latest.visit_type_id) || VISIT_TYPE.NORMAL;
-
-          if (visitTypeId === VISIT_TYPE.ENROLLEE && !progress) {
-            const enrolleeForVisitor = (enrolleeRows ?? []).find(
-              (e) => Number(e.visitor_id) === Number(chosen.visitor_id),
-            );
-            if (enrolleeForVisitor?.enrollee_id != null) {
-              enrolleeId = enrolleeForVisitor.enrollee_id;
-              progress = await this.buildEnrolleeProgress(
-                enrolleeForVisitor.enrollee_id,
-              );
-            }
-          }
-
-          const typeName =
-            (latest.visit_type as any)?.visit_type_name ||
-            visitTypeToKey(visitTypeId);
-          const officeName = (latest.primary_office as any)?.office_name;
-          lastVisitSummary = officeName
-            ? `Last visit: ${typeName} · ${officeName}`
-            : `Last visit: ${typeName}`;
-        } else if ((enrolleeRows ?? []).length > 0 && !progress) {
-          visitTypeId = VISIT_TYPE.ENROLLEE;
-          const first = enrolleeRows![0];
-          const visitor = matches.find(
-            (v) => Number(v.visitor_id) === Number(first.visitor_id),
-          );
-          if (visitor) chosen = visitor;
-          if (first.enrollee_id != null) {
-            enrolleeId = first.enrollee_id;
-            progress = await this.buildEnrolleeProgress(first.enrollee_id);
-          }
-          lastVisitSummary = 'Previously registered as Enrollee';
-        }
-      }
-
-      let addressParts = {
-        houseNo: '',
-        street: '',
-        barangay: '',
-        cityMunicipality: '',
-        province: '',
-        region: '',
-      };
-      let addressText = '';
-      if (chosen.address_id) {
-        const addr = await addressService.getAddress(chosen.address_id);
-        if (addr) {
-          addressParts = {
-            houseNo: addr.houseNo || '',
-            street: addr.street || '',
-            barangay: addr.barangay || '',
-            cityMunicipality: addr.cityMunicipality || '',
-            province: addr.province || '',
-            region: addr.region || '',
-          };
-          addressText = formatAddressText(addressParts);
-        }
-      }
-
-      const rawPhoto =
-        (typeof chosen.visitor_photo_with_id_url === 'string' &&
-        chosen.visitor_photo_with_id_url.trim().length > 0
-          ? chosen.visitor_photo_with_id_url.trim()
-          : null) || pickBestPhotoRaw(matches);
-      const photoUrl = await resolvePhotoUri(rawPhoto);
+            fallbackFirstName: firstName,
+            fallbackLastName: lastName,
+            birthday,
+            buildEnrolleeProgress: (id) => this.buildEnrolleeProgress(id),
+          }),
+        ),
+      );
 
       console.log(
-        `   Raw photo field: ${rawPhoto ? rawPhoto.slice(0, 120) : '(empty)'}`,
+        `✅ Returning multi-lookup: ${built.length} record(s) for ${firstName} ${lastName}`,
       );
-      console.log(`   Resolved photo URL: ${photoUrl ? 'yes' : 'no'}`);
+      return built;
+    } catch (error) {
+      console.error('❌ findAllReturningByNameAndBirthday error:', error);
+      return [];
+    }
+  },
 
-      const passControl = await loadLatestVisitPassControl(chosen.visitor_id);
+  /**
+   * After ID OCR: match by first name + last name + birthday and build
+   * a returning-visitor payload (type, photo, address, enrollee progress).
+   * When multiple rows match, prefers unfinished enrollee / photo / newest.
+   */
+  async findReturningByNameAndBirthday(criteria: {
+    firstName: string;
+    lastName: string;
+    birthday: string;
+  }): Promise<ReturningVisitorMatch | null> {
+    try {
+      const all = await this.findAllReturningByNameAndBirthday(criteria);
+      if (all.length === 0) {
+        console.log('✅ No returning visitor with same name + birthday');
+        return null;
+      }
 
-      const match: ReturningVisitorMatch = {
-        visitorId: chosen.visitor_id,
-        firstName: chosen.first_name || firstName,
-        lastName: chosen.last_name || lastName,
-        contactNo: String(chosen.contact_no ?? ''),
-        birthday,
-        addressText,
-        addressParts,
-        photoUrl,
-        visitorType: visitTypeToKey(visitTypeId),
-        visitTypeId,
-        progress,
-        lastVisitSummary,
-        passNumber: passControl.passNumber,
-        controlNumber: passControl.controlNumber,
-      };
+      const unfinished = all.find(
+        (m) => m.visitorType === 'enrollee' && m.progress && !m.progress.allCompleted,
+      );
+      const enrollee = all.find((m) => m.visitorType === 'enrollee' || m.progress);
+      const withPhoto = all.find((m) => Boolean(m.photoUrl));
+      const chosen = unfinished || enrollee || withPhoto || all[0];
 
       console.log('✅ Returning visitor match:');
-      console.log(`   ID: ${match.visitorId} · type: ${match.visitorType}`);
-      console.log(`   Photo URL: ${match.photoUrl ? 'yes' : 'no'}`);
-      return match;
+      console.log(`   ID: ${chosen.visitorId} · type: ${chosen.visitorType}`);
+      console.log(`   Photo URL: ${chosen.photoUrl ? 'yes' : 'no'}`);
+      return chosen;
     } catch (error) {
       console.error('❌ findReturningByNameAndBirthday error:', error);
       return null;

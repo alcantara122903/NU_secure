@@ -1,8 +1,9 @@
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   Modal,
   Pressable,
+  ScrollView,
   StyleProp,
   StyleSheet,
   Text,
@@ -26,6 +27,11 @@ const MONTH_NAMES = [
   'November',
   'December',
 ] as const;
+
+/** Earliest year selectable for visitor birthdays. */
+const MIN_BIRTH_YEAR = 1900;
+/** Default open year when no birthday is set yet (typical adult). */
+const DEFAULT_VIEW_AGE_YEARS = 30;
 
 export type BirthdayFieldColors = {
   background: string;
@@ -56,10 +62,11 @@ export function formatIsoFromDate(d: Date): string {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
 
+/** Display birthday as DD/MM/YYYY. */
 export function formatDisplayMDY(iso: string): string {
   const d = parseIsoBirthday(iso);
   if (!d) return '';
-  return `${pad2(d.getMonth() + 1)}/${pad2(d.getDate())}/${d.getFullYear()}`;
+  return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${d.getFullYear()}`;
 }
 
 function startOfToday(): Date {
@@ -86,6 +93,8 @@ function buildMonthGrid(year: number, month: number): (number | null)[] {
   return cells;
 }
 
+type PickerMode = 'calendar' | 'year' | 'month';
+
 type BirthdayDateFieldProps = {
   value: string;
   onChange: (isoYyyyMmDd: string) => void;
@@ -103,13 +112,25 @@ export function BirthdayDateField({
   inputContainerStyle,
 }: BirthdayDateFieldProps) {
   const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<PickerMode>('calendar');
+  const yearListRef = useRef<ScrollView>(null);
   const selected = useMemo(() => parseIsoBirthday(value), [value]);
+
+  const today = startOfToday();
+  const maxYear = today.getFullYear();
+
+  const years = useMemo(() => {
+    const list: number[] = [];
+    for (let y = maxYear; y >= MIN_BIRTH_YEAR; y--) list.push(y);
+    return list;
+  }, [maxYear]);
 
   const initialView = useCallback(() => {
     if (selected) return { y: selected.getFullYear(), m: selected.getMonth() };
-    const t = startOfToday();
-    return { y: t.getFullYear(), m: t.getMonth() };
-  }, [selected]);
+    // Empty field: open near a typical adult birth year, not the current month.
+    const y = Math.max(MIN_BIRTH_YEAR, maxYear - DEFAULT_VIEW_AGE_YEARS);
+    return { y, m: 0 };
+  }, [selected, maxYear]);
 
   const [viewYear, setViewYear] = useState(() => initialView().y);
   const [viewMonth, setViewMonth] = useState(() => initialView().m);
@@ -118,14 +139,20 @@ export function BirthdayDateField({
     const v = initialView();
     setViewYear(v.y);
     setViewMonth(v.m);
+    setMode('calendar');
     setOpen(true);
   };
 
-  const today = startOfToday();
+  const closeModal = () => {
+    setOpen(false);
+    setMode('calendar');
+  };
+
   const grid = useMemo(() => buildMonthGrid(viewYear, viewMonth), [viewYear, viewMonth]);
 
   const goPrevMonth = () => {
     if (viewMonth === 0) {
+      if (viewYear <= MIN_BIRTH_YEAR) return;
       setViewMonth(11);
       setViewYear((y) => y - 1);
     } else {
@@ -143,6 +170,9 @@ export function BirthdayDateField({
     }
   };
 
+  const canGoPrev =
+    viewYear > MIN_BIRTH_YEAR || (viewYear === MIN_BIRTH_YEAR && viewMonth > 0);
+
   const canGoNext =
     viewYear < today.getFullYear() ||
     (viewYear === today.getFullYear() && viewMonth < today.getMonth());
@@ -152,24 +182,62 @@ export function BirthdayDateField({
     picked.setHours(0, 0, 0, 0);
     if (picked > today) return;
     onChange(formatIsoFromDate(picked));
-    setOpen(false);
+    closeModal();
   };
 
   const onClear = () => {
     onChange('');
   };
 
-  const onToday = () => {
-    onChange(formatIsoFromDate(today));
-    setOpen(false);
+  const onConfirm = () => {
+    if (selected) {
+      onChange(formatIsoFromDate(selected));
+    }
+    closeModal();
+  };
+
+  const onSelectYear = (year: number) => {
+    setViewYear(year);
+    // If viewing a future month in the current year, clamp.
+    if (year === maxYear && viewMonth > today.getMonth()) {
+      setViewMonth(today.getMonth());
+    }
+    setMode('month');
+  };
+
+  const onSelectMonth = (month: number) => {
+    if (viewYear === maxYear && month > today.getMonth()) return;
+    setViewMonth(month);
+    setMode('calendar');
+  };
+
+  const scrollYearIntoView = () => {
+    const index = years.indexOf(viewYear);
+    if (index < 0) return;
+    // Approximate row height (~48) so the selected year is near the top.
+    requestAnimationFrame(() => {
+      yearListRef.current?.scrollTo({ y: Math.max(0, index * 48 - 96), animated: false });
+    });
+  };
+
+  const openYearPicker = () => {
+    setMode('year');
+    setTimeout(scrollYearIntoView, 50);
   };
 
   const display = formatDisplayMDY(value);
-  const headerTitle = `${MONTH_NAMES[viewMonth]} ${viewYear}`;
+  const headerTitle =
+    mode === 'year'
+      ? 'Select year'
+      : mode === 'month'
+        ? `${viewYear}`
+        : `${MONTH_NAMES[viewMonth]} ${viewYear}`;
 
   return (
     <View style={styles.field}>
-      <Text style={[styles.label, { color: colors.textSecondary }]}>{label}</Text>
+      {label ? (
+        <Text style={[styles.label, { color: colors.textSecondary }]}>{label}</Text>
+      ) : null}
       <Pressable
         onPress={openModal}
         style={({ pressed }) => [
@@ -185,99 +253,193 @@ export function BirthdayDateField({
           style={[styles.inputText, { color: display ? colors.text : colors.textSecondary }]}
           numberOfLines={1}
         >
-          {display || 'MM / DD / YYYY'}
+          {display || 'DD / MM / YYYY'}
         </Text>
         <MaterialIcons name="calendar-today" size={20} color={colors.textSecondary} />
       </Pressable>
 
-      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
-        <Pressable style={styles.overlay} onPress={() => setOpen(false)}>
+      <Modal visible={open} transparent animationType="fade" onRequestClose={closeModal}>
+        <Pressable style={styles.overlay} onPress={closeModal}>
           <Pressable
             style={[styles.sheet, { backgroundColor: colors.surface, borderColor: colors.border }]}
             onPress={(e) => e.stopPropagation()}
           >
             <View style={styles.sheetHeader}>
-              <View style={styles.headerTitleWrap}>
+              <TouchableOpacity
+                style={styles.headerTitleWrap}
+                onPress={() => {
+                  if (mode === 'calendar') openYearPicker();
+                  else if (mode === 'month') openYearPicker();
+                  else setMode('calendar');
+                }}
+                hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+                accessibilityRole="button"
+                accessibilityLabel="Change month and year"
+              >
                 <Text style={[styles.headerTitle, { color: colors.text }]}>{headerTitle}</Text>
-                <MaterialIcons name="arrow-drop-down" size={22} color={colors.textSecondary} />
-              </View>
-              <View style={styles.headerNav}>
-                <TouchableOpacity
-                  onPress={goPrevMonth}
-                  style={styles.navBtn}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                >
-                  <MaterialIcons name="keyboard-arrow-up" size={26} color={colors.primary} />
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={goNextMonth}
-                  disabled={!canGoNext}
-                  style={[styles.navBtn, !canGoNext && { opacity: 0.25 }]}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                >
-                  <MaterialIcons name="keyboard-arrow-down" size={26} color={colors.primary} />
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            <View style={styles.weekRow}>
-              {WEEKDAYS.map((d) => (
-                <View key={d} style={styles.weekCol}>
-                  <Text style={[styles.weekCell, { color: colors.textSecondary }]}>{d}</Text>
+                <MaterialIcons
+                  name={mode === 'year' ? 'arrow-drop-up' : 'arrow-drop-down'}
+                  size={22}
+                  color={colors.textSecondary}
+                />
+              </TouchableOpacity>
+              {mode === 'calendar' ? (
+                <View style={styles.headerNav}>
+                  <TouchableOpacity
+                    onPress={goPrevMonth}
+                    disabled={!canGoPrev}
+                    style={[styles.navBtn, !canGoPrev && { opacity: 0.25 }]}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <MaterialIcons name="keyboard-arrow-up" size={26} color={colors.primary} />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={goNextMonth}
+                    disabled={!canGoNext}
+                    style={[styles.navBtn, !canGoNext && { opacity: 0.25 }]}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <MaterialIcons name="keyboard-arrow-down" size={26} color={colors.primary} />
+                  </TouchableOpacity>
                 </View>
-              ))}
+              ) : (
+                <TouchableOpacity
+                  onPress={() => setMode('calendar')}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Text style={[styles.doneLink, { color: colors.primary }]}>Done</Text>
+                </TouchableOpacity>
+              )}
             </View>
 
-            <View style={styles.grid}>
-              {grid.map((cell, idx) => {
-                if (cell === null) {
-                  return <View key={`e-${idx}`} style={styles.dayCol} />;
-                }
-                const cellDate = new Date(viewYear, viewMonth, cell);
-                cellDate.setHours(0, 0, 0, 0);
-                const isFuture = cellDate > today;
-                const isSelected = selected ? isSameDay(cellDate, selected) : false;
-                return (
-                  <View key={idx} style={styles.dayCol}>
+            {mode === 'year' ? (
+              <ScrollView
+                ref={yearListRef}
+                style={styles.yearList}
+                showsVerticalScrollIndicator
+                nestedScrollEnabled
+              >
+                {years.map((year) => {
+                  const isSelected = year === viewYear;
+                  return (
                     <TouchableOpacity
-                      style={styles.dayTouch}
-                      disabled={isFuture}
-                      onPress={() => onPickDay(cell)}
+                      key={year}
+                      style={[
+                        styles.yearRow,
+                        isSelected && { backgroundColor: colors.primary },
+                      ]}
+                      onPress={() => onSelectYear(year)}
                       activeOpacity={0.7}
                     >
-                      <View
+                      <Text
                         style={[
-                          styles.dayInner,
-                          isSelected && {
-                            backgroundColor: colors.primary,
-                            borderWidth: 1,
-                            borderColor: colors.text,
-                          },
-                          isFuture && { opacity: 0.28 },
+                          styles.yearText,
+                          { color: isSelected ? '#FFFFFF' : colors.text },
+                          isSelected && { fontWeight: '700' },
                         ]}
                       >
-                        <Text
-                          style={[
-                            styles.dayText,
-                            { color: colors.text },
-                            isSelected && { color: '#FFFFFF', fontWeight: '600' },
-                          ]}
-                        >
-                          {cell}
-                        </Text>
-                      </View>
+                        {year}
+                      </Text>
                     </TouchableOpacity>
-                  </View>
-                );
-              })}
-            </View>
+                  );
+                })}
+              </ScrollView>
+            ) : mode === 'month' ? (
+              <View style={styles.monthGrid}>
+                {MONTH_NAMES.map((name, month) => {
+                  const disabled = viewYear === maxYear && month > today.getMonth();
+                  const isSelected = month === viewMonth;
+                  return (
+                    <TouchableOpacity
+                      key={name}
+                      style={[
+                        styles.monthCell,
+                        isSelected && {
+                          backgroundColor: colors.primary,
+                          borderColor: colors.text,
+                          borderWidth: 1,
+                        },
+                        disabled && { opacity: 0.28 },
+                      ]}
+                      disabled={disabled}
+                      onPress={() => onSelectMonth(month)}
+                      activeOpacity={0.7}
+                    >
+                      <Text
+                        style={[
+                          styles.monthText,
+                          { color: isSelected ? '#FFFFFF' : colors.text },
+                          isSelected && { fontWeight: '600' },
+                        ]}
+                      >
+                        {name.slice(0, 3)}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            ) : (
+              <>
+                <View style={styles.weekRow}>
+                  {WEEKDAYS.map((d) => (
+                    <View key={d} style={styles.weekCol}>
+                      <Text style={[styles.weekCell, { color: colors.textSecondary }]}>{d}</Text>
+                    </View>
+                  ))}
+                </View>
+
+                <View style={styles.grid}>
+                  {grid.map((cell, idx) => {
+                    if (cell === null) {
+                      return <View key={`e-${idx}`} style={styles.dayCol} />;
+                    }
+                    const cellDate = new Date(viewYear, viewMonth, cell);
+                    cellDate.setHours(0, 0, 0, 0);
+                    const isFuture = cellDate > today;
+                    const isSelected = selected ? isSameDay(cellDate, selected) : false;
+                    return (
+                      <View key={idx} style={styles.dayCol}>
+                        <TouchableOpacity
+                          style={styles.dayTouch}
+                          disabled={isFuture}
+                          onPress={() => onPickDay(cell)}
+                          activeOpacity={0.7}
+                        >
+                          <View
+                            style={[
+                              styles.dayInner,
+                              isSelected && {
+                                backgroundColor: colors.primary,
+                                borderWidth: 1,
+                                borderColor: colors.text,
+                              },
+                              isFuture && { opacity: 0.28 },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.dayText,
+                                { color: colors.text },
+                                isSelected && { color: '#FFFFFF', fontWeight: '600' },
+                              ]}
+                            >
+                              {cell}
+                            </Text>
+                          </View>
+                        </TouchableOpacity>
+                      </View>
+                    );
+                  })}
+                </View>
+              </>
+            )}
 
             <View style={[styles.footer, { borderTopColor: colors.border }]}>
               <TouchableOpacity onPress={onClear} hitSlop={{ top: 12, bottom: 12 }}>
                 <Text style={[styles.footerBtn, { color: colors.primary }]}>Clear</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={onToday} hitSlop={{ top: 12, bottom: 12 }}>
-                <Text style={[styles.footerBtn, { color: colors.primary }]}>Today</Text>
+              <TouchableOpacity onPress={onConfirm} hitSlop={{ top: 12, bottom: 12 }}>
+                <Text style={[styles.footerBtn, { color: colors.primary }]}>Confirm</Text>
               </TouchableOpacity>
             </View>
           </Pressable>
@@ -348,6 +510,38 @@ const styles = StyleSheet.create({
   },
   navBtn: {
     paddingVertical: 0,
+  },
+  doneLink: {
+    fontSize: 15,
+    fontWeight: '600',
+    paddingHorizontal: 4,
+  },
+  yearList: {
+    maxHeight: 280,
+  },
+  yearRow: {
+    height: 48,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  yearText: {
+    fontSize: 17,
+  },
+  monthGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingVertical: 8,
+  },
+  monthCell: {
+    width: '33.33%',
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 8,
+  },
+  monthText: {
+    fontSize: 15,
   },
   weekRow: {
     flexDirection: 'row',

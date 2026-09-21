@@ -211,7 +211,6 @@ export function FaceCaptureStepScreen({
           <View style={styles.headerTop}>
             <TouchableOpacity activeOpacity={0.85} style={styles.backButton} onPress={onBack}>
               <ArrowLeft size={20} color="#FFFFFF" strokeWidth={2.5} />
-              <Text style={styles.backText}>Back</Text>
             </TouchableOpacity>
 
             <View style={styles.visitorBadge}>
@@ -432,21 +431,14 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   backButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    minWidth: 88,
+    width: 44,
     height: 44,
-    paddingHorizontal: 12,
     borderRadius: 14,
     backgroundColor: 'rgba(0, 40, 100, 0.38)',
+    alignItems: 'center',
+    justifyContent: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
-  },
-  backText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '800',
+    borderColor: 'rgba(255,255,255,0.18)',
   },
   visitorBadge: {
     flexDirection: 'row',
@@ -481,7 +473,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   headerSpacer: {
-    width: 88,
+    width: 44,
   },
   stepTitle: {
     zIndex: 2,

@@ -1,5 +1,7 @@
 import { DataPrivacyNoticeModal } from "@/components/guard/data-privacy-notice-modal";
 import { FaceCaptureStepScreen } from "@/components/guard/face-capture-step";
+import { ManualVisitorEntryPanel } from "@/components/guard/manual-visitor-entry-panel";
+import { MultipleVisitorsFoundModal } from "@/components/guard/multiple-visitors-found-modal";
 import {
   PhotoCaptureConsentModal,
   type PhotoCaptureConsentKind,
@@ -26,7 +28,6 @@ import {
     type NormalVisitorRegistrationInput,
     type ReturningVisitorMatch,
 } from "@/services/visitor";
-import { runOCRDiagnostics } from "@/utils/diagnostics";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import {
@@ -35,10 +36,10 @@ import {
     ChevronRight,
     FileText,
     IdCard,
+    Keyboard,
     RefreshCw,
     ShieldCheck,
     UploadCloud,
-    Wrench,
 } from "lucide-react-native";
 import React, { useEffect, useState } from "react";
 import {
@@ -221,6 +222,11 @@ export default function RegisterVisitorScreen() {
   const [idPhotoConsentGiven, setIdPhotoConsentGiven] = useState(false);
   const [privacyPendingAction, setPrivacyPendingAction] =
     useState<PrivacyPendingAction>(null);
+  const [showManualEntry, setShowManualEntry] = useState(false);
+  const [manualFirstName, setManualFirstName] = useState("");
+  const [manualLastName, setManualLastName] = useState("");
+  const [manualBirthday, setManualBirthday] = useState("");
+  const [isCheckingManualVisitor, setIsCheckingManualVisitor] = useState(false);
 
   // Normal Visitor Step 1 Fields
   const [normalVisitorFirstName, setNormalVisitorFirstName] = useState("");
@@ -299,6 +305,8 @@ export default function RegisterVisitorScreen() {
   const [returningMatch, setReturningMatch] =
     useState<ReturningVisitorMatch | null>(null);
   const [showReturningModal, setShowReturningModal] = useState(false);
+  const [multiMatches, setMultiMatches] = useState<ReturningVisitorMatch[]>([]);
+  const [showMultiMatchModal, setShowMultiMatchModal] = useState(false);
   /** enrollee-resume = progress modal; identity-confirm = Existing Visitor Found */
   const [returningModalMode, setReturningModalMode] = useState<
     "enrollee-resume" | "identity-confirm"
@@ -405,12 +413,32 @@ export default function RegisterVisitorScreen() {
 
   const visitorTypeInfo = getVisitorTypeDisplay();
 
-  const handleBack = () => {
+  const goBackOneStep = () => {
     if (step > 1) {
       setStep(step - 1);
     } else {
       router.back();
     }
+  };
+
+  const handleBack = () => {
+    // Steps 2–3: confirm before leaving so guards don't lose in-progress details.
+    if (step >= 2) {
+      Alert.alert(
+        "Leave this page?",
+        "You have unsaved visitor registration progress. If you go back now, changes on this step may be lost.",
+        [
+          { text: "Stay", style: "cancel" },
+          {
+            text: "Go Back",
+            style: "destructive",
+            onPress: goBackOneStep,
+          },
+        ],
+      );
+      return;
+    }
+    goBackOneStep();
   };
 
   const handleCaptureFace = async () => {
@@ -874,7 +902,59 @@ export default function RegisterVisitorScreen() {
 
   const finishIdExtractionAndGoStep2 = () => {
     setShowReturningModal(false);
+    setShowMultiMatchModal(false);
+    setMultiMatches([]);
+    setShowManualEntry(false);
     setStep(2);
+  };
+
+  const openReturningModalForMatch = (match: ReturningVisitorMatch) => {
+    if (visitorType === "enrollee") {
+      if (match.visitorType === "enrollee" || match.progress) {
+        setReturningMatch({
+          ...match,
+          visitorType: "enrollee",
+        });
+        setReturningModalMode("enrollee-resume");
+        setShowReturningModal(true);
+        return;
+      }
+      setReturningMatch({
+        ...match,
+        progress: null,
+        lastVisitSummary: null,
+      });
+      setReturningModalMode("identity-confirm");
+      setShowReturningModal(true);
+      return;
+    }
+
+    if (visitorType === "contractor" || visitorType === "normal") {
+      setReturningMatch({
+        ...match,
+        visitorType: visitorType === "contractor" ? "contractor" : "normal",
+        progress: null,
+        lastVisitSummary: null,
+      });
+      setReturningModalMode("identity-confirm");
+      setShowReturningModal(true);
+    }
+  };
+
+  /** Returns true when a returning / multi-match UI was shown (do not advance yet). */
+  const presentReturningLookupResults = (
+    matches: ReturningVisitorMatch[],
+  ): boolean => {
+    if (matches.length === 0) {
+      return false;
+    }
+    if (matches.length === 1) {
+      openReturningModalForMatch(matches[0]);
+      return true;
+    }
+    setMultiMatches(matches);
+    setShowMultiMatchModal(true);
+    return true;
   };
 
   const handleConfirmResumeReturning = () => {
@@ -974,49 +1054,17 @@ export default function RegisterVisitorScreen() {
           extractedData.lastName?.trim() &&
           extractedData.birthday?.trim()
         ) {
-          const match = await visitorLookupService.findReturningByNameAndBirthday({
-            firstName: extractedData.firstName,
-            lastName: extractedData.lastName,
-            birthday: extractedData.birthday,
-          });
+          const matches =
+            await visitorLookupService.findAllReturningByNameAndBirthday({
+              firstName: extractedData.firstName,
+              lastName: extractedData.lastName,
+              birthday: extractedData.birthday,
+            });
 
-          if (match) {
-            if (visitorType === "enrollee") {
-              if (match.visitorType === "enrollee" || match.progress) {
-                setIsProcessingId(false);
-                setReturningMatch({
-                  ...match,
-                  visitorType: "enrollee",
-                });
-                setReturningModalMode("enrollee-resume");
-                setShowReturningModal(true);
-                return true;
-              }
-              // Known person but not an enrollee yet — identity confirm only
-              setIsProcessingId(false);
-              setReturningMatch({
-                ...match,
-                progress: null,
-                lastVisitSummary: null,
-              });
-              setReturningModalMode("identity-confirm");
-              setShowReturningModal(true);
-              return true;
-            }
-
-            if (visitorType === "contractor" || visitorType === "normal") {
-              setIsProcessingId(false);
-              setReturningMatch({
-                ...match,
-                visitorType:
-                  visitorType === "contractor" ? "contractor" : "normal",
-                progress: null,
-                lastVisitSummary: null,
-              });
-              setReturningModalMode("identity-confirm");
-              setShowReturningModal(true);
-              return true;
-            }
+          if (matches.length > 0) {
+            setIsProcessingId(false);
+            presentReturningLookupResults(matches);
+            return true;
           }
         }
 
@@ -1115,27 +1163,86 @@ export default function RegisterVisitorScreen() {
     setIdPhotoPreview(null);
   };
 
-  const handleRunOCRDiagnostics = async () => {
-    console.log("🔧 Running OCR diagnostics...");
-    Alert.alert(
-      "Running Diagnostics",
-      "Checking backend connection and OCR configuration...",
-      [{ text: "OK" }],
-    );
+  const applyManualNameBirthdayToForm = (
+    firstName: string,
+    lastName: string,
+    birthday: string,
+  ) => {
+    setExtractedFirstName(firstName);
+    setExtractedLastName(lastName);
+    setEnrolleeBirthday(birthday);
+    setNormalVisitorFirstName(firstName);
+    setNormalVisitorLastName(lastName);
+    setNormalVisitorBirthday(birthday);
+    setContractorFirstName(firstName);
+    setContractorLastName(lastName);
+    setContractorBirthday(birthday);
+    setOcrExtractionFailed(true);
+    setExtractionConfidence(null);
+  };
 
-    const diagnostics = await runOCRDiagnostics();
+  const handleCheckManualVisitor = async () => {
+    const firstName = manualFirstName.trim().replace(/\s+/g, " ");
+    const lastName = manualLastName.trim().replace(/\s+/g, " ");
+    const birthday = manualBirthday.trim();
 
-    let message = `Backend: ${diagnostics.backendStatus === "ok" ? "✅ OK" : "❌ ERROR"}\n`;
-    message += `Tesseract: ${diagnostics.tesseractReady ? "✅ Ready" : "⏳ Initializing"}\n\n`;
-
-    if (diagnostics.recommendations.length > 0) {
-      message += "💡 Recommendations:\n";
-      diagnostics.recommendations.forEach((rec) => {
-        message += `• ${rec}\n`;
-      });
+    if (!firstName) {
+      Alert.alert("Missing First Name", "Please enter the visitor's first name.");
+      return;
+    }
+    if (!lastName) {
+      Alert.alert("Missing Last Name", "Please enter the visitor's last name.");
+      return;
+    }
+    if (!birthday) {
+      Alert.alert("Missing Birthday", "Please select the visitor's birthday.");
+      return;
+    }
+    if (!isBirthdayValid(birthday)) {
+      Alert.alert(
+        "Invalid Birthday",
+        "Please choose a valid birthday that is not in the future.",
+      );
+      return;
     }
 
-    Alert.alert("OCR Diagnostics Results", message, [{ text: "OK" }]);
+    try {
+      setIsCheckingManualVisitor(true);
+      applyManualNameBirthdayToForm(firstName, lastName, birthday);
+
+      const matches =
+        await visitorLookupService.findAllReturningByNameAndBirthday({
+          firstName,
+          lastName,
+          birthday,
+        });
+
+      if (presentReturningLookupResults(matches)) {
+        return;
+      }
+
+      Alert.alert(
+        "No Existing Record",
+        "No matching visitor was found. Continue to enter the remaining details.",
+        [
+          {
+            text: "Continue",
+            onPress: () => {
+              setShowManualEntry(false);
+              setStep(2);
+            },
+          },
+        ],
+      );
+    } catch (error) {
+      console.error("Manual visitor check failed:", error);
+      Alert.alert(
+        "Lookup Error",
+        "Could not check for an existing visitor. Please try again.",
+      );
+    } finally {
+      setIsCheckingManualVisitor(false);
+    }
   };
 
   const handleCreateEnrollee = async (photoOpts?: {
@@ -1827,7 +1934,6 @@ export default function RegisterVisitorScreen() {
                   onPress={handleBack}
                 >
                   <ArrowLeft size={20} color="#FFFFFF" strokeWidth={2.8} />
-                  <Text style={captureStepStyles.backText}>Back</Text>
                 </TouchableOpacity>
                 <View style={captureStepStyles.headerTopSpacer} />
               </View>
@@ -1859,6 +1965,22 @@ export default function RegisterVisitorScreen() {
               </View>
             </View>
 
+            {showManualEntry ? (
+              <ManualVisitorEntryPanel
+                firstName={manualFirstName}
+                onChangeFirstName={setManualFirstName}
+                lastName={manualLastName}
+                onChangeLastName={setManualLastName}
+                birthday={manualBirthday}
+                onChangeBirthday={setManualBirthday}
+                birthdayColors={colors}
+                isChecking={isCheckingManualVisitor}
+                onBackToIdScan={() => setShowManualEntry(false)}
+                onCheckVisitor={() => {
+                  void handleCheckManualVisitor();
+                }}
+              />
+            ) : (
             <ScrollView
               style={captureStepStyles.captureScroll}
               contentContainerStyle={captureStepStyles.scrollContent}
@@ -1932,11 +2054,11 @@ export default function RegisterVisitorScreen() {
                 />
 
                 <CaptureIdActionButton
-                  title="Test OCR Connection"
-                  subtitle="Check OCR service status"
-                  icon={<Wrench size={24} color="#FFFFFF" fill="#FFFFFF" />}
+                  title="Manual Entry"
+                  subtitle="Type name and birthday to look up visitor"
+                  icon={<Keyboard size={24} color="#FFFFFF" strokeWidth={2.3} />}
                   color="#FF9500"
-                  onPress={handleRunOCRDiagnostics}
+                  onPress={() => setShowManualEntry(true)}
                   disabled={isCapturingIdPhoto || isUploadingIdPhoto}
                 />
 
@@ -2020,6 +2142,7 @@ export default function RegisterVisitorScreen() {
             )}
           </View>
         </ScrollView>
+            )}
           </View>
       </SafeAreaView>
         <DataPrivacyNoticeModal
@@ -2039,6 +2162,25 @@ export default function RegisterVisitorScreen() {
           mode={returningModalMode}
           onConfirmResume={handleConfirmResumeReturning}
           onCancelNewVisitor={handleCancelReturningAsNew}
+        />
+        <MultipleVisitorsFoundModal
+          visible={showMultiMatchModal}
+          matches={multiMatches}
+          onUseSelected={(match) => {
+            setShowMultiMatchModal(false);
+            setMultiMatches([]);
+            openReturningModalForMatch(match);
+          }}
+          onCreateNewVisitor={() => {
+            setShowMultiMatchModal(false);
+            setMultiMatches([]);
+            setReturningMatch(null);
+            setResumeExistingVisitor(false);
+            finishIdExtractionAndGoStep2();
+          }}
+          onClose={() => {
+            setShowMultiMatchModal(false);
+          }}
         />
         <Modal
           visible={isProcessingId}
@@ -2766,7 +2908,7 @@ const captureStepStyles = StyleSheet.create({
     justifyContent: "space-between",
   },
   headerTopSpacer: {
-    width: 88,
+    width: 44,
     height: 1,
   },
   visitorBadgeWrapper: {
@@ -2775,20 +2917,14 @@ const captureStepStyles = StyleSheet.create({
     marginTop: 12,
   },
   captureBackButton: {
-    flexDirection: "row",
+    width: 44,
+    height: 44,
+    borderRadius: 14,
     alignItems: "center",
-    gap: 6,
-    paddingVertical: 9,
-    paddingHorizontal: 12,
-    borderRadius: 999,
+    justifyContent: "center",
     backgroundColor: "rgba(255,255,255,0.12)",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.25)",
-  },
-  backText: {
-    color: "#FFFFFF",
-    fontSize: 15,
-    fontWeight: "800",
   },
   visitorBadge: {
     flexDirection: "row",
