@@ -59,7 +59,6 @@ export default function ForgotPasswordScreen() {
   const [email, setEmail] = useState('');
   const [codeDigits, setCodeDigits] = useState<string[]>(['', '', '', '', '', '']);
   const [resetToken, setResetToken] = useState('');
-  const [verifiedCode, setVerifiedCode] = useState('');
   const [password, setPassword] = useState('');
   const [passwordConfirmation, setPasswordConfirmation] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -131,7 +130,7 @@ export default function ForgotPasswordScreen() {
     setIsLoading(true);
     setCodeError(undefined);
     try {
-      await authService.forgotPassword(email);
+      await authService.resendResetCode(email);
       if (!mountedRef.current) return;
       setCodeSentNotice(true);
       setCodeDigits(['', '', '', '', '', '']);
@@ -167,7 +166,6 @@ export default function ForgotPasswordScreen() {
       });
       if (!mountedRef.current) return;
       setResetToken(result.token);
-      setVerifiedCode(codeValue);
       setPassword('');
       setPasswordConfirmation('');
       setPasswordErrors({});
@@ -206,7 +204,6 @@ export default function ForgotPasswordScreen() {
         token: resetToken,
         password,
         passwordConfirmation,
-        code: verifiedCode,
       });
       if (!mountedRef.current) return;
       setStep('success');
@@ -222,7 +219,6 @@ export default function ForgotPasswordScreen() {
     password,
     passwordConfirmation,
     resetToken,
-    verifiedCode,
   ]);
 
   const onCodeChange = (index: number, text: string) => {
