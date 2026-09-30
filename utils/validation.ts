@@ -94,6 +94,19 @@ export const validateForgotPasswordForm = (email: string) => {
   };
 };
 
+export const validateResetVerificationCode = (
+  code: string,
+): string | undefined => {
+  const trimmed = code.trim();
+  if (!trimmed) {
+    return 'Verification code is required.';
+  }
+  if (!/^\d{6}$/.test(trimmed)) {
+    return 'Enter the 6-digit verification code.';
+  }
+  return undefined;
+};
+
 export const validateResetPasswordForm = (
   password: string,
   passwordConfirmation: string,
@@ -115,3 +128,17 @@ export const validateResetPasswordForm = (
     },
   };
 };
+
+/** Mask email for UI: g*********o@nusecure.com */
+export function maskEmailForDisplay(email: string): string {
+  const trimmed = email.trim().toLowerCase();
+  const at = trimmed.indexOf('@');
+  if (at <= 0) return trimmed;
+  const local = trimmed.slice(0, at);
+  const domain = trimmed.slice(at);
+  if (local.length <= 2) {
+    return `${local[0] ?? ''}***${domain}`;
+  }
+  const stars = '*'.repeat(Math.min(9, Math.max(3, local.length - 2)));
+  return `${local[0]}${stars}${local[local.length - 1]}${domain}`;
+}

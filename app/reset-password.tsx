@@ -1,7 +1,11 @@
+/**
+ * Deep-link / email-link fallback for password reset.
+ * Primary in-app flow is the OTP wizard in `forgot-password.tsx`.
+ * Supports: nusecure://reset-password?email=...&token=...
+ */
 import { AUTH_ERROR_MESSAGES, ApiClientError } from '@/services/api';
 import { AuthError, authService } from '@/services/authentication';
 import { validateResetPasswordForm } from '@/utils/validation';
-import Ionicons from '@expo/vector-icons/Ionicons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -40,10 +44,16 @@ function getResetErrorMessage(error: unknown): string {
 
 export default function ResetPasswordScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ email?: string | string[]; token?: string | string[] }>();
+  const params = useLocalSearchParams<{
+    email?: string | string[];
+    token?: string | string[];
+  }>();
   const mountedRef = useRef(true);
 
-  const email = useMemo(() => firstParam(params.email).trim().toLowerCase(), [params.email]);
+  const email = useMemo(
+    () => firstParam(params.email).trim().toLowerCase(),
+    [params.email],
+  );
   const token = useMemo(() => firstParam(params.token).trim(), [params.token]);
 
   useEffect(() => {
@@ -85,7 +95,7 @@ export default function ResetPasswordScreen() {
     setErrors({});
 
     try {
-      const result = await authService.resetPassword({
+      await authService.resetPassword({
         email,
         token,
         password,
@@ -97,12 +107,6 @@ export default function ResetPasswordScreen() {
       }
 
       setIsSuccess(true);
-      Alert.alert('Password Reset', result.message, [
-        {
-          text: 'Back to Login',
-          onPress: goBackToLogin,
-        },
-      ]);
     } catch (error) {
       if (!mountedRef.current) {
         return;
@@ -115,7 +119,6 @@ export default function ResetPasswordScreen() {
     }
   }, [
     email,
-    goBackToLogin,
     isLoading,
     isSuccess,
     linkMissing,
@@ -127,14 +130,12 @@ export default function ResetPasswordScreen() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="light-content" backgroundColor="#0A4DB3" />
-
       <ImageBackground
         source={require('@/assets/nu-building.png')}
         style={styles.background}
         resizeMode="cover"
       >
         <View style={styles.overlay} />
-
         <KeyboardAvoidingView
           style={styles.flex}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -146,7 +147,9 @@ export default function ResetPasswordScreen() {
           >
             <View style={styles.headerSection}>
               <Text style={styles.appTitle}>NU-SECURE</Text>
-              <Text style={styles.subtitle}>Smart Visitor Monitoring System</Text>
+              <Text style={styles.headerSubtitle}>
+                Smart Visitor Monitoring System
+              </Text>
             </View>
 
             <View style={styles.card}>
@@ -156,149 +159,138 @@ export default function ResetPasswordScreen() {
                 resizeMode="contain"
               />
 
-              <Text style={styles.title}>Reset Password</Text>
-
               {linkMissing ? (
                 <>
-                  <Text style={styles.description}>
+                  <Text style={styles.title}>Invalid Reset Link</Text>
+                  <Text style={styles.subtitle}>
                     This password reset link is invalid or has already been used.
+                    You can request a new verification code from Forgot Password.
                   </Text>
                   <TouchableOpacity
                     style={styles.primaryButton}
-                    onPress={goBackToLogin}
+                    onPress={() => router.replace('/forgot-password')}
                     activeOpacity={0.9}
                   >
-                    <Text style={styles.primaryButtonText}>Back to Login</Text>
+                    <Text style={styles.primaryButtonText}>Forgot Password</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={goBackToLogin}
+                    style={styles.linkButton}
+                  >
+                    <Text style={styles.linkText}>Back to Sign In</Text>
                   </TouchableOpacity>
                 </>
               ) : isSuccess ? (
                 <>
-                  <Text style={styles.successText}>
-                    Your password has been reset successfully. You can now sign in using your new
-                    password.
+                  <Text style={styles.title}>Password Reset Successful</Text>
+                  <Text style={styles.subtitle}>
+                    Your password has been changed successfully. For your
+                    security, existing login sessions may have been signed out.
+                    You can now sign in using your new password.
                   </Text>
                   <TouchableOpacity
                     style={styles.primaryButton}
                     onPress={goBackToLogin}
                     activeOpacity={0.9}
                   >
-                    <Text style={styles.primaryButtonText}>Back to Login</Text>
+                    <Text style={styles.primaryButtonText}>Back to Sign In</Text>
                   </TouchableOpacity>
                 </>
               ) : (
                 <>
-                  <Text style={styles.description}>
-                    Choose a new password for {email}. Use at least 8 characters with uppercase,
-                    lowercase, and a number.
+                  <Text style={styles.title}>Create New Password</Text>
+                  <Text style={styles.subtitle}>
+                    Your identity has been verified. Create a new password for
+                    your account.
                   </Text>
 
-                  <View style={styles.inputGroup}>
-                    <Text style={styles.label}>New Password</Text>
-                    <View
-                      style={[
-                        styles.inputWrapper,
-                        errors.password ? styles.inputWrapperError : null,
-                      ]}
+                  <Text style={styles.label}>New Password</Text>
+                  <View
+                    style={[
+                      styles.passwordRow,
+                      errors.password ? styles.inputError : null,
+                    ]}
+                  >
+                    <TextInput
+                      style={styles.passwordInput}
+                      placeholder="Enter new password"
+                      placeholderTextColor="#94A3B8"
+                      secureTextEntry={!showPassword}
+                      editable={!isLoading}
+                      value={password}
+                      onChangeText={(text) => {
+                        setPassword(text);
+                        if (errors.password) {
+                          setErrors((prev) => ({ ...prev, password: undefined }));
+                        }
+                      }}
+                    />
+                    <TouchableOpacity
+                      onPress={() => setShowPassword((v) => !v)}
+                      disabled={isLoading}
                     >
-                      <Ionicons
-                        name="lock-closed-outline"
-                        size={20}
-                        color="#6B7280"
-                        style={styles.inputIcon}
-                      />
-                      <TextInput
-                        style={styles.input}
-                        placeholder="Enter new password"
-                        placeholderTextColor="#9CA3AF"
-                        secureTextEntry={!showPassword}
-                        editable={!isLoading}
-                        value={password}
-                        onChangeText={(text) => {
-                          setPassword(text);
-                          if (errors.password) {
-                            setErrors((prev) => ({ ...prev, password: undefined }));
-                          }
-                        }}
-                      />
-                      <TouchableOpacity
-                        onPress={() => setShowPassword((prev) => !prev)}
-                        style={styles.eyeButton}
-                        disabled={isLoading}
-                      >
-                        <Ionicons
-                          name={showPassword ? 'eye-off-outline' : 'eye-outline'}
-                          size={22}
-                          color="#4B5563"
-                        />
-                      </TouchableOpacity>
-                    </View>
-                    {errors.password ? (
-                      <Text style={styles.errorText}>{errors.password}</Text>
-                    ) : null}
+                      <Text style={styles.showText}>
+                        {showPassword ? 'Hide' : 'Show'}
+                      </Text>
+                    </TouchableOpacity>
                   </View>
+                  {errors.password ? (
+                    <Text style={styles.errorText}>{errors.password}</Text>
+                  ) : null}
 
-                  <View style={styles.inputGroup}>
-                    <Text style={styles.label}>Confirm New Password</Text>
-                    <View
-                      style={[
-                        styles.inputWrapper,
-                        errors.passwordConfirmation ? styles.inputWrapperError : null,
-                      ]}
+                  <Text style={[styles.label, { marginTop: 14 }]}>
+                    Confirm New Password
+                  </Text>
+                  <View
+                    style={[
+                      styles.passwordRow,
+                      errors.passwordConfirmation ? styles.inputError : null,
+                    ]}
+                  >
+                    <TextInput
+                      style={styles.passwordInput}
+                      placeholder="Confirm new password"
+                      placeholderTextColor="#94A3B8"
+                      secureTextEntry={!showConfirmPassword}
+                      editable={!isLoading}
+                      value={passwordConfirmation}
+                      onChangeText={(text) => {
+                        setPasswordConfirmation(text);
+                        if (errors.passwordConfirmation) {
+                          setErrors((prev) => ({
+                            ...prev,
+                            passwordConfirmation: undefined,
+                          }));
+                        }
+                      }}
+                    />
+                    <TouchableOpacity
+                      onPress={() => setShowConfirmPassword((v) => !v)}
+                      disabled={isLoading}
                     >
-                      <Ionicons
-                        name="lock-closed-outline"
-                        size={20}
-                        color="#6B7280"
-                        style={styles.inputIcon}
-                      />
-                      <TextInput
-                        style={styles.input}
-                        placeholder="Confirm new password"
-                        placeholderTextColor="#9CA3AF"
-                        secureTextEntry={!showConfirmPassword}
-                        editable={!isLoading}
-                        value={passwordConfirmation}
-                        onChangeText={(text) => {
-                          setPasswordConfirmation(text);
-                          if (errors.passwordConfirmation) {
-                            setErrors((prev) => ({
-                              ...prev,
-                              passwordConfirmation: undefined,
-                            }));
-                          }
-                        }}
-                      />
-                      <TouchableOpacity
-                        onPress={() => setShowConfirmPassword((prev) => !prev)}
-                        style={styles.eyeButton}
-                        disabled={isLoading}
-                      >
-                        <Ionicons
-                          name={showConfirmPassword ? 'eye-off-outline' : 'eye-outline'}
-                          size={22}
-                          color="#4B5563"
-                        />
-                      </TouchableOpacity>
-                    </View>
-                    {errors.passwordConfirmation ? (
-                      <Text style={styles.errorText}>{errors.passwordConfirmation}</Text>
-                    ) : null}
+                      <Text style={styles.showText}>
+                        {showConfirmPassword ? 'Hide' : 'Show'}
+                      </Text>
+                    </TouchableOpacity>
                   </View>
+                  {errors.passwordConfirmation ? (
+                    <Text style={styles.errorText}>
+                      {errors.passwordConfirmation}
+                    </Text>
+                  ) : null}
 
                   <TouchableOpacity
                     style={[
                       styles.primaryButton,
                       isLoading ? styles.primaryButtonDisabled : null,
+                      { marginTop: 20 },
                     ]}
-                    onPress={handleSubmit}
+                    onPress={() => void handleSubmit()}
                     activeOpacity={0.9}
                     disabled={isLoading}
                   >
                     {isLoading ? (
-                      <View style={styles.buttonContent}>
-                        <ActivityIndicator color="#FFFFFF" size="small" />
-                        <Text style={styles.primaryButtonText}>Resetting...</Text>
-                      </View>
+                      <ActivityIndicator color="#FFFFFF" />
                     ) : (
                       <Text style={styles.primaryButtonText}>Reset Password</Text>
                     )}
@@ -306,15 +298,18 @@ export default function ResetPasswordScreen() {
 
                   <TouchableOpacity
                     onPress={goBackToLogin}
-                    style={styles.backButton}
-                    activeOpacity={0.8}
+                    style={styles.linkButton}
                     disabled={isLoading}
                   >
-                    <Text style={styles.backText}>Back to Login</Text>
+                    <Text style={styles.linkText}>Back to Sign In</Text>
                   </TouchableOpacity>
                 </>
               )}
             </View>
+
+            <Text style={styles.footer}>
+              National University - Secure Visitor Access
+            </Text>
           </ScrollView>
         </KeyboardAvoidingView>
       </ImageBackground>
@@ -354,7 +349,7 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     textAlign: 'center',
   },
-  subtitle: {
+  headerSubtitle: {
     marginTop: 8,
     fontSize: 14,
     color: '#EAF2FF',
@@ -383,17 +378,15 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     color: '#111827',
     textAlign: 'center',
+    marginBottom: 8,
   },
-  description: {
+  subtitle: {
     fontSize: 13,
     color: '#6B7280',
     textAlign: 'center',
-    marginTop: 8,
-    marginBottom: 18,
     lineHeight: 18,
-  },
-  inputGroup: {
-    marginBottom: 14,
+    marginBottom: 18,
+    fontWeight: '500',
   },
   label: {
     fontSize: 14,
@@ -401,51 +394,44 @@ const styles = StyleSheet.create({
     color: '#111827',
     marginBottom: 8,
   },
-  inputWrapper: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  passwordRow: {
     minHeight: 50,
-    borderRadius: 14,
     borderWidth: 1.4,
     borderColor: '#D7DEE8',
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: '#F9FAFB',
-    paddingHorizontal: 12,
   },
-  inputWrapperError: {
-    borderColor: '#FF6B6B',
-  },
-  inputIcon: {
-    marginRight: 8,
-  },
-  input: {
+  passwordInput: {
     flex: 1,
     fontSize: 14,
     color: '#111827',
     fontWeight: '600',
+    paddingVertical: 12,
   },
-  eyeButton: {
-    paddingLeft: 6,
-    paddingVertical: 4,
+  showText: {
+    color: '#0A4DB3',
+    fontSize: 14,
+    fontWeight: '700',
+    paddingLeft: 8,
+  },
+  inputError: {
+    borderColor: '#FF6B6B',
   },
   errorText: {
     color: '#FF6B6B',
     fontSize: 12,
-    marginTop: 6,
     fontWeight: '500',
-  },
-  successText: {
-    color: '#047857',
-    fontSize: 14,
-    textAlign: 'center',
-    marginTop: 8,
-    marginBottom: 18,
-    lineHeight: 20,
-    fontWeight: '600',
+    marginBottom: 8,
+    marginTop: 4,
   },
   primaryButton: {
-    backgroundColor: '#0A4DB3',
+    marginTop: 14,
     minHeight: 50,
     borderRadius: 14,
+    backgroundColor: '#0A4DB3',
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#0A4DB3',
@@ -457,23 +443,25 @@ const styles = StyleSheet.create({
   primaryButtonDisabled: {
     opacity: 0.75,
   },
-  buttonContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
   primaryButtonText: {
     color: '#FFFFFF',
     fontSize: 17,
     fontWeight: '900',
   },
-  backButton: {
+  linkButton: {
     alignSelf: 'center',
-    marginTop: 18,
+    marginTop: 16,
   },
-  backText: {
+  linkText: {
     color: '#0A4DB3',
     fontSize: 14,
     fontWeight: '700',
+  },
+  footer: {
+    marginTop: 22,
+    textAlign: 'center',
+    color: '#EAF2FF',
+    fontSize: 12,
+    fontWeight: '500',
   },
 });

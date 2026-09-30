@@ -210,6 +210,10 @@ class AuthService {
     }
   }
 
+  /**
+   * Step 1 — request a 6-digit verification code by email.
+   * Backend should email the OTP (and never reveal whether the account exists).
+   */
   async forgotPassword(email: string): Promise<{ success: boolean; message: string }> {
     try {
       const data = await apiClient.post<{ success?: boolean; message?: string }>(
@@ -222,28 +226,79 @@ class AuthService {
         success: data?.success !== false,
         message:
           data?.message?.trim() ||
-          'If an account exists for this email, password reset instructions have been sent.',
+          'If an account exists for this email, a verification code has been sent.',
       };
     } catch (error) {
       throw this.handleError(error);
     }
   }
 
+  /**
+   * Step 2 — verify the 6-digit code. Returns a short-lived reset token for step 3.
+   */
+  async verifyResetCode(input: {
+    email: string;
+    code: string;
+  }): Promise<{ success: boolean; token: string; message: string }> {
+    try {
+      const data = await apiClient.post<{
+        success?: boolean;
+        token?: string;
+        reset_token?: string;
+        message?: string;
+      }>(
+        API_ENDPOINTS.VERIFY_RESET_CODE,
+        {
+          email: input.email.toLowerCase().trim(),
+          code: input.code.trim(),
+        },
+        { auth: false },
+      );
+
+      const token = (data?.token || data?.reset_token || '').trim();
+      if (data?.success === false || !token) {
+        throw new AuthError(
+          'VERIFY_FAILED',
+          data?.message?.trim() ||
+            'Invalid or expired verification code. Please try again.',
+        );
+      }
+
+      return {
+        success: true,
+        token,
+        message: data?.message?.trim() || 'Code verified successfully.',
+      };
+    } catch (error) {
+      throw this.handleError(error);
+    }
+  }
+
+  /**
+   * Step 3 — set a new password using the verified reset token (or legacy email link token).
+   * Backend should also send the “password changed” confirmation email.
+   */
   async resetPassword(input: {
     email: string;
     token: string;
     password: string;
     passwordConfirmation: string;
+    code?: string;
   }): Promise<{ success: boolean; message: string }> {
     try {
+      const payload: Record<string, string> = {
+        email: input.email.toLowerCase().trim(),
+        token: input.token,
+        password: input.password,
+        password_confirmation: input.passwordConfirmation,
+      };
+      if (input.code?.trim()) {
+        payload.code = input.code.trim();
+      }
+
       const data = await apiClient.post<{ success?: boolean; message?: string }>(
         API_ENDPOINTS.RESET_PASSWORD,
-        {
-          email: input.email.toLowerCase().trim(),
-          token: input.token,
-          password: input.password,
-          password_confirmation: input.passwordConfirmation,
-        },
+        payload,
         { auth: false },
       );
 
@@ -258,7 +313,7 @@ class AuthService {
         success: true,
         message:
           data?.message?.trim() ||
-          'Your password has been reset successfully. You can now sign in using your new password.',
+          'Your password has been changed successfully. You can now sign in using your new password.',
       };
     } catch (error) {
       throw this.handleError(error);

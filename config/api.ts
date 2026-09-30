@@ -101,6 +101,7 @@ export const API_ENDPOINTS = {
   LOGOUT: `${API_BASE_URL}/api/logout`,
   USER: `${API_BASE_URL}/api/user`,
   FORGOT_PASSWORD: `${API_BASE_URL}/api/forgot-password`,
+  VERIFY_RESET_CODE: `${API_BASE_URL}/api/verify-reset-code`,
   RESET_PASSWORD: `${API_BASE_URL}/api/reset-password`,
   REGISTER_VISITOR: `${API_BASE_URL}/api/visitors/register`,
 };

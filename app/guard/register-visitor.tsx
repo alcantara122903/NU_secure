@@ -1,6 +1,7 @@
 import { DataPrivacyNoticeModal } from "@/components/guard/data-privacy-notice-modal";
 import { FaceCaptureStepScreen } from "@/components/guard/face-capture-step";
 import { ManualVisitorEntryPanel } from "@/components/guard/manual-visitor-entry-panel";
+import { type IdExtractionReviewKind } from "@/components/guard/id-extraction-review-modal";
 import { MultipleVisitorsFoundModal } from "@/components/guard/multiple-visitors-found-modal";
 import {
   PhotoCaptureConsentModal,
@@ -41,7 +42,7 @@ import {
     ShieldCheck,
     UploadCloud,
 } from "lucide-react-native";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
     ActivityIndicator,
     Alert,
@@ -302,6 +303,10 @@ export default function RegisterVisitorScreen() {
   const [enrolleeBirthday, setEnrolleeBirthday] = useState("");
   const [isCreatingEnrollee, setIsCreatingEnrollee] = useState(false);
   const [ocrExtractionFailed, setOcrExtractionFailed] = useState(false);
+  const [showIdReviewModal, setShowIdReviewModal] = useState(false);
+  const [idReviewKind, setIdReviewKind] =
+    useState<IdExtractionReviewKind>("medium");
+  const pendingIdReviewKindRef = useRef<IdExtractionReviewKind | null>(null);
   const [returningMatch, setReturningMatch] =
     useState<ReturningVisitorMatch | null>(null);
   const [showReturningModal, setShowReturningModal] = useState(false);
@@ -900,12 +905,25 @@ export default function RegisterVisitorScreen() {
     setResumeExistingVisitor(true);
   };
 
+  const queueIdReviewNotice = (kind: IdExtractionReviewKind | null) => {
+    pendingIdReviewKindRef.current = kind;
+  };
+
+  const presentPendingIdReviewNotice = () => {
+    const kind = pendingIdReviewKindRef.current;
+    pendingIdReviewKindRef.current = null;
+    if (!kind) return;
+    setIdReviewKind(kind);
+    setShowIdReviewModal(true);
+  };
+
   const finishIdExtractionAndGoStep2 = () => {
     setShowReturningModal(false);
     setShowMultiMatchModal(false);
     setMultiMatches([]);
     setShowManualEntry(false);
     setStep(2);
+    presentPendingIdReviewNotice();
   };
 
   const openReturningModalForMatch = (match: ReturningVisitorMatch) => {
@@ -958,6 +976,7 @@ export default function RegisterVisitorScreen() {
   };
 
   const handleConfirmResumeReturning = () => {
+    pendingIdReviewKindRef.current = null;
     if (returningMatch) {
       applyReturningMatchToForm(returningMatch);
       console.log(
@@ -1062,45 +1081,25 @@ export default function RegisterVisitorScreen() {
             });
 
           if (matches.length > 0) {
+            const reviewKind =
+              extractedData.confidence === "medium" ||
+              extractedData.confidence === "low"
+                ? extractedData.confidence
+                : null;
+            queueIdReviewNotice(reviewKind);
             setIsProcessingId(false);
             presentReturningLookupResults(matches);
             return true;
           }
         }
 
-        // Show confidence-based message
-        let confidenceMessage = "";
-        let actionMessage =
-          "Please review and confirm the extracted information.";
-        let warningNote = "";
-        let missingFieldsNote =
-          extractedFields.length < 3
-            ? `\n\n📝 Fields extracted: ${extractedFields.join(", ")}. You can fill in missing fields manually on the next screen.`
-            : "";
-
-        if (extractedData.confidence === "high") {
-          confidenceMessage = "✅ High Confidence\n";
-          actionMessage = "The data was extracted with high accuracy.";
-        } else if (extractedData.confidence === "medium") {
-          confidenceMessage = "⚠️ Medium Confidence\n";
-          actionMessage =
-            "Some fields were extracted but please verify them carefully.";
-          warningNote =
-            "\n\n💡 If your ID has a hologram or see-through security sticker, some details may have been affected by glare. Please review all fields on the next screen and make any necessary corrections.";
-        } else {
-          confidenceMessage = "⚠️ Low Confidence\n";
-          actionMessage =
-            "Automatic extraction had difficulty. Please review all fields carefully.";
-          warningNote =
-            "\n\n💡 Your ID may have holograms, security stickers, or glare that affected extraction. You will be able to manually correct any fields on the next screen.";
-        }
-
+        const reviewKind =
+          extractedData.confidence === "medium" ||
+          extractedData.confidence === "low"
+            ? extractedData.confidence
+            : null;
+        queueIdReviewNotice(reviewKind);
         setIsProcessingId(false);
-        Alert.alert(
-          "ID Data Extracted",
-          `${confidenceMessage}\nFirst Name: ${extractedData.firstName || "(not extracted)"}\nLast Name: ${extractedData.lastName || "(not extracted)"}\nBirthday: ${extractedData.birthday || "(not extracted)"}\nAddress: ${extractedData.address || "(not extracted)"}\n\n${actionMessage}${warningNote}${missingFieldsNote}`,
-          [{ text: "Review & Continue" }],
-        );
         return false;
       } else {
         // Extraction failed - guide user to manual entry
@@ -1109,13 +1108,9 @@ export default function RegisterVisitorScreen() {
         );
         setExtractionConfidence("low");
         setOcrExtractionFailed(true);
+        queueIdReviewNotice("failed");
 
         setIsProcessingId(false);
-        Alert.alert(
-          "⚠️ Unable to Extract ID Details",
-          "We could not automatically read your ID due to image quality, lighting, or obscured text.\n\n✏️ No problem! You can enter your information manually on the next screen.\n\nRequired fields:\n  • First Name\n  • Last Name\n  • Address\n\nYou can also edit the phone number if needed.",
-          [{ text: "Proceed to Manual Entry" }],
-        );
         return false;
       }
     } catch (error) {
@@ -1125,13 +1120,9 @@ export default function RegisterVisitorScreen() {
       console.error("Details:", errorMessage);
 
       setOcrExtractionFailed(true);
+      queueIdReviewNotice("failed");
 
       setIsProcessingId(false);
-      Alert.alert(
-        "Extraction Failed",
-        "Could not automatically extract information from the ID. Please enter the details manually.\n\nYou will be able to enter your information in the next step.",
-        [{ text: "Continue to Manual Entry" }],
-      );
       return false;
     } finally {
       setIsProcessingId(false);
@@ -1154,6 +1145,7 @@ export default function RegisterVisitorScreen() {
     // Stay on step 1 while returning modal is open
     if (!waitingForReturningDecision) {
       setStep(2);
+      presentPendingIdReviewNotice();
     }
   };
 
@@ -1493,130 +1485,11 @@ export default function RegisterVisitorScreen() {
   };
 
   if (step === 2) {
-    const enrolleeInformationTopSlot =
-      visitorType === "enrollee" ? (
-        <View style={{ marginBottom: 4 }}>
-          {extractionConfidence && !ocrExtractionFailed && (
-            <View
-              style={[
-                styles.confidenceAlert,
-                {
-                  backgroundColor:
-                    extractionConfidence === "high"
-                      ? "#E8F5E9"
-                      : extractionConfidence === "medium"
-                        ? "#FFF3E0"
-                        : "#FFEBEE",
-                  borderLeftColor:
-                    extractionConfidence === "high"
-                      ? "#4CAF50"
-                      : extractionConfidence === "medium"
-                        ? "#FF9800"
-                        : "#F44336",
-                },
-              ]}
-            >
-              <MaterialIcons
-                name={
-                  extractionConfidence === "high" ? "check-circle" : "warning"
-                }
-                size={18}
-                color={
-                  extractionConfidence === "high"
-                    ? "#4CAF50"
-                    : extractionConfidence === "medium"
-                      ? "#FF9800"
-                      : "#F44336"
-                }
-              />
-              <Text
-                style={[
-                  styles.confidenceText,
-                  {
-                    color:
-                      extractionConfidence === "high"
-                        ? "#2E7D32"
-                        : extractionConfidence === "medium"
-                          ? "#E65100"
-                          : "#C62828",
-                    marginLeft: 8,
-                  },
-                ]}
-              >
-                {extractionConfidence === "high"
-                  ? "High Confidence - Data extracted accurately"
-                  : extractionConfidence === "medium"
-                    ? "Medium Confidence - Please verify the fields"
-                    : "Low Confidence - Please review and correct"}
-              </Text>
-            </View>
-          )}
-
-          {ocrExtractionFailed && (
-            <View
-              style={[
-                styles.confidenceAlert,
-                {
-                  backgroundColor: "#FFEBEE",
-                  borderLeftColor: "#F44336",
-                },
-              ]}
-            >
-              <MaterialIcons name="error" size={18} color="#F44336" />
-              <Text
-                style={[
-                  styles.confidenceText,
-                  { color: "#C62828", marginLeft: 8 },
-                ]}
-              >
-                Manual Entry Required - Please fill in the details below
-              </Text>
-            </View>
-          )}
-
-          {extractionConfidence &&
-            extractionConfidence !== "high" &&
-            !ocrExtractionFailed && (
-              <View
-                style={[
-                  styles.confidenceAlert,
-                  {
-                    backgroundColor: "#FFF3E0",
-                    borderLeftColor: "#FF9800",
-                  },
-                ]}
-              >
-                <MaterialIcons name="info" size={18} color="#FF9800" />
-                <Text
-                  style={[
-                    styles.confidenceText,
-                    { color: "#E65100", marginLeft: 8 },
-                  ]}
-                >
-                  Some ID details could not be extracted clearly. Please verify
-                  and edit the fields if needed.
-                </Text>
-              </View>
-            )}
-
-          <Text
-            style={[
-              styles.editableNote,
-              {
-                color: ocrExtractionFailed ? "#C62828" : colors.textSecondary,
-                marginBottom: 12,
-                marginTop: 8,
-                fontSize: ocrExtractionFailed ? 13 : 12,
-                fontWeight: ocrExtractionFailed ? "600" : "400",
-              },
-            ]}
-          >
-            {ocrExtractionFailed
-              ? "✏️ Please enter your information below. All three fields are required: First Name, Last Name, and Address."
-              : "✎ All fields are editable. Please correct any inaccurate information."}
-          </Text>
-        </View>
-      ) : null;
+    const reviewNotice = {
+      visible: showIdReviewModal,
+      kind: idReviewKind,
+      onContinue: () => setShowIdReviewModal(false),
+    };
 
     if (visitorType === "enrollee") {
       return (
@@ -1694,7 +1567,7 @@ export default function RegisterVisitorScreen() {
           reasonForVisit=""
           onChangeReasonForVisit={() => {}}
           birthdayColors={colors}
-          topSlot={enrolleeInformationTopSlot}
+          reviewNotice={reviewNotice}
         />
       );
     }
@@ -1789,6 +1662,7 @@ export default function RegisterVisitorScreen() {
           reasonForVisit={contractorReasonForVisit}
           onChangeReasonForVisit={setContractorReasonForVisit}
           birthdayColors={colors}
+          reviewNotice={reviewNotice}
         />
       );
     }
@@ -1883,6 +1757,7 @@ export default function RegisterVisitorScreen() {
         reasonForVisit={normalVisitorReasonForVisit}
         onChangeReasonForVisit={setNormalVisitorReasonForVisit}
         birthdayColors={colors}
+        reviewNotice={reviewNotice}
       />
     );
   }

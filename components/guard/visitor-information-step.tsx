@@ -3,6 +3,10 @@ import {
     type BirthdayFieldColors,
 } from "@/components/birthday-date-field";
 import {
+    IdExtractionReviewModal,
+    type IdExtractionReviewKind,
+} from "@/components/guard/id-extraction-review-modal";
+import {
     ArrowLeft,
     ArrowRight,
     Briefcase,
@@ -91,6 +95,11 @@ export type VisitorInformationStepProps = {
   birthdayColors: BirthdayFieldColors;
   /** Enrollee OCR / manual-entry banners above the form */
   topSlot?: React.ReactNode;
+  reviewNotice?: {
+    visible: boolean;
+    kind: IdExtractionReviewKind;
+    onContinue: () => void;
+  } | null;
 };
 
 function HeaderPattern() {
@@ -270,6 +279,7 @@ export function VisitorInformationStepScreen(
     onChangeReasonForVisit,
     birthdayColors,
     topSlot,
+    reviewNotice,
   } = props;
 
   const insets = useSafeAreaInsets();
@@ -698,6 +708,13 @@ export function VisitorInformationStepScreen(
         </View>
       </ScrollView>
       </View>
+      {reviewNotice ? (
+        <IdExtractionReviewModal
+          visible={reviewNotice.visible}
+          kind={reviewNotice.kind}
+          onContinue={reviewNotice.onContinue}
+        />
+      ) : null}
     </SafeAreaView>
   );
 }
