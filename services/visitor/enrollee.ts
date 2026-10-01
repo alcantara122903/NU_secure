@@ -9,6 +9,7 @@ import {
   resolveCompletedExpectationStatusId,
   resolvePendingExpectationStatusId,
 } from '@/services/office-flow/db-status-lookups';
+import { isOptionalEnrolleeStop } from '@/services/office-flow/enrollee-route';
 import { addressService, type AddressData } from '../address';
 import { supabase } from '../database/supabase';
 import { extractTextFromImageViaOCR as extractDataFromIDViaBackend } from '../ocr/ocr-client';
@@ -452,21 +453,34 @@ export const enrolleeService = {
       try {
         const { data: progressForNext } = await supabase
           .from('enrollee_progress')
-          .select('completed_at, step:enrollee_step(office_id, step_order)')
+          .select('completed_at, step:enrollee_step(office_id, step_order, step_name, office:office_id(office_name))')
           .eq('enrollee_id', enrolleeRecData.enrollee_id);
         const incomplete = (progressForNext || [])
           .map((row: any) => {
             const step = Array.isArray(row.step) ? row.step[0] : row.step;
+            const officeJoin = step?.office;
+            const office = Array.isArray(officeJoin) ? officeJoin[0] : officeJoin;
             return {
               completed_at: row.completed_at,
               office_id: step?.office_id != null ? Number(step.office_id) : null,
               step_order: Number(step?.step_order) || 0,
+              step_name: step?.step_name != null ? String(step.step_name) : '',
+              office_name: office?.office_name != null ? String(office.office_name) : '',
             };
           })
           .filter((r) => !r.completed_at && r.office_id != null)
           .sort((a, b) => a.step_order - b.step_order);
-        if (incomplete[0]?.office_id != null) {
-          firstOfficeId = incomplete[0].office_id;
+        // Prefer next required office (skip optional Bulldogs Exchange for primary destination)
+        const nextRequired = incomplete.find(
+          (r) =>
+            !isOptionalEnrolleeStop({
+              stepName: r.step_name,
+              officeName: r.office_name,
+            }),
+        );
+        const next = nextRequired ?? incomplete[0];
+        if (next?.office_id != null) {
+          firstOfficeId = next.office_id;
         }
       } catch {
         // non-blocking
@@ -1064,7 +1078,8 @@ export const enrolleeService = {
             step_id,
             step_name,
             step_order,
-            office_id
+            office_id,
+            office:office_id(office_name)
           ),
           status:step_status(
             step_status_name
@@ -1077,30 +1092,89 @@ export const enrolleeService = {
         return null;
       }
 
+      const pickStep = (raw: unknown) => {
+        if (raw == null) return null;
+        if (Array.isArray(raw)) return raw[0] ?? null;
+        return raw;
+      };
+      const pickOfficeName = (step: any): string | null => {
+        const officeJoin = step?.office;
+        const office = Array.isArray(officeJoin) ? officeJoin[0] : officeJoin;
+        return office?.office_name != null ? String(office.office_name) : null;
+      };
+
       // Transform data to match UI expectations
-      const transformedData = data?.map((progress: any) => ({
-        progress_id: progress.progress_id,
-        step_id: progress.step?.step_id,
-        step_name: progress.step?.step_name,
-        step_order: progress.step?.step_order,
-        office_id: progress.step?.office_id,
-        status: progress.completed_at ? 'completed' : 'pending', // If completed_at exists, it's completed
-        completed_at: progress.completed_at,
-        step_status_name: progress.status?.step_status_name,
-      })) || [];
+      let transformedData =
+        data?.map((progress: any) => {
+          const step = pickStep(progress.step) as any;
+          const statusJoin = progress.status;
+          const statusObj = Array.isArray(statusJoin) ? statusJoin[0] : statusJoin;
+          return {
+            progress_id: progress.progress_id,
+            step_id: step?.step_id,
+            step_name: step?.step_name,
+            step_order: step?.step_order,
+            office_id: step?.office_id,
+            office_name: pickOfficeName(step),
+            // Done ONLY when completed_at is set — never from step_status_name alone
+            status: progress.completed_at ? 'completed' : 'pending',
+            completed_at: progress.completed_at ?? null,
+            step_status_name: statusObj?.step_status_name,
+          };
+        }) || [];
 
       // Sort by step_order (client-side to ensure correct order)
-      const sortedData = transformedData.sort((a: any, b: any) => {
+      transformedData = transformedData.sort((a: any, b: any) => {
         return (a.step_order || 0) - (b.step_order || 0);
       });
 
-      if (sortedData && sortedData.length > 0) {
-        console.log(`✅ Found ${sortedData.length} enrollee steps:`, sortedData);
+      // Repair out-of-order completions: a later step must not show Done
+      // while an earlier required step is still pending (e.g. SDAO Done + Admissions Current).
+      let sawIncompleteRequired = false;
+      const invalidProgressIds: number[] = [];
+      transformedData = transformedData.map((row: any) => {
+        const optional = isOptionalEnrolleeStop({
+          stepName: row.step_name,
+          officeName: row.office_name,
+        });
+        const isDone = Boolean(row.completed_at);
+        if (!isDone && !optional) {
+          sawIncompleteRequired = true;
+          return row;
+        }
+        if (isDone && sawIncompleteRequired) {
+          invalidProgressIds.push(Number(row.progress_id));
+          return {
+            ...row,
+            completed_at: null,
+            status: 'pending',
+          };
+        }
+        if (!isDone && optional && sawIncompleteRequired) {
+          return row;
+        }
+        return row;
+      });
+
+      // Persist repair so ticket / progress tracker stay consistent
+      if (invalidProgressIds.length > 0) {
+        console.warn(
+          `⚠️ Clearing ${invalidProgressIds.length} out-of-order completed step(s)`,
+          invalidProgressIds,
+        );
+        await supabase
+          .from('enrollee_progress')
+          .update({ completed_at: null })
+          .in('progress_id', invalidProgressIds);
+      }
+
+      if (transformedData && transformedData.length > 0) {
+        console.log(`✅ Found ${transformedData.length} enrollee steps:`, transformedData);
       } else {
         console.warn('⚠️ No enrollee progress found for this enrollee');
       }
 
-      return sortedData;
+      return transformedData;
     } catch (error) {
       console.error('❌ Error in getEnrolleeSteps:', error);
       return null;
@@ -1176,7 +1250,8 @@ export const enrolleeService = {
             step_id,
             step_name,
             step_order,
-            office_id
+            office_id,
+            office:office_id(office_name)
           )
         `)
         .eq('enrollee_id', enrolleeId)
@@ -1193,10 +1268,23 @@ export const enrolleeService = {
       }
 
       const pickStep = (row: any) => (Array.isArray(row?.step) ? row.step[0] : row?.step);
+      const officeNameOf = (step: any) => {
+        const officeJoin = step?.office;
+        const office = Array.isArray(officeJoin) ? officeJoin[0] : officeJoin;
+        return office?.office_name != null ? String(office.office_name) : null;
+      };
       const sorted = [...data].sort(
         (a, b) => (pickStep(a)?.step_order ?? 0) - (pickStep(b)?.step_order ?? 0),
       );
-      const next = sorted[0];
+      // Prefer next required step; optional Bulldogs Exchange can be skipped
+      const nextRequired = sorted.find((row) => {
+        const step = pickStep(row);
+        return !isOptionalEnrolleeStop({
+          stepName: step?.step_name,
+          officeName: officeNameOf(step),
+        });
+      });
+      const next = nextRequired ?? sorted[0];
       const stepData = pickStep(next);
       console.log(`📍 Next incomplete step: ${stepData?.step_name} (Order: ${stepData?.step_order})`);
       return next;

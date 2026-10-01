@@ -12,6 +12,7 @@ export {
   resolvePendingExpectationStatusId,
   resolveCompletedExpectationStatusId,
   resolveSkippedExpectationStatusId,
+  resolveSkippedStepStatusId,
 } from './db-status-lookups';
 export {
   loadExpectationsForVisit,
@@ -21,7 +22,14 @@ export {
   hasExpectationAtOffice,
   type OfficeExpectationRow,
 } from './expectation-route';
-export { nextOfficeIdFromEnrolleeProgress, completeEnrolleeProgressAtOffice } from './enrollee-route';
+export {
+  nextOfficeIdFromEnrolleeProgress,
+  completeEnrolleeProgressAtOffice,
+  resolveEnrolleeCheckInAuthorization,
+  isOptionalEnrolleeStepName,
+  isOptionalEnrolleeStop,
+  officeStillHasIncompleteEnrolleeSteps,
+} from './enrollee-route';
 
 export type { OfficeCheckInScanRequest, OfficeCheckInScanResult } from './checkin.types';
 export { processOfficeCheckInScan, officeCheckInScanService } from './checkin.service';

@@ -31,6 +31,20 @@ export async function resolveCompletedStepStatusId(): Promise<number | null> {
   return hit?.step_status_id ?? rows[0].step_status_id;
 }
 
+/** step_status_id for optional steps that were skipped (falls back to completed). */
+export async function resolveSkippedStepStatusId(): Promise<number | null> {
+  const { data: rows } = await supabase.from('step_status').select('step_status_id, step_status_name').limit(40);
+  if (!rows?.length) {
+    return null;
+  }
+  const hit = rows.find((r) => {
+    const n = norm(r.step_status_name);
+    return n.includes('skip') || n.includes('bypass') || n.includes('optional');
+  });
+  if (hit) return hit.step_status_id;
+  return resolveCompletedStepStatusId();
+}
+
 /** enrollee_status_id for marking an enrollee as fully completed. */
 export async function resolveCompletedEnrolleeStatusId(): Promise<number | null> {
   const { data: rows } = await supabase

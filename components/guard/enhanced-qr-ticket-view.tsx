@@ -42,6 +42,8 @@ export type EnhancedQrRouteOffice = {
   /** Optional progress status for resume tickets */
   status?: "done" | "current" | "pending";
   stepOrder?: number;
+  /** Optional enrollee stop (e.g. Bulldogs Exchange) — may be skipped */
+  isOptional?: boolean;
 };
 
 export type EnhancedQrTicketViewProps = {
@@ -366,53 +368,74 @@ export function EnhancedQrTicketView({
               const status = office.status;
               const isDone = status === "done";
               const isCurrent = status === "current";
+              const isOptional = Boolean(office.isOptional) && !isDone;
               return (
                 <View
                   key={`${office.id}-${office.stepOrder ?? index}`}
                   style={[
                     styles.routeItem,
                     isDone && styles.routeItemDone,
-                    isCurrent && styles.routeItemCurrent,
+                    isCurrent && !isOptional && styles.routeItemCurrent,
+                    isOptional && isCurrent && styles.routeItemOptionalCurrent,
+                    isOptional && !isCurrent && styles.routeItemOptional,
                   ]}
                 >
                   <View
                     style={[
                       styles.routeNumberCircle,
                       isDone && styles.routeNumberCircleDone,
-                      isCurrent && styles.routeNumberCircleCurrent,
+                      isCurrent && !isOptional && styles.routeNumberCircleCurrent,
+                      isOptional && styles.routeNumberCircleOptional,
                     ]}
                   >
                     <Text
                       style={[
                         styles.routeNumberText,
-                        (isDone || isCurrent) && styles.routeNumberTextOn,
+                        (isDone || isCurrent || isOptional) &&
+                          styles.routeNumberTextOn,
                       ]}
                     >
                       {isDone ? "✓" : (office.stepOrder ?? index + 1)}
                     </Text>
                   </View>
                   <View style={styles.routeTextWrapper}>
-                    <Text style={styles.routeOfficeText}>{office.name}</Text>
+                    <View style={styles.routeTitleRow}>
+                      <Text style={styles.routeOfficeText} numberOfLines={2}>
+                        {office.name}
+                      </Text>
+                      {isOptional ? (
+                        <View style={styles.optionalBadge}>
+                          <Text style={styles.optionalBadgeText}>Optional</Text>
+                        </View>
+                      ) : null}
+                    </View>
                     {office.floor ? (
                       <Text style={styles.routeFloorText} numberOfLines={1}>
                         {office.floor}
                       </Text>
                     ) : null}
-                    {office.stepName ? (
-                      <Text style={styles.routeStepText} numberOfLines={3}>
-                        {office.stepName}
-                      </Text>
-                    ) : null}
+                    <Text style={styles.routeStepText} numberOfLines={3}>
+                      {isOptional
+                        ? "Visit this office if needed, or continue to the next stop."
+                        : office.stepName || ""}
+                    </Text>
                   </View>
                   {status ? (
                     <Text
                       style={[
                         styles.routeStatusText,
                         isDone && styles.routeStatusDone,
-                        isCurrent && styles.routeStatusCurrent,
+                        isCurrent && !isOptional && styles.routeStatusCurrent,
+                        isOptional && styles.routeStatusOptional,
                       ]}
                     >
-                      {isDone ? "Done" : isCurrent ? "Current" : "Pending"}
+                      {isDone
+                        ? "Done"
+                        : isOptional
+                          ? "Optional"
+                          : isCurrent
+                            ? "Current"
+                            : "Pending"}
                     </Text>
                   ) : (
                     <ChevronRight size={16} color="#4B5563" strokeWidth={2.2} />
@@ -427,7 +450,7 @@ export function EnhancedQrTicketView({
               </View>
               <Text style={styles.noticeText}>
                 Keep this pass ready. Staff will scan the code at each office to
-                record your visit.
+                record your visit. Optional stops may be skipped.
               </Text>
             </View>
           </View>
@@ -886,6 +909,16 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFF7ED",
     borderColor: "#FDBA74",
   },
+  routeItemOptional: {
+    backgroundColor: "#F8FAFC",
+    borderColor: "#CBD5E1",
+    borderStyle: "dashed",
+  },
+  routeItemOptionalCurrent: {
+    backgroundColor: "#F8FAFC",
+    borderColor: "#94A3B8",
+    borderStyle: "dashed",
+  },
   routeNumberCircle: {
     width: 32,
     height: 32,
@@ -900,6 +933,9 @@ const styles = StyleSheet.create({
   },
   routeNumberCircleCurrent: {
     backgroundColor: "#F59E0B",
+  },
+  routeNumberCircleOptional: {
+    backgroundColor: "#64748B",
   },
   routeNumberText: {
     color: "#FFFFFF",
@@ -921,10 +957,31 @@ const styles = StyleSheet.create({
   routeStatusCurrent: {
     color: "#C2410C",
   },
+  routeStatusOptional: {
+    color: "#475569",
+  },
   routeTextWrapper: {
     flex: 1,
     paddingVertical: 8,
     paddingRight: 4,
+  },
+  routeTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+  optionalBadge: {
+    backgroundColor: "#E2E8F0",
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 999,
+  },
+  optionalBadgeText: {
+    color: "#334155",
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 0.2,
   },
   routeOfficeText: {
     color: "#0648A8",

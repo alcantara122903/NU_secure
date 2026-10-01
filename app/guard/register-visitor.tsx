@@ -21,6 +21,7 @@ import {
 import { cameraService, FACE_PHOTO_QUALITY, ID_PHOTO_QUALITY } from "@/services/camera";
 import { supabase } from "@/services/database";
 import { officeService } from "@/services/office";
+import { isOptionalEnrolleeStop } from "@/services/office-flow/enrollee-route";
 import {
     contractorService,
     enrolleeService,
@@ -1422,6 +1423,7 @@ export default function RegisterVisitorScreen() {
         stepName: string;
         stepOrder?: number;
         status: "done" | "current" | "pending";
+        isOptional?: boolean;
       }[] =
         steps?.map(
           (s: {
@@ -1443,6 +1445,10 @@ export default function RegisterVisitorScreen() {
               status: (s.status === "completed" || s.completed_at
                 ? "done"
                 : "pending") as "done" | "current" | "pending",
+              isOptional: isOptionalEnrolleeStop({
+                stepName: s.step_name,
+                officeName,
+              }),
             };
           },
         ) ?? [];

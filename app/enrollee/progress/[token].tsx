@@ -156,7 +156,7 @@ export default function EnrolleeProgressScreen() {
             <Text style={styles.cardHeading}>Track each office step in order.</Text>
             <Text style={styles.cardBody}>
               Your enrollment visit updates automatically when office staff scans your QR pass. Follow
-              the route below and proceed only to your current office.
+              the route below. Optional stops (Bulldogs Exchange) may be skipped.
             </Text>
             <Text style={styles.progressLabel}>
               Overall progress{' '}
@@ -199,10 +199,14 @@ export default function EnrolleeProgressScreen() {
                 </View>
                 <Text style={styles.cardHeading}>
                   {currentStep?.officeName || 'Waiting for next office'}
+                  {currentStep?.isOptional ? ' (Optional)' : ''}
                 </Text>
                 <Text style={styles.cardBody}>
-                  Proceed to {currentStep?.officeName || 'your current office'} and present your QR
-                  pass for validation.
+                  {currentStep?.isOptional
+                    ? data.nextRequiredOfficeName
+                      ? `${currentStep.officeName} is optional. You may visit it, or skip ahead to ${data.nextRequiredOfficeName} and present your QR pass there.`
+                      : `${currentStep.officeName} is optional. You may visit it or skip ahead to the next office on your route.`
+                    : `Proceed to ${currentStep?.officeName || 'your current office'} and present your QR pass for validation.`}
                 </Text>
               </>
             )}
@@ -237,6 +241,7 @@ export default function EnrolleeProgressScreen() {
             <Legend color={GREEN} label="Done" />
             <Legend color={ORANGE} label="Current" />
             <Legend color="#9ca3af" label="Pending" />
+            <Legend color="#64748b" label="Optional" />
           </View>
 
           {routeSteps.map((step) => (
@@ -284,6 +289,7 @@ function Legend({ color, label }: { color: string; label: string }) {
 function RouteRow({ step }: { step: EnrolleeRouteStep }) {
   const isDone = step.status === 'done';
   const isCurrent = step.status === 'current';
+  const isOptional = Boolean(step.isOptional);
   return (
     <View
       style={[
@@ -304,12 +310,17 @@ function RouteRow({ step }: { step: EnrolleeRouteStep }) {
         </Text>
       </View>
       <View style={styles.routeBody}>
-        <Text style={styles.routeOffice}>{step.officeName}</Text>
+        <Text style={styles.routeOffice}>
+          {step.officeName}
+          {isOptional && !isDone ? ' · Optional' : ''}
+        </Text>
         <Text style={styles.routeHint}>
-          {step.stepName &&
-          step.stepName.trim().toLowerCase() !== step.officeName.trim().toLowerCase()
-            ? step.stepName
-            : `Proceed to ${step.officeName} and present your QR pass for validation.`}
+          {isOptional && !isDone
+            ? 'Optional stop — you may skip this office and continue to the next required step.'
+            : step.stepName &&
+                step.stepName.trim().toLowerCase() !== step.officeName.trim().toLowerCase()
+              ? step.stepName
+              : `Proceed to ${step.officeName} and present your QR pass for validation.`}
         </Text>
       </View>
       <View
@@ -317,6 +328,7 @@ function RouteRow({ step }: { step: EnrolleeRouteStep }) {
           styles.statusPill,
           isDone && styles.statusPillDone,
           isCurrent && styles.statusPillCurrent,
+          isOptional && !isDone && !isCurrent && styles.statusPillOptional,
         ]}
       >
         <Text
@@ -324,9 +336,10 @@ function RouteRow({ step }: { step: EnrolleeRouteStep }) {
             styles.statusPillText,
             isDone && styles.statusPillTextDone,
             isCurrent && styles.statusPillTextCurrent,
+            isOptional && !isDone && !isCurrent && styles.statusPillTextOptional,
           ]}
         >
-          {isDone ? 'Done' : isCurrent ? 'Current' : 'Pending'}
+          {isDone ? 'Done' : isCurrent ? (isOptional ? 'Optional' : 'Current') : isOptional ? 'Optional' : 'Pending'}
         </Text>
       </View>
     </View>
@@ -497,9 +510,11 @@ const styles = StyleSheet.create({
   },
   statusPillDone: { backgroundColor: '#d1fae5' },
   statusPillCurrent: { backgroundColor: '#ffedd5' },
+  statusPillOptional: { backgroundColor: '#f1f5f9' },
   statusPillText: { fontSize: 11, fontWeight: '800', color: '#64748b' },
   statusPillTextDone: { color: '#047857' },
   statusPillTextCurrent: { color: '#c2410c' },
+  statusPillTextOptional: { color: '#475569' },
 
   footerBanner: {
     marginTop: 16,

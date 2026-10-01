@@ -11,12 +11,15 @@ import {
   resolveCompletedExpectationStatusId,
   resolveCompletedStepStatusId,
   resolvePendingExpectationStatusId,
+  resolveSkippedExpectationStatusId,
+  resolveSkippedStepStatusId,
   resolveValidationStatusId,
 } from "./db-status-lookups";
 import {
   completeEnrolleeProgressAtOffice,
   nextOfficeIdFromEnrolleeProgress,
   officeStillHasIncompleteEnrolleeSteps,
+  resolveEnrolleeCheckInAuthorization,
 } from "./enrollee-route";
 import {
   expectationsAreFullyCheckedIn,
@@ -172,6 +175,36 @@ async function resolveCheckInStop(
       authorized: false,
       unauthorizedMessage:
         "This visitor is not scheduled to visit this office.",
+    };
+  }
+
+  // Enrollees: sequential required steps; optional steps (Bulldogs Exchange)
+  // may be skipped so the visitor can check in at the next required office.
+  if (visit.visit_type_id === VISIT_TYPE.ENROLLEE) {
+    const auth = await resolveEnrolleeCheckInAuthorization(
+      visit.visitor_id,
+      scanningOfficeId,
+    );
+    if (auth.expectedOfficeId == null && !auth.authorized) {
+      return null;
+    }
+    const expectedOfficeId = auth.authorized
+      ? scanningOfficeId
+      : (auth.expectedOfficeId ?? scanningOfficeId);
+    const pendingByOffice = expectations.find(
+      (e) =>
+        !e.arrived_at && Number(e.office_id) === Number(expectedOfficeId),
+    );
+    const pendingAtScanner = findPendingExpectationAtOffice(
+      expectations,
+      scanningOfficeId,
+    );
+    return {
+      expectedOfficeId,
+      pending: auth.authorized
+        ? (pendingAtScanner ?? pendingByOffice)
+        : pendingByOffice,
+      authorized: auth.authorized,
     };
   }
 
@@ -483,19 +516,44 @@ export async function processOfficeCheckInScan(
   const expectationCompletedStatusId =
     await resolveCompletedExpectationStatusId();
   const expectationPendingStatusId = await resolvePendingExpectationStatusId();
+  const expectationSkippedStatusId =
+    await resolveSkippedExpectationStatusId();
 
   // Complete enrollee step FIRST so next office / completion status is accurate
   let completedAllSteps = false;
   if (visit.visit_type_id === VISIT_TYPE.ENROLLEE) {
     const stepStatusId = await resolveCompletedStepStatusId();
+    const skippedStepStatusId = await resolveSkippedStepStatusId();
     const enrolleeCompletedStatusId = await resolveCompletedEnrolleeStatusId();
-    completedAllSteps = await completeEnrolleeProgressAtOffice(
+    const progressResult = await completeEnrolleeProgressAtOffice(
       visit.visitor_id,
       scanningOfficeId,
       scanTime,
       stepStatusId,
       enrolleeCompletedStatusId,
+      skippedStepStatusId,
     );
+    completedAllSteps = progressResult.completedAllRequired;
+
+    // Mark skipped optional offices (e.g. Bulldogs Exchange) on the visit route
+    for (const skippedOfficeId of progressResult.skippedOfficeIds) {
+      if (Number(skippedOfficeId) === Number(scanningOfficeId)) continue;
+      const { data: updatedSkip } = await supabase
+        .from("office_expectation")
+        .update({
+          arrived_at: scanTime,
+          expectation_status_id: expectationSkippedStatusId,
+        })
+        .eq("visit_id", visit.visit_id)
+        .eq("office_id", skippedOfficeId)
+        .is("arrived_at", null)
+        .select("expectation_id");
+      if (!updatedSkip?.length) {
+        console.log(
+          `[OfficeCheckIn] optional office ${skippedOfficeId} skipped (no pending expectation)`,
+        );
+      }
+    }
   }
 
   // Always mark this office stop arrived. Same office can be revisited later

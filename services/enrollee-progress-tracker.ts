@@ -4,6 +4,7 @@
  */
 
 import { buildEnrolleeProgressUrl } from '@/lib/enrollee-progress-url';
+import { isOptionalEnrolleeStop } from '@/services/office-flow/enrollee-route';
 import { supabase } from '@/services/database/supabase';
 
 export type EnrolleeRouteStepStatus = 'done' | 'current' | 'pending';
@@ -16,6 +17,8 @@ export type EnrolleeRouteStep = {
   officeName: string;
   completedAt: string | null;
   status: EnrolleeRouteStepStatus;
+  /** Optional steps (e.g. Bulldogs Exchange) may be skipped. */
+  isOptional?: boolean;
 };
 
 export type EnrolleeProgressTrackerData = {
@@ -31,6 +34,8 @@ export type EnrolleeProgressTrackerData = {
   totalCount: number;
   percentComplete: number;
   currentOfficeName: string | null;
+  /** Next required office when current is optional (e.g. after SDAO → ITSO). */
+  nextRequiredOfficeName: string | null;
   remainingCount: number;
   isFullyComplete: boolean;
 };
@@ -130,6 +135,10 @@ export async function loadEnrolleeProgressByQrToken(
           officeName,
           completedAt: row.completed_at ?? null,
           status: 'pending' as EnrolleeRouteStepStatus,
+          isOptional: isOptionalEnrolleeStop({
+            stepName: step.step_name,
+            officeName,
+          }),
         };
       })
       .filter((s): s is NonNullable<typeof s> => s != null)
@@ -213,6 +222,10 @@ export async function loadEnrolleeProgressByQrToken(
         officeName,
         completedAt: e.arrived_at ?? null,
         status: 'pending' as EnrolleeRouteStepStatus,
+        isOptional: isOptionalEnrolleeStop({
+          stepName: officeName,
+          officeName,
+        }),
       });
     }
 
@@ -241,6 +254,16 @@ export async function loadEnrolleeProgressByQrToken(
   const currentOfficeName = isFullyComplete
     ? 'Done'
     : current?.officeName ?? null;
+  const nextRequired =
+    !isFullyComplete && current?.isOptional
+      ? steps.find(
+          (s) =>
+            s.status !== 'done' &&
+            !s.isOptional &&
+            s.stepOrder > (current.stepOrder ?? 0),
+        )
+      : null;
+  const nextRequiredOfficeName = nextRequired?.officeName ?? null;
 
   return {
     qrToken: String(visit.qr_token || qrToken),
@@ -255,6 +278,7 @@ export async function loadEnrolleeProgressByQrToken(
     totalCount,
     percentComplete,
     currentOfficeName,
+    nextRequiredOfficeName,
     remainingCount,
     isFullyComplete,
   };

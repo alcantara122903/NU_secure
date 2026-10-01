@@ -73,6 +73,8 @@ interface VisitorQRTicketData {
     stepName?: string;
     stepOrder?: number;
     status?: "done" | "current" | "pending";
+    /** Enrollee optional stop (Bulldogs Exchange) — may be skipped */
+    isOptional?: boolean;
   }[];
   /** Face capture preview URI (`file://` / `content://`) shown on ticket */
   facePhotoUri?: string;
@@ -651,6 +653,7 @@ export default function QRTicketScreen() {
     stepName: o.stepName,
     stepOrder: o.stepOrder ?? index + 1,
     status: o.status,
+    isOptional: o.isOptional,
   }));
 
   return (
