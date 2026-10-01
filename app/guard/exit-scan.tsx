@@ -1,10 +1,14 @@
+import { IncompleteRouteExitModal } from '@/components/guard/incomplete-route-exit-modal';
 import { Colors } from '@/constants/colors';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { extractQrTokenFromAnyScan } from '@/lib/enrollee-progress-url';
 import { parseQrTicketRaw } from '@/lib/qr-ticket-payload';
 import { authSessionService } from '@/services/auth-session';
 import { supabase } from '@/services/database';
-import { officeExitApiService } from '@/services/office-exit-api';
+import {
+  officeExitApiService,
+  type RemainingOfficeInfo,
+} from '@/services/office-exit-api';
 import { resolveVisitorPhotoDisplayUri } from '@/services/storage/upload';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
@@ -116,6 +120,13 @@ export default function ExitScanScreen() {
   const [exitCameraSuppressed, setExitCameraSuppressed] = useState(false);
   const [profilePhotoUri, setProfilePhotoUri] = useState<string | null>(null);
   const [photoLoadFailed, setPhotoLoadFailed] = useState(false);
+  const [incompleteRouteVisible, setIncompleteRouteVisible] = useState(false);
+  const [incompleteOffices, setIncompleteOffices] = useState<RemainingOfficeInfo[]>(
+    [],
+  );
+  const [incompleteVisitorName, setIncompleteVisitorName] = useState('');
+  const [incompleteSubmitting, setIncompleteSubmitting] = useState(false);
+  const pendingIncompleteRawRef = useRef<string | null>(null);
   const isProcessingRef = useRef(false);
 
   useEffect(() => {
@@ -168,7 +179,10 @@ export default function ExitScanScreen() {
     }
   };
 
-  const processExitFromRawValue = async (rawValue: string) => {
+  const processExitFromRawValue = async (
+    rawValue: string,
+    options?: { allowIncompleteRoute?: boolean; guardConversationNote?: string },
+  ) => {
     if (!rawValue || isProcessingRef.current || scannedInfo) {
       return;
     }
@@ -185,7 +199,9 @@ export default function ExitScanScreen() {
     const qrToken = extractQrToken(rawValue);
 
     isProcessingRef.current = true;
-    setScanState({ type: 'processing' });
+    if (!options?.allowIncompleteRoute) {
+      setScanState({ type: 'processing' });
+    }
 
     try {
       const result = await officeExitApiService.processExitScan({
@@ -193,7 +209,24 @@ export default function ExitScanScreen() {
         rawQrValue: rawValue,
         scannedByUserId,
         scannerContext: 'guard',
+        allowIncompleteRoute: options?.allowIncompleteRoute === true,
+        guardConversationNote: options?.guardConversationNote,
       });
+
+      if (
+        !result.success &&
+        result.errorCode === 'ROUTE_INCOMPLETE' &&
+        result.data?.remainingOffices &&
+        result.data.remainingOffices.length > 0
+      ) {
+        pendingIncompleteRawRef.current = rawValue;
+        setIncompleteVisitorName(result.data.visitorName || 'Visitor');
+        setIncompleteOffices(result.data.remainingOffices);
+        setIncompleteRouteVisible(true);
+        setScanState({ type: 'idle' });
+        setExitCameraSuppressed(true);
+        return;
+      }
 
       if (!result.success || !result.data) {
         setScanState({
@@ -222,6 +255,9 @@ export default function ExitScanScreen() {
       };
 
       const showResult = () => {
+        setIncompleteRouteVisible(false);
+        setIncompleteOffices([]);
+        pendingIncompleteRawRef.current = null;
         setScannedInfo(info);
         setScanState({ type: 'idle' });
         setExitCameraSuppressed(false);
@@ -248,6 +284,7 @@ export default function ExitScanScreen() {
       });
     } finally {
       isProcessingRef.current = false;
+      setIncompleteSubmitting(false);
     }
   };
 
@@ -268,6 +305,30 @@ export default function ExitScanScreen() {
     setScanState({ type: 'idle' });
     setManualRaw('');
     setShowManualEntry(false);
+    setIncompleteRouteVisible(false);
+    setIncompleteOffices([]);
+    pendingIncompleteRawRef.current = null;
+  };
+
+  const handleCancelIncompleteRoute = () => {
+    setIncompleteRouteVisible(false);
+    setIncompleteOffices([]);
+    pendingIncompleteRawRef.current = null;
+    setIncompleteSubmitting(false);
+    setExitCameraSuppressed(false);
+    setScanState({ type: 'idle' });
+  };
+
+  const handleConfirmIncompleteRouteExit = (note: string) => {
+    const raw = pendingIncompleteRawRef.current;
+    if (!raw || incompleteSubmitting) {
+      return;
+    }
+    setIncompleteSubmitting(true);
+    void processExitFromRawValue(raw, {
+      allowIncompleteRoute: true,
+      guardConversationNote: note,
+    });
   };
 
   const handleCompleteExit = () => {
@@ -664,6 +725,15 @@ export default function ExitScanScreen() {
         </ScrollView>
       </View>
       </View>
+
+      <IncompleteRouteExitModal
+        visible={incompleteRouteVisible}
+        visitorName={incompleteVisitorName}
+        remainingOffices={incompleteOffices}
+        isSubmitting={incompleteSubmitting}
+        onCancel={handleCancelIncompleteRoute}
+        onConfirmAllowExit={handleConfirmIncompleteRouteExit}
+      />
     </SafeAreaView>
   );
 }

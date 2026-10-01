@@ -2,6 +2,7 @@ import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
 import {
+  ActivityIndicator,
   Image,
   Platform,
   ScrollView,
@@ -13,6 +14,7 @@ import {
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { consumePendingOfficeVisitorPhotoUri } from "@/lib/office-visitor-photo-handoff";
 import { supabase } from "@/services/database";
 import { resolveVisitorPhotoDisplayUri } from "@/services/storage/upload";
 
@@ -47,13 +49,24 @@ function decodePhotoParam(raw: string): string {
   }
 }
 
+function initialsFromName(name: string): string {
+  const parts = name
+    .replace(/[()]/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return `${parts[0][0] ?? ""}${parts[parts.length - 1][0] ?? ""}`.toUpperCase();
+}
+
 export default function VisitorInformationScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams();
 
   const visitorName = (params.visitorName as string) || "(visitor not found)";
-  const visitorId = (params.visitorId as string) || "";
+  const visitorIdParam = String(params.visitorId ?? "").trim();
   const passNumber = (params.passNumber as string) || "";
   const destinationOffice = (params.destinationOffice as string) || "(not available)";
   const expectedOffice = (params.expectedOffice as string) || "";
@@ -66,7 +79,7 @@ export default function VisitorInformationScreen() {
   const destinationStatusLabel = (params.destinationStatusLabel as string) || "Wrong office destination";
   const enrolleeStatusLabel = (params.enrolleeStatusLabel as string) || "";
   const isCorrectDestination = (params.isCorrectDestination as string) === "true";
-  const idLabel = passNumber || visitorId || "";
+  const idLabel = passNumber || visitorIdParam || "";
 
   const visitIdParam = String(params.visitId ?? "").trim();
   const photoParamRaw = useMemo(
@@ -74,50 +87,121 @@ export default function VisitorInformationScreen() {
     [params.visitorPhotoUrl],
   );
   const [profilePhotoUri, setProfilePhotoUri] = useState("");
+  const [photoLoading, setPhotoLoading] = useState(true);
   const [photoLoadFailed, setPhotoLoadFailed] = useState(false);
+  const [photoReady, setPhotoReady] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     setPhotoLoadFailed(false);
+    setPhotoReady(false);
+    setPhotoLoading(true);
+    setProfilePhotoUri("");
+
+    const finish = (uri: string) => {
+      if (cancelled) return;
+      setProfilePhotoUri(uri);
+      setPhotoLoading(false);
+      if (!uri) {
+        setPhotoLoadFailed(true);
+      }
+    };
 
     void (async () => {
-      let uri = (await resolveVisitorPhotoDisplayUri(photoParamRaw)) || "";
+      try {
+        let uri = "";
 
-      if (!uri && visitIdParam) {
-        const vid = Number(visitIdParam);
-        if (Number.isFinite(vid) && vid > 0) {
-          const { data: visitRow } = await supabase
-            .from("visit")
-            .select("visitor_id")
-            .eq("visit_id", vid)
+        // 0) In-memory handoff from office-scan (signed URL, not truncated)
+        const handedOff = consumePendingOfficeVisitorPhotoUri();
+        if (handedOff) {
+          uri = handedOff;
+        }
+
+        // 1) Prefer DB lookup by numeric visitor_id
+        const numericVisitorId = Number(visitorIdParam);
+        if (!uri && Number.isFinite(numericVisitorId) && numericVisitorId > 0) {
+          const { data: visitorRow, error } = await supabase
+            .from("visitor")
+            .select("visitor_photo_with_id_url")
+            .eq("visitor_id", numericVisitorId)
             .maybeSingle();
-          if (visitRow?.visitor_id != null) {
-            const { data: visitorRow } = await supabase
-              .from("visitor")
-              .select("visitor_photo_with_id_url")
-              .eq("visitor_id", visitRow.visitor_id)
+          if (error && __DEV__) {
+            console.warn("[VisitorInfo] visitor photo by id:", error.message);
+          }
+          uri =
+            (await resolveVisitorPhotoDisplayUri(
+              visitorRow?.visitor_photo_with_id_url,
+            )) || "";
+        }
+
+        // 2) Route photo param (short relative path preferred)
+        if (!uri && photoParamRaw) {
+          uri = (await resolveVisitorPhotoDisplayUri(photoParamRaw)) || "";
+        }
+
+        // 3) visit → visitor (most reliable when visitorId param was wrong/missing)
+        if (!uri && visitIdParam) {
+          const vid = Number(visitIdParam);
+          if (Number.isFinite(vid) && vid > 0) {
+            const { data: visitRow, error: visitErr } = await supabase
+              .from("visit")
+              .select("visitor_id")
+              .eq("visit_id", vid)
               .maybeSingle();
-            uri =
-              (await resolveVisitorPhotoDisplayUri(visitorRow?.visitor_photo_with_id_url)) || "";
+            if (visitErr && __DEV__) {
+              console.warn("[VisitorInfo] visit lookup:", visitErr.message);
+            }
+            const linkedVisitorId = Number(visitRow?.visitor_id);
+            if (Number.isFinite(linkedVisitorId) && linkedVisitorId > 0) {
+              const { data: visitorRow } = await supabase
+                .from("visitor")
+                .select("visitor_photo_with_id_url")
+                .eq("visitor_id", linkedVisitorId)
+                .maybeSingle();
+              uri =
+                (await resolveVisitorPhotoDisplayUri(
+                  visitorRow?.visitor_photo_with_id_url,
+                )) || "";
+            }
           }
         }
-      }
 
-      if (!cancelled) {
-        setProfilePhotoUri(uri);
+        if (__DEV__) {
+          console.log("[VisitorInfo] photo resolve", {
+            visitorIdParam,
+            visitIdParam,
+            photoParamPreview: photoParamRaw.slice(0, 80),
+            resolved: uri ? uri.slice(0, 100) : "(none)",
+          });
+        }
+
+        finish(uri);
+      } catch (err) {
+        if (__DEV__) console.warn("[VisitorInfo] photo load failed", err);
+        finish("");
       }
     })();
 
+    // Never leave the avatar stuck on a spinner
+    const timeout = setTimeout(() => {
+      if (!cancelled) {
+        setPhotoLoading(false);
+      }
+    }, 8000);
+
     return () => {
       cancelled = true;
+      clearTimeout(timeout);
     };
-  }, [photoParamRaw, visitIdParam]);
+  }, [photoParamRaw, visitIdParam, visitorIdParam]);
 
   const officeCardLabel = isCorrectDestination ? "DESTINATION OFFICE" : "EXPECTED OFFICE";
   const officeCardValue = isCorrectDestination
     ? destinationOffice
     : expectedOffice || destinationOffice || "(not available)";
   const scannedOfficeValue = (params.scanningOffice as string) || "";
+  const showPhoto = Boolean(profilePhotoUri) && !photoLoadFailed;
+  const avatarInitials = initialsFromName(visitorName);
 
   const handleDone = () => {
     router.replace("/office/office-portal");
@@ -157,16 +241,32 @@ export default function VisitorInformationScreen() {
         >
         <View style={styles.profileCard}>
           <View style={styles.avatarCircle}>
-            {profilePhotoUri && !photoLoadFailed ? (
+            {/* Always keep initials so the circle never looks empty */}
+            <View style={styles.avatarFallback}>
+              <Text style={styles.avatarInitials}>{avatarInitials}</Text>
+            </View>
+
+            {showPhoto ? (
               <Image
                 source={{ uri: profilePhotoUri }}
-                style={styles.avatarImage}
+                style={[
+                  styles.avatarImage,
+                  !photoReady ? styles.avatarImageHidden : null,
+                ]}
                 resizeMode="cover"
-                onError={() => setPhotoLoadFailed(true)}
+                onLoad={() => setPhotoReady(true)}
+                onError={() => {
+                  setPhotoLoadFailed(true);
+                  setPhotoReady(false);
+                }}
               />
-            ) : (
-              <Ionicons name="person" size={48} color="#FFFFFF" />
-            )}
+            ) : null}
+
+            {photoLoading ? (
+              <View style={styles.avatarLoading}>
+                <ActivityIndicator color="#FFFFFF" size="small" />
+              </View>
+            ) : null}
           </View>
 
           <View style={styles.profileTextBox}>
@@ -430,22 +530,52 @@ const styles = StyleSheet.create({
   },
 
   avatarCircle: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    width: 84,
+    height: 84,
+    borderRadius: 42,
     borderWidth: 3,
-    borderColor: "rgba(255,255,255,0.85)",
-    backgroundColor: "rgba(255,255,255,0.18)",
+    borderColor: "rgba(255,255,255,0.9)",
+    backgroundColor: "#0B3A7A",
     justifyContent: "center",
     alignItems: "center",
-    marginRight: 12,
+    marginRight: 14,
     overflow: "hidden",
+    position: "relative",
   },
 
   avatarImage: {
-    width: 74,
-    height: 74,
-    borderRadius: 37,
+    position: "absolute",
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    width: "100%",
+    height: "100%",
+  },
+
+  avatarImageHidden: {
+    opacity: 0,
+  },
+
+  avatarFallback: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#0B3A7A",
+  },
+
+  avatarLoading: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(11, 58, 122, 0.35)",
+  },
+
+  avatarInitials: {
+    color: "#FFFFFF",
+    fontSize: 26,
+    fontWeight: "800",
+    letterSpacing: 0.5,
   },
 
   profileTextBox: {

@@ -15,9 +15,11 @@ import {
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { setPendingOfficeVisitorPhotoUri } from "@/lib/office-visitor-photo-handoff";
 import { authSessionService } from "@/services/auth-session";
 import { supabase } from "@/services/database";
 import { processOfficeCheckInScan } from "@/services/office-checkin-scan";
+import { resolveVisitorPhotoDisplayUri } from "@/services/storage/upload";
 
 type Phase = "loading_office" | "ready" | "processing" | "error";
 
@@ -117,11 +119,30 @@ export default function OfficeCheckInScreen() {
         return;
       }
 
+      // Resolve face photo before navigation (avoid truncating long URLs in route params)
+      const resolvedPhoto =
+        (await resolveVisitorPhotoDisplayUri(result.visitorPhotoUrl)) || "";
+      if (!resolvedPhoto && result.visitorId != null) {
+        const { data: visitorRow } = await supabase
+          .from("visitor")
+          .select("visitor_photo_with_id_url")
+          .eq("visitor_id", result.visitorId)
+          .maybeSingle();
+        const again =
+          (await resolveVisitorPhotoDisplayUri(
+            visitorRow?.visitor_photo_with_id_url,
+          )) || "";
+        setPendingOfficeVisitorPhotoUri(again);
+      } else {
+        setPendingOfficeVisitorPhotoUri(resolvedPhoto);
+      }
+
       router.push({
         pathname: "/office/visitor-info",
         params: {
           visitId: String(result.visitId),
-          visitorId: result.passNumber || "",
+          visitorId:
+            result.visitorId != null ? String(result.visitorId) : "",
           visitorName: result.visitorName || "(visitor not found)",
           passNumber: result.passNumber || "",
           controlNumber: result.controlNumber || "",
@@ -136,6 +157,7 @@ export default function OfficeCheckInScreen() {
           isCorrectDestination: result.isCorrectDestination ? "true" : "false",
           destinationStatusLabel: result.destinationStatusLabel || "",
           enrolleeStatusLabel: result.enrolleeStatusLabel || "",
+          // Keep short relative path only; full signed URL goes through handoff
           visitorPhotoUrl: result.visitorPhotoUrl || "",
         },
       });

@@ -260,54 +260,66 @@ export default function ForgotPasswordScreen() {
   const renderStepper = () => {
     if (step === 'success') return null;
     return (
-      <View style={styles.stepper}>
-        {STEPS.map((s, index) => {
-          const done = index < currentIdx;
-          const active = index === currentIdx;
-          return (
-            <View key={s.key} style={styles.stepItem}>
-              {index > 0 ? (
-                <View
-                  style={[
-                    styles.stepLine,
-                    done || active ? styles.stepLineDone : null,
-                  ]}
-                />
-              ) : (
-                <View style={styles.stepLineSpacer} />
-              )}
-              <View style={styles.stepCircleCol}>
-                <View
-                  style={[
-                    styles.stepCircle,
-                    done && styles.stepCircleDone,
-                    active && styles.stepCircleActive,
-                  ]}
-                >
-                  {done ? (
-                    <Text style={styles.stepCheck}>✓</Text>
-                  ) : (
-                    <View
-                      style={[
-                        styles.stepDot,
-                        active ? styles.stepDotActive : styles.stepDotIdle,
-                      ]}
-                    />
-                  )}
+      <View style={styles.stepperWrap}>
+        <View style={styles.stepperTrack}>
+          <View style={styles.stepperBaseLine} />
+          <View
+            style={[
+              styles.stepperProgressLine,
+              {
+                width:
+                  currentIdx <= 0
+                    ? '0%'
+                    : currentIdx >= 2
+                      ? '100%'
+                      : '50%',
+              },
+            ]}
+          />
+          <View style={styles.stepperNodes}>
+            {STEPS.map((s, index) => {
+              const done = index < currentIdx;
+              const active = index === currentIdx;
+              return (
+                <View key={s.key} style={styles.stepNode}>
+                  <View
+                    style={[
+                      styles.stepCircle,
+                      done && styles.stepCircleDone,
+                      active && styles.stepCircleActive,
+                    ]}
+                  >
+                    {done ? (
+                      <Text style={styles.stepCheck}>✓</Text>
+                    ) : active ? (
+                      <View style={styles.stepDotActive} />
+                    ) : (
+                      <Text style={styles.stepNumber}>{index + 1}</Text>
+                    )}
+                  </View>
                 </View>
-                <Text
-                  style={[
-                    styles.stepLabel,
-                    done && styles.stepLabelDone,
-                    active && styles.stepLabelActive,
-                  ]}
-                >
-                  {s.label}
-                </Text>
-              </View>
-            </View>
-          );
-        })}
+              );
+            })}
+          </View>
+        </View>
+        <View style={styles.stepperLabels}>
+          {STEPS.map((s, index) => {
+            const done = index < currentIdx;
+            const active = index === currentIdx;
+            return (
+              <Text
+                key={`label-${s.key}`}
+                style={[
+                  styles.stepLabel,
+                  done && styles.stepLabelDone,
+                  active && styles.stepLabelActive,
+                ]}
+              >
+                {s.label}
+              </Text>
+            );
+          })}
+        </View>
       </View>
     );
   };
@@ -350,28 +362,33 @@ export default function ForgotPasswordScreen() {
                 <>
                   <Text style={styles.title}>Forgot Password</Text>
                   <Text style={styles.subtitle}>
-                    Enter the email address associated with your account. We will
-                    send you a verification code.
+                    Enter the email address associated with your account. We
+                    will send you a verification code.
                   </Text>
 
-                  <Text style={styles.label}>Email Address</Text>
-                  <TextInput
-                    style={[styles.input, emailError ? styles.inputError : null]}
-                    placeholder="Enter your email"
-                    placeholderTextColor="#94A3B8"
-                    keyboardType="email-address"
-                    autoCapitalize="none"
-                    autoComplete="email"
-                    editable={!isLoading}
-                    value={email}
-                    onChangeText={(text) => {
-                      setEmail(text);
-                      if (emailError) setEmailError(undefined);
-                    }}
-                  />
-                  {emailError ? (
-                    <Text style={styles.errorText}>{emailError}</Text>
-                  ) : null}
+                  <View style={styles.fieldGroup}>
+                    <Text style={styles.label}>Email Address</Text>
+                    <TextInput
+                      style={[
+                        styles.input,
+                        emailError ? styles.inputError : null,
+                      ]}
+                      placeholder="Enter your email"
+                      placeholderTextColor="#94A3B8"
+                      keyboardType="email-address"
+                      autoCapitalize="none"
+                      autoComplete="email"
+                      editable={!isLoading}
+                      value={email}
+                      onChangeText={(text) => {
+                        setEmail(text);
+                        if (emailError) setEmailError(undefined);
+                      }}
+                    />
+                    {emailError ? (
+                      <Text style={styles.errorText}>{emailError}</Text>
+                    ) : null}
+                  </View>
 
                   <TouchableOpacity
                     style={[
@@ -395,6 +412,7 @@ export default function ForgotPasswordScreen() {
                     onPress={goBackToLogin}
                     style={styles.linkButton}
                     disabled={isLoading}
+                    hitSlop={{ top: 8, bottom: 8, left: 12, right: 12 }}
                   >
                     <Text style={styles.linkText}>Back to Sign In</Text>
                   </TouchableOpacity>
@@ -406,8 +424,8 @@ export default function ForgotPasswordScreen() {
                   {codeSentNotice ? (
                     <View style={styles.noticeBanner}>
                       <Text style={styles.noticeText}>
-                        If an account exists for this email, a verification code
-                        has been sent.
+                        If an account exists for this email, a verification
+                        code has been sent.
                       </Text>
                     </View>
                   ) : null}
@@ -420,34 +438,36 @@ export default function ForgotPasswordScreen() {
                     {maskEmailForDisplay(email)}
                   </Text>
 
-                  <Text style={styles.label}>Enter Verification Code</Text>
-                  <View style={styles.codeRow}>
-                    {codeDigits.map((digit, index) => (
-                      <TextInput
-                        key={`code-${index}`}
-                        ref={(ref) => {
-                          codeInputRefs.current[index] = ref;
-                        }}
-                        style={[
-                          styles.codeBox,
-                          digit ? styles.codeBoxFilled : null,
-                          codeError ? styles.codeBoxError : null,
-                        ]}
-                        value={digit}
-                        onChangeText={(text) => onCodeChange(index, text)}
-                        onKeyPress={(e) => onCodeKeyPress(index, e)}
-                        keyboardType="number-pad"
-                        maxLength={index === 0 ? 6 : 1}
-                        editable={!isLoading}
-                        selectTextOnFocus
-                        textContentType="oneTimeCode"
-                        autoComplete="sms-otp"
-                      />
-                    ))}
+                  <View style={styles.fieldGroup}>
+                    <Text style={styles.label}>Enter Verification Code</Text>
+                    <View style={styles.codeRow}>
+                      {codeDigits.map((digit, index) => (
+                        <TextInput
+                          key={`code-${index}`}
+                          ref={(ref) => {
+                            codeInputRefs.current[index] = ref;
+                          }}
+                          style={[
+                            styles.codeBox,
+                            digit ? styles.codeBoxFilled : null,
+                            codeError ? styles.codeBoxError : null,
+                          ]}
+                          value={digit}
+                          onChangeText={(text) => onCodeChange(index, text)}
+                          onKeyPress={(e) => onCodeKeyPress(index, e)}
+                          keyboardType="number-pad"
+                          maxLength={index === 0 ? 6 : 1}
+                          editable={!isLoading}
+                          selectTextOnFocus
+                          textContentType="oneTimeCode"
+                          autoComplete="sms-otp"
+                        />
+                      ))}
+                    </View>
+                    {codeError ? (
+                      <Text style={styles.errorText}>{codeError}</Text>
+                    ) : null}
                   </View>
-                  {codeError ? (
-                    <Text style={styles.errorText}>{codeError}</Text>
-                  ) : null}
 
                   <TouchableOpacity
                     style={[
@@ -465,43 +485,60 @@ export default function ForgotPasswordScreen() {
                     )}
                   </TouchableOpacity>
 
-                  <TouchableOpacity
-                    onPress={() => void resendCode()}
-                    style={styles.linkButton}
-                    disabled={isLoading || resendSeconds > 0}
-                  >
-                    <Text
-                      style={[
-                        styles.linkText,
-                        resendSeconds > 0 ? styles.linkTextMuted : null,
-                      ]}
+                  <View style={styles.verifyActions}>
+                    <TouchableOpacity
+                      style={styles.verifyActionRow}
+                      onPress={() => void resendCode()}
+                      disabled={isLoading || resendSeconds > 0}
+                      activeOpacity={0.75}
                     >
-                      {resendSeconds > 0
-                        ? `Resend Code (${resendSeconds}s)`
-                        : 'Resend Code'}
-                    </Text>
-                  </TouchableOpacity>
+                      <Text
+                        style={[
+                          styles.verifyActionPrimary,
+                          resendSeconds > 0
+                            ? styles.verifyActionDisabled
+                            : null,
+                        ]}
+                      >
+                        {resendSeconds > 0
+                          ? `Resend code in ${resendSeconds}s`
+                          : 'Resend Code'}
+                      </Text>
+                    </TouchableOpacity>
 
-                  <TouchableOpacity
-                    onPress={() => {
-                      setStep('email');
-                      setCodeDigits(['', '', '', '', '', '']);
-                      setCodeError(undefined);
-                      setResetToken('');
-                    }}
-                    style={styles.linkButtonTight}
-                    disabled={isLoading}
-                  >
-                    <Text style={styles.linkText}>Change Email</Text>
-                  </TouchableOpacity>
+                    <View style={styles.verifyDivider} />
 
-                  <TouchableOpacity
-                    onPress={goBackToLogin}
-                    style={styles.linkButtonTight}
-                    disabled={isLoading}
-                  >
-                    <Text style={styles.linkText}>Back to Sign In</Text>
-                  </TouchableOpacity>
+                    <View style={styles.verifySecondaryRow}>
+                      <TouchableOpacity
+                        onPress={() => {
+                          setStep('email');
+                          setCodeDigits(['', '', '', '', '', '']);
+                          setCodeError(undefined);
+                          setResetToken('');
+                        }}
+                        disabled={isLoading}
+                        activeOpacity={0.75}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      >
+                        <Text style={styles.verifyActionLink}>
+                          Change Email
+                        </Text>
+                      </TouchableOpacity>
+
+                      <Text style={styles.verifyDot}>·</Text>
+
+                      <TouchableOpacity
+                        onPress={goBackToLogin}
+                        disabled={isLoading}
+                        activeOpacity={0.75}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      >
+                        <Text style={styles.verifyActionMuted}>
+                          Back to Sign In
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
                 </>
               ) : null}
 
@@ -513,93 +550,101 @@ export default function ForgotPasswordScreen() {
                     your account.
                   </Text>
 
-                  <Text style={styles.label}>New Password</Text>
-                  <View
-                    style={[
-                      styles.passwordRow,
-                      passwordErrors.password ? styles.inputError : null,
-                    ]}
-                  >
-                    <TextInput
-                      style={styles.passwordInput}
-                      placeholder="Enter new password"
-                      placeholderTextColor="#94A3B8"
-                      secureTextEntry={!showPassword}
-                      editable={!isLoading}
-                      value={password}
-                      onChangeText={(text) => {
-                        setPassword(text);
-                        if (passwordErrors.password) {
-                          setPasswordErrors((prev) => ({
-                            ...prev,
-                            password: undefined,
-                          }));
-                        }
-                      }}
-                    />
-                    <TouchableOpacity
-                      onPress={() => setShowPassword((v) => !v)}
-                      disabled={isLoading}
+                  <View style={styles.fieldGroup}>
+                    <Text style={styles.label}>New Password</Text>
+                    <View
+                      style={[
+                        styles.passwordRow,
+                        passwordErrors.password ? styles.inputError : null,
+                      ]}
                     >
-                      <Text style={styles.showText}>
-                        {showPassword ? 'Hide' : 'Show'}
+                      <TextInput
+                        style={styles.passwordInput}
+                        placeholder="Enter new password"
+                        placeholderTextColor="#94A3B8"
+                        secureTextEntry={!showPassword}
+                        editable={!isLoading}
+                        value={password}
+                        onChangeText={(text) => {
+                          setPassword(text);
+                          if (passwordErrors.password) {
+                            setPasswordErrors((prev) => ({
+                              ...prev,
+                              password: undefined,
+                            }));
+                          }
+                        }}
+                      />
+                      <TouchableOpacity
+                        onPress={() => setShowPassword((v) => !v)}
+                        disabled={isLoading}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      >
+                        <Text style={styles.showText}>
+                          {showPassword ? 'Hide' : 'Show'}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                    {passwordErrors.password ? (
+                      <Text style={styles.errorText}>
+                        {passwordErrors.password}
                       </Text>
-                    </TouchableOpacity>
+                    ) : (
+                      <Text style={styles.helperText}>
+                        At least 8 characters, with uppercase, lowercase, and a
+                        number.
+                      </Text>
+                    )}
                   </View>
-                  {passwordErrors.password ? (
-                    <Text style={styles.errorText}>
-                      {passwordErrors.password}
-                    </Text>
-                  ) : null}
 
-                  <Text style={[styles.label, { marginTop: 14 }]}>
-                    Confirm New Password
-                  </Text>
-                  <View
-                    style={[
-                      styles.passwordRow,
-                      passwordErrors.passwordConfirmation
-                        ? styles.inputError
-                        : null,
-                    ]}
-                  >
-                    <TextInput
-                      style={styles.passwordInput}
-                      placeholder="Confirm new password"
-                      placeholderTextColor="#94A3B8"
-                      secureTextEntry={!showConfirmPassword}
-                      editable={!isLoading}
-                      value={passwordConfirmation}
-                      onChangeText={(text) => {
-                        setPasswordConfirmation(text);
-                        if (passwordErrors.passwordConfirmation) {
-                          setPasswordErrors((prev) => ({
-                            ...prev,
-                            passwordConfirmation: undefined,
-                          }));
-                        }
-                      }}
-                    />
-                    <TouchableOpacity
-                      onPress={() => setShowConfirmPassword((v) => !v)}
-                      disabled={isLoading}
+                  <View style={styles.fieldGroup}>
+                    <Text style={styles.label}>Confirm New Password</Text>
+                    <View
+                      style={[
+                        styles.passwordRow,
+                        passwordErrors.passwordConfirmation
+                          ? styles.inputError
+                          : null,
+                      ]}
                     >
-                      <Text style={styles.showText}>
-                        {showConfirmPassword ? 'Hide' : 'Show'}
+                      <TextInput
+                        style={styles.passwordInput}
+                        placeholder="Confirm new password"
+                        placeholderTextColor="#94A3B8"
+                        secureTextEntry={!showConfirmPassword}
+                        editable={!isLoading}
+                        value={passwordConfirmation}
+                        onChangeText={(text) => {
+                          setPasswordConfirmation(text);
+                          if (passwordErrors.passwordConfirmation) {
+                            setPasswordErrors((prev) => ({
+                              ...prev,
+                              passwordConfirmation: undefined,
+                            }));
+                          }
+                        }}
+                      />
+                      <TouchableOpacity
+                        onPress={() => setShowConfirmPassword((v) => !v)}
+                        disabled={isLoading}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      >
+                        <Text style={styles.showText}>
+                          {showConfirmPassword ? 'Hide' : 'Show'}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                    {passwordErrors.passwordConfirmation ? (
+                      <Text style={styles.errorText}>
+                        {passwordErrors.passwordConfirmation}
                       </Text>
-                    </TouchableOpacity>
+                    ) : null}
                   </View>
-                  {passwordErrors.passwordConfirmation ? (
-                    <Text style={styles.errorText}>
-                      {passwordErrors.passwordConfirmation}
-                    </Text>
-                  ) : null}
 
                   <TouchableOpacity
                     style={[
                       styles.primaryButton,
                       isLoading ? styles.primaryButtonDisabled : null,
-                      { marginTop: 20 },
                     ]}
                     onPress={() => void submitNewPassword()}
                     activeOpacity={0.9}
@@ -618,6 +663,7 @@ export default function ForgotPasswordScreen() {
                     onPress={goBackToLogin}
                     style={styles.linkButton}
                     disabled={isLoading}
+                    hitSlop={{ top: 8, bottom: 8, left: 12, right: 12 }}
                   >
                     <Text style={styles.linkText}>Back to Sign In</Text>
                   </TouchableOpacity>
@@ -626,6 +672,9 @@ export default function ForgotPasswordScreen() {
 
               {step === 'success' ? (
                 <>
+                  <View style={styles.successIcon}>
+                    <Text style={styles.successIconCheck}>✓</Text>
+                  </View>
                   <Text style={styles.title}>Password Reset Successful</Text>
                   <Text style={styles.successBody}>
                     Your password has been changed successfully. For your
@@ -673,203 +722,235 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
     justifyContent: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 24,
+    paddingHorizontal: 22,
+    paddingVertical: 28,
   },
   headerSection: {
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 22,
   },
   appTitle: {
-    fontSize: 26,
+    fontSize: 28,
     fontWeight: '900',
     color: '#FFD914',
-    letterSpacing: 1,
+    letterSpacing: 1.2,
     textAlign: 'center',
   },
   headerSubtitle: {
-    marginTop: 8,
+    marginTop: 6,
     fontSize: 14,
     color: '#EAF2FF',
     textAlign: 'center',
     fontWeight: '500',
   },
   card: {
-    backgroundColor: 'rgba(255,255,255,0.96)',
-    borderRadius: 22,
-    paddingHorizontal: 18,
-    paddingVertical: 20,
-    shadowColor: '#000',
-    shadowOpacity: 0.18,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 8,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    paddingHorizontal: 22,
+    paddingTop: 24,
+    paddingBottom: 26,
+    shadowColor: '#041E42',
+    shadowOpacity: 0.22,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 10,
   },
   logo: {
-    width: 78,
-    height: 78,
+    width: 72,
+    height: 72,
     alignSelf: 'center',
-    marginBottom: 10,
-  },
-  stepper: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'center',
     marginBottom: 18,
-    paddingHorizontal: 4,
   },
-  stepItem: {
-    flex: 1,
+  stepperWrap: {
+    marginBottom: 22,
+    paddingHorizontal: 6,
+  },
+  stepperTrack: {
+    height: 36,
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  stepperBaseLine: {
+    position: 'absolute',
+    left: 18,
+    right: 18,
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: '#E5E7EB',
+  },
+  stepperProgressLine: {
+    position: 'absolute',
+    left: 18,
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: '#16A34A',
+  },
+  stepperNodes: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-  },
-  stepLine: {
-    height: 2,
-    flex: 1,
-    backgroundColor: '#D1D5DB',
-    marginTop: 15,
-    marginRight: 4,
-  },
-  stepLineDone: {
-    backgroundColor: '#22C55E',
-  },
-  stepLineSpacer: {
-    width: 0,
-  },
-  stepCircleCol: {
+    justifyContent: 'space-between',
     alignItems: 'center',
-    minWidth: 56,
+  },
+  stepNode: {
+    width: 36,
+    alignItems: 'center',
   },
   stepCircle: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#E5E7EB',
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#F3F4F6',
+    borderWidth: 2,
+    borderColor: '#E5E7EB',
     alignItems: 'center',
     justifyContent: 'center',
   },
   stepCircleActive: {
-    backgroundColor: '#0648A8',
+    backgroundColor: '#0A4DB3',
+    borderColor: '#0A4DB3',
+    shadowColor: '#0A4DB3',
+    shadowOpacity: 0.35,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 4,
   },
   stepCircleDone: {
-    backgroundColor: '#22C55E',
-  },
-  stepDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    backgroundColor: '#16A34A',
+    borderColor: '#16A34A',
   },
   stepDotActive: {
+    width: 9,
+    height: 9,
+    borderRadius: 5,
     backgroundColor: '#FFFFFF',
   },
-  stepDotIdle: {
-    backgroundColor: '#9CA3AF',
+  stepNumber: {
+    color: '#9CA3AF',
+    fontSize: 13,
+    fontWeight: '800',
   },
   stepCheck: {
     color: '#FFFFFF',
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '800',
   },
+  stepperLabels: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
   stepLabel: {
-    marginTop: 6,
+    width: 72,
+    textAlign: 'center',
     fontSize: 12,
     fontWeight: '600',
     color: '#9CA3AF',
   },
   stepLabelActive: {
-    color: '#0648A8',
+    color: '#0A4DB3',
     fontWeight: '800',
   },
   stepLabelDone: {
-    color: '#16A34A',
+    color: '#15803D',
     fontWeight: '700',
   },
   title: {
-    fontSize: 22,
-    fontWeight: '900',
-    color: '#111827',
+    fontSize: 24,
+    fontWeight: '800',
+    color: '#0B2F6B',
     textAlign: 'center',
+    letterSpacing: -0.3,
     marginBottom: 8,
   },
   subtitle: {
-    fontSize: 13,
-    color: '#6B7280',
+    fontSize: 14,
+    color: '#64748B',
     textAlign: 'center',
-    lineHeight: 18,
-    marginBottom: 18,
+    lineHeight: 21,
+    marginBottom: 22,
     fontWeight: '500',
+    paddingHorizontal: 4,
   },
   maskedEmail: {
     fontSize: 15,
     fontWeight: '800',
-    color: '#0B2F6B',
+    color: '#0A4DB3',
     textAlign: 'center',
-    marginTop: -10,
-    marginBottom: 18,
+    marginTop: -14,
+    marginBottom: 20,
+  },
+  fieldGroup: {
+    marginBottom: 16,
   },
   label: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: '#111827',
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#334155',
     marginBottom: 8,
+    letterSpacing: 0.2,
   },
   input: {
-    minHeight: 50,
-    borderWidth: 1.4,
-    borderColor: '#D7DEE8',
+    minHeight: 52,
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
     borderRadius: 14,
-    paddingHorizontal: 14,
-    fontSize: 14,
-    color: '#111827',
+    paddingHorizontal: 16,
+    fontSize: 15,
+    color: '#0F172A',
     fontWeight: '600',
-    backgroundColor: '#F9FAFB',
-    marginBottom: 6,
+    backgroundColor: '#F8FAFC',
   },
   inputError: {
-    borderColor: '#FF6B6B',
+    borderColor: '#F87171',
+    backgroundColor: '#FEF2F2',
   },
   passwordRow: {
-    minHeight: 50,
-    borderWidth: 1.4,
-    borderColor: '#D7DEE8',
+    minHeight: 52,
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
     borderRadius: 14,
-    paddingHorizontal: 14,
+    paddingHorizontal: 16,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F9FAFB',
+    backgroundColor: '#F8FAFC',
   },
   passwordInput: {
     flex: 1,
-    fontSize: 14,
-    color: '#111827',
+    fontSize: 15,
+    color: '#0F172A',
     fontWeight: '600',
     paddingVertical: 12,
   },
   showText: {
     color: '#0A4DB3',
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '700',
-    paddingLeft: 8,
+    paddingLeft: 10,
+  },
+  helperText: {
+    marginTop: 8,
+    fontSize: 12,
+    lineHeight: 17,
+    color: '#94A3B8',
+    fontWeight: '500',
   },
   errorText: {
-    color: '#FF6B6B',
+    color: '#DC2626',
     fontSize: 12,
-    fontWeight: '500',
-    marginBottom: 8,
+    fontWeight: '600',
+    marginTop: 8,
   },
   noticeBanner: {
     backgroundColor: '#ECFDF5',
     borderWidth: 1,
-    borderColor: '#86EFAC',
+    borderColor: '#A7F3D0',
     borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    marginBottom: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 18,
   },
   noticeText: {
     color: '#166534',
     fontSize: 13,
-    lineHeight: 18,
+    lineHeight: 19,
     fontWeight: '600',
     textAlign: 'center',
   },
@@ -877,75 +958,149 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     gap: 8,
-    marginBottom: 10,
   },
   codeBox: {
     flex: 1,
-    minHeight: 52,
+    minHeight: 54,
     borderWidth: 1.5,
-    borderColor: '#D7DEE8',
+    borderColor: '#E2E8F0',
     borderRadius: 12,
     textAlign: 'center',
     fontSize: 20,
     fontWeight: '800',
     color: '#0B2F6B',
-    backgroundColor: '#F9FAFB',
+    backgroundColor: '#F8FAFC',
   },
   codeBoxFilled: {
     borderColor: '#0A4DB3',
+    backgroundColor: '#EFF6FF',
   },
   codeBoxError: {
-    borderColor: '#FF6B6B',
+    borderColor: '#F87171',
+    backgroundColor: '#FEF2F2',
   },
   primaryButton: {
-    marginTop: 14,
-    minHeight: 50,
+    marginTop: 6,
+    minHeight: 52,
     borderRadius: 14,
     backgroundColor: '#0A4DB3',
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#0A4DB3',
-    shadowOpacity: 0.28,
+    shadowOpacity: 0.3,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 6 },
     elevation: 5,
   },
   primaryButtonDisabled: {
-    opacity: 0.75,
+    opacity: 0.72,
   },
   primaryButtonText: {
     color: '#FFFFFF',
-    fontSize: 17,
-    fontWeight: '900',
+    fontSize: 16,
+    fontWeight: '800',
+    letterSpacing: 0.2,
   },
   linkButton: {
     alignSelf: 'center',
-    marginTop: 16,
+    marginTop: 18,
   },
-  linkButtonTight: {
-    alignSelf: 'center',
-    marginTop: 10,
+  linkStack: {
+    alignItems: 'center',
+    marginTop: 18,
+    gap: 14,
+  },
+  verifyActions: {
+    marginTop: 20,
+    alignItems: 'center',
+  },
+  verifyActionRow: {
+    minHeight: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+  },
+  verifyActionPrimary: {
+    color: '#0A4DB3',
+    fontSize: 14,
+    fontWeight: '700',
+    letterSpacing: 0.1,
+  },
+  verifyActionDisabled: {
+    color: '#94A3B8',
+    fontWeight: '600',
+  },
+  verifyDivider: {
+    width: '72%',
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: '#E2E8F0',
+    marginVertical: 14,
+  },
+  verifySecondaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  verifyActionLink: {
+    color: '#0A4DB3',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  verifyActionMuted: {
+    color: '#64748B',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  verifyDot: {
+    color: '#CBD5E1',
+    fontSize: 16,
+    fontWeight: '700',
+    marginTop: -1,
   },
   linkText: {
     color: '#0A4DB3',
     fontSize: 14,
     fontWeight: '700',
   },
+  linkTextSecondary: {
+    color: '#64748B',
+    fontSize: 14,
+    fontWeight: '600',
+  },
   linkTextMuted: {
     color: '#94A3B8',
   },
+  successIcon: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#ECFDF5',
+    borderWidth: 2,
+    borderColor: '#86EFAC',
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'center',
+    marginBottom: 16,
+  },
+  successIconCheck: {
+    color: '#16A34A',
+    fontSize: 28,
+    fontWeight: '800',
+  },
   successBody: {
     fontSize: 14,
-    color: '#6B7280',
+    color: '#64748B',
     textAlign: 'center',
-    lineHeight: 21,
-    marginBottom: 8,
+    lineHeight: 22,
+    marginBottom: 10,
     fontWeight: '500',
+    paddingHorizontal: 4,
   },
   footer: {
-    marginTop: 22,
+    marginTop: 24,
     textAlign: 'center',
-    color: '#EAF2FF',
+    color: 'rgba(234, 242, 255, 0.9)',
     fontSize: 12,
     fontWeight: '500',
   },

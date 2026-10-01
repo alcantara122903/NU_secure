@@ -3,11 +3,18 @@ import { parseQrTicketRaw } from '@/lib/qr-ticket-payload';
 import { toSupabaseTimestampPh } from '@/lib/supabase-timestamp-ph';
 import { authSessionService } from '@/services/auth-session';
 import { supabase } from '@/services/database/supabase';
+import { VISIT_TYPE } from '@/services/office-flow/constants';
 import {
   resolveSkippedExpectationStatusId,
   resolveValidationStatusId,
 } from '@/services/office-flow/db-status-lookups';
 import { resolveVisitorPhotoDisplayUri } from '@/services/storage/upload';
+
+export type RemainingOfficeInfo = {
+  officeId: number;
+  officeName: string;
+  floor?: string | null;
+};
 
 export interface ExitScanRequest {
   qrToken: string;
@@ -15,6 +22,13 @@ export interface ExitScanRequest {
   scannedByUserId: number;
   /** Gate guard exit does not use `office_staff`; office flow validates destination vs staff office. */
   scannerContext?: 'office' | 'guard';
+  /**
+   * Guard confirmed conversation after incomplete route modal.
+   * When true, exit proceeds even if some declared offices were not visited.
+   */
+  allowIncompleteRoute?: boolean;
+  /** Optional note from guard after reviewing incomplete route with visitor. */
+  guardConversationNote?: string;
 }
 
 export interface ExitScanResult {
@@ -44,6 +58,9 @@ export interface ExitScanResult {
     officeScanInserted?: boolean;
     /** Public URL or storage path from visitor.visitor_photo_with_id_url. */
     visitorPhotoUrl?: string | null;
+    /** Present when exit is blocked pending guard review (normal multi-office route). */
+    remainingOffices?: RemainingOfficeInfo[];
+    requiresIncompleteRouteAck?: boolean;
   };
   debug?: {
     functionName: string;
@@ -145,10 +162,57 @@ const readErrorContextBody = async (context: unknown): Promise<unknown> => {
 };
 
 const VISIT_EXIT_SELECT =
-  'visit_id, visitor_id, guard_user_id, primary_office_id, purpose_reason, destination_text, entry_time, exit_time, exit_status_id, qr_token, duration_minutes, pass_number, control_number';
+  'visit_id, visitor_id, visit_type_id, guard_user_id, primary_office_id, purpose_reason, destination_text, entry_time, exit_time, exit_status_id, qr_token, duration_minutes, pass_number, control_number';
 
 const VISITOR_EXIT_SELECT =
   'visitor_id, first_name, last_name, visitor_photo_with_id_url';
+
+async function loadRemainingOfficesForVisit(
+  visitId: number,
+): Promise<RemainingOfficeInfo[]> {
+  const { data: pending } = await supabase
+    .from('office_expectation')
+    .select('office_id, expected_order, arrived_at')
+    .eq('visit_id', visitId)
+    .is('arrived_at', null)
+    .order('expected_order', { ascending: true });
+
+  const rows = pending ?? [];
+  if (rows.length === 0) {
+    return [];
+  }
+
+  const officeIds = Array.from(
+    new Set(
+      rows
+        .map((r) => Number(r.office_id))
+        .filter((id) => Number.isFinite(id) && id > 0),
+    ),
+  );
+
+  if (officeIds.length === 0) {
+    return [];
+  }
+
+  const { data: offices } = await supabase
+    .from('office')
+    .select('office_id, office_name, floor')
+    .in('office_id', officeIds);
+
+  const byId = new Map(
+    (offices ?? []).map((o) => [Number(o.office_id), o] as const),
+  );
+
+  return rows.map((r) => {
+    const officeId = Number(r.office_id);
+    const office = byId.get(officeId);
+    return {
+      officeId,
+      officeName: String(office?.office_name ?? `Office #${officeId}`).trim(),
+      floor: office?.floor != null ? String(office.floor).trim() : null,
+    };
+  });
+}
 
 const resolveScanByDatabase = async (payload: ExitScanRequest): Promise<ExitScanResult> => {
   const candidates = buildCandidates(payload);
@@ -290,6 +354,55 @@ const resolveScanByDatabase = async (payload: ExitScanRequest): Promise<ExitScan
     };
   }
 
+  const visitorNameEarly =
+    `${visitor.first_name || ''} ${visitor.last_name || ''}`.trim() ||
+    '(unknown visitor)';
+
+  // Normal visitors with declared multi-office routes: block exit until guard reviews.
+  if (
+    isGuard &&
+    Number(visit.visit_type_id) === VISIT_TYPE.NORMAL &&
+    !payload.allowIncompleteRoute
+  ) {
+    const remainingOffices = await loadRemainingOfficesForVisit(visit.visit_id);
+    if (remainingOffices.length > 0) {
+      const rawPhoto =
+        typeof visitor.visitor_photo_with_id_url === 'string' &&
+        visitor.visitor_photo_with_id_url.trim()
+          ? visitor.visitor_photo_with_id_url.trim()
+          : null;
+      const visitorPhotoUrl = await resolveVisitorPhotoDisplayUri(rawPhoto);
+
+      return {
+        success: false,
+        message:
+          'This visitor still has unvisited offices on their pass. Exit cannot be completed until a guard reviews this with the visitor.',
+        errorCode: 'ROUTE_INCOMPLETE',
+        data: {
+          visitId: visit.visit_id,
+          visitorId: visitor.visitor_id,
+          visitorName: visitorNameEarly,
+          passNumber: visit.pass_number ?? null,
+          controlNumber: visit.control_number ?? null,
+          destinationOffice: null,
+          expectedOffice: null,
+          purposeReason: visit.purpose_reason ?? null,
+          entryTime: visit.entry_time ?? null,
+          registeredBy: null,
+          isCorrectDestination: false,
+          destinationStatusLabel: 'Route incomplete',
+          exitTime: '',
+          durationMinutes: 0,
+          exitStatusId: null,
+          destinationText: visit.destination_text ?? null,
+          visitorPhotoUrl,
+          remainingOffices,
+          requiresIncompleteRouteAck: true,
+        },
+      };
+    }
+  }
+
   const { data: destinationOffice } = await supabase
     .from('office')
     .select('office_id, office_name')
@@ -418,11 +531,20 @@ const resolveScanByDatabase = async (payload: ExitScanRequest): Promise<ExitScan
     }
   }
 
-  const scanRemarks = isGuard
-    ? 'Guard facility exit scan'
-    : isCorrectDestination
+  const scanRemarks = (() => {
+    const note = (payload.guardConversationNote || '').trim();
+    if (isGuard && payload.allowIncompleteRoute) {
+      return note
+        ? `Guard incomplete-route exit after conversation. Note: ${note}`
+        : 'Guard incomplete-route exit after conversation with visitor';
+    }
+    if (isGuard) {
+      return 'Guard facility exit scan';
+    }
+    return isCorrectDestination
       ? 'Office scan validated: correct destination'
       : 'Office scan validated: wrong destination';
+  })();
 
   if (scanOfficeId == null || !Number.isFinite(scanOfficeId)) {
     console.warn('[office-exit] skipping office_scan insert: no office_id available');

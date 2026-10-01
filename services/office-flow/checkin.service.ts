@@ -334,6 +334,7 @@ export async function processOfficeCheckInScan(
   const { visitor, visitorName, visitorPhotoUrl } = await loadVisitorDisplay(
     visit.visitor_id,
   );
+  const visitorId = visit.visitor_id;
   const expectations = await loadExpectationsForVisit(visit.visit_id);
   // In office scan UI, "Registered By" refers to the current office staff
   // performing this scan, per business requirement.
@@ -356,6 +357,7 @@ export async function processOfficeCheckInScan(
           message:
             "Every office on this ticket has already been checked in. Use exit processing when the visitor leaves.",
           visitorName,
+          visitorId,
           visitorPhotoUrl,
           visitId: visit.visit_id,
         };
@@ -368,6 +370,7 @@ export async function processOfficeCheckInScan(
         message:
           "Every office on this ticket has already been checked in. Use exit processing when the visitor leaves.",
         visitorName,
+        visitorId,
         visitorPhotoUrl,
         visitId: visit.visit_id,
       };
@@ -382,6 +385,7 @@ export async function processOfficeCheckInScan(
       title: "No route",
       message: "This visit has no expected office sequence yet.",
       visitorName,
+      visitorId,
       visitId: visit.visit_id,
       errorCode: "NO_EXPECTATION",
     };
@@ -430,6 +434,7 @@ export async function processOfficeCheckInScan(
       title: "Error",
       message: scanErr.message || "Could not save scan record.",
       visitorName,
+      visitorId,
       errorCode: "SCAN_INSERT_FAILED",
     };
   }
@@ -456,6 +461,7 @@ export async function processOfficeCheckInScan(
         unauthorizedMessage ??
         `This visitor is expected at ${expectedOfficeName}, not here.`,
       visitorName,
+      visitorId,
       visitorPhotoUrl,
       passNumber: visit.pass_number ?? null,
       controlNumber: visit.control_number ?? null,
@@ -650,6 +656,7 @@ export async function processOfficeCheckInScan(
       title: "Authorized",
       message: `${visitorName} completed all enrollee steps.`,
       visitorName,
+      visitorId,
       visitorPhotoUrl,
       passNumber: visit.pass_number ?? null,
       controlNumber: visit.control_number ?? null,
@@ -674,6 +681,7 @@ export async function processOfficeCheckInScan(
     title: "Authorized",
     message: `${visitorName} is at a scheduled office for this visit.`,
     visitorName,
+    visitorId,
     visitorPhotoUrl,
     passNumber: visit.pass_number ?? null,
     controlNumber: visit.control_number ?? null,
